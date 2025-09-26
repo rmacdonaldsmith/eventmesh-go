@@ -43,5 +43,5 @@
 //	}
 //
 // This package is part of the EventMesh system for secure, distributed event routing.
-// See the event_mesh_design.md file for complete architecture and requirements.
+// See the design.md file for complete architecture and requirements.
 package eventlog

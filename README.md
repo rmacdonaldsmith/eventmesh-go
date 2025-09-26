@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Go implementation of an event mesh system for secure, distributed event routing. This project was ported from a C#/.NET implementation and follows the same architecture and design principles. See `event_mesh_design.md` for complete architecture and design details.
+This is a Go implementation of an event mesh system for secure, distributed event routing. This project was ported from a C#/.NET implementation and follows the same architecture and design principles. See `design.md` for complete architecture and design details.
 
 ## Development Workflow
 
@@ -23,7 +23,7 @@ This is a Go implementation of an event mesh system for secure, distributed even
 eventmesh-go/
 ├── go.mod                           # Go module definition
 ├── go.sum                          # Go module checksums (auto-generated)
-├── event_mesh_design.md            # System design document
+├── design.md            # System design document
 ├── pkg/                           # Public API packages
 │   └── eventlog/
 │       ├── interfaces.go           # EventRecord + EventLog interfaces
@@ -56,7 +56,7 @@ eventmesh-go/
 
 ## Key References
 
-- **Design Document**: `event_mesh_design.md` - Complete system design, architecture, and requirements
+- **Design Document**: `design.md` - Complete system design, architecture, and requirements
 - **License**: MIT License (see LICENSE file)
 - **Original C# Implementation**: Available in separate repository for reference
 
@@ -86,7 +86,7 @@ This project follows strict TDD practices (ported from C# implementation):
 - **Error Types**: Predefined error variables (`ErrNegativeOffset`, etc.)
 
 ### Technical Architecture
-- Follow the requirements defined in `event_mesh_design.md`
+- Follow the requirements defined in `design.md`
 - Current implementation: In-memory storage (future: RocksDB)
 - Future communication: gRPC/mTLS (as per design document)
 - Event Log Requirements: REQ-LOG-001 through REQ-LOG-004 implemented

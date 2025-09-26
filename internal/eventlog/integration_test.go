@@ -1,4 +1,4 @@
-package tests
+package eventlog
 
 import (
 	"bytes"
@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rmacdonaldsmith/eventmesh-go/internal/eventlog"
 	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
@@ -21,12 +20,12 @@ func testContext() context.Context {
 
 func TestAppend_ShouldReturnSequentialOffsets(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
 	eventData := []byte("test event")
-	record1 := eventlog.NewRecord("test-topic", eventData)
-	record2 := eventlog.NewRecord("test-topic", eventData)
+	record1 := NewRecord("test-topic", eventData)
+	record2 := NewRecord("test-topic", eventData)
 
 	// Act
 	result1, err1 := log.Append(testContext(), record1)
@@ -64,12 +63,12 @@ func TestAppend_ShouldReturnSequentialOffsets(t *testing.T) {
 
 func TestReadFrom_ShouldReturnEventsFromOffset(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	record1 := eventlog.NewRecord("topic1", []byte("event1"))
-	record2 := eventlog.NewRecord("topic2", []byte("event2"))
-	record3 := eventlog.NewRecord("topic3", []byte("event3"))
+	record1 := NewRecord("topic1", []byte("event1"))
+	record2 := NewRecord("topic2", []byte("event2"))
+	record3 := NewRecord("topic3", []byte("event3"))
 
 	_, err := log.Append(testContext(), record1)
 	if err != nil {
@@ -113,18 +112,18 @@ func TestReadFrom_ShouldReturnEventsFromOffset(t *testing.T) {
 
 func TestReadFrom_ShouldRespectMaxCount(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	_, err := log.Append(testContext(), eventlog.NewRecord("topic1", []byte("event1")))
+	_, err := log.Append(testContext(), NewRecord("topic1", []byte("event1")))
 	if err != nil {
 		t.Fatalf("Failed to append first record: %v", err)
 	}
-	_, err = log.Append(testContext(), eventlog.NewRecord("topic2", []byte("event2")))
+	_, err = log.Append(testContext(), NewRecord("topic2", []byte("event2")))
 	if err != nil {
 		t.Fatalf("Failed to append second record: %v", err)
 	}
-	_, err = log.Append(testContext(), eventlog.NewRecord("topic3", []byte("event3")))
+	_, err = log.Append(testContext(), NewRecord("topic3", []byte("event3")))
 	if err != nil {
 		t.Fatalf("Failed to append third record: %v", err)
 	}
@@ -151,10 +150,10 @@ func TestReadFrom_ShouldRespectMaxCount(t *testing.T) {
 
 func TestReadFrom_ShouldReturnEmptyWhenOffsetTooHigh(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	_, err := log.Append(testContext(), eventlog.NewRecord("topic1", []byte("event1")))
+	_, err := log.Append(testContext(), NewRecord("topic1", []byte("event1")))
 	if err != nil {
 		t.Fatalf("Failed to append record: %v", err)
 	}
@@ -174,7 +173,7 @@ func TestReadFrom_ShouldReturnEmptyWhenOffsetTooHigh(t *testing.T) {
 
 func TestGetEndOffset_ShouldReturnZeroForEmptyLog(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
 	// Act
@@ -192,14 +191,14 @@ func TestGetEndOffset_ShouldReturnZeroForEmptyLog(t *testing.T) {
 
 func TestGetEndOffset_ShouldReturnNextAppendPosition(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	_, err := log.Append(testContext(), eventlog.NewRecord("topic1", []byte("event1")))
+	_, err := log.Append(testContext(), NewRecord("topic1", []byte("event1")))
 	if err != nil {
 		t.Fatalf("Failed to append first record: %v", err)
 	}
-	_, err = log.Append(testContext(), eventlog.NewRecord("topic2", []byte("event2")))
+	_, err = log.Append(testContext(), NewRecord("topic2", []byte("event2")))
 	if err != nil {
 		t.Fatalf("Failed to append second record: %v", err)
 	}
@@ -219,18 +218,18 @@ func TestGetEndOffset_ShouldReturnNextAppendPosition(t *testing.T) {
 
 func TestReplay_ShouldReturnAllEventsFromOffset(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	_, err := log.Append(testContext(), eventlog.NewRecord("topic1", []byte("event1")))
+	_, err := log.Append(testContext(), NewRecord("topic1", []byte("event1")))
 	if err != nil {
 		t.Fatalf("Failed to append first record: %v", err)
 	}
-	_, err = log.Append(testContext(), eventlog.NewRecord("topic2", []byte("event2")))
+	_, err = log.Append(testContext(), NewRecord("topic2", []byte("event2")))
 	if err != nil {
 		t.Fatalf("Failed to append second record: %v", err)
 	}
-	_, err = log.Append(testContext(), eventlog.NewRecord("topic3", []byte("event3")))
+	_, err = log.Append(testContext(), NewRecord("topic3", []byte("event3")))
 	if err != nil {
 		t.Fatalf("Failed to append third record: %v", err)
 	}
@@ -286,10 +285,10 @@ assertResults:
 
 func TestReplay_ShouldReturnEmptyWhenOffsetTooHigh(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	_, err := log.Append(testContext(), eventlog.NewRecord("topic1", []byte("event1")))
+	_, err := log.Append(testContext(), NewRecord("topic1", []byte("event1")))
 	if err != nil {
 		t.Fatalf("Failed to append record: %v", err)
 	}
@@ -325,14 +324,14 @@ assertResults:
 
 func TestReplay_ShouldSupportCancellation(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	_, err := log.Append(testContext(), eventlog.NewRecord("topic1", []byte("event1")))
+	_, err := log.Append(testContext(), NewRecord("topic1", []byte("event1")))
 	if err != nil {
 		t.Fatalf("Failed to append first record: %v", err)
 	}
-	_, err = log.Append(testContext(), eventlog.NewRecord("topic2", []byte("event2")))
+	_, err = log.Append(testContext(), NewRecord("topic2", []byte("event2")))
 	if err != nil {
 		t.Fatalf("Failed to append second record: %v", err)
 	}
@@ -385,10 +384,10 @@ func TestReplay_ShouldSupportCancellation(t *testing.T) {
 
 func TestCompact_ShouldCompleteSuccessfully(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	_, err := log.Append(testContext(), eventlog.NewRecord("topic1", []byte("event1")))
+	_, err := log.Append(testContext(), NewRecord("topic1", []byte("event1")))
 	if err != nil {
 		t.Fatalf("Failed to append record: %v", err)
 	}
@@ -414,7 +413,7 @@ func TestCompact_ShouldCompleteSuccessfully(t *testing.T) {
 
 func TestAppend_WithNilRecord_ShouldReturnError(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
 	// Act
@@ -424,7 +423,7 @@ func TestAppend_WithNilRecord_ShouldReturnError(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for nil record, got nil")
 	}
-	if err != eventlog.ErrNilRecord {
+	if err != ErrNilRecord {
 		t.Errorf("Expected ErrNilRecord, got %v", err)
 	}
 	if result != nil {
@@ -434,7 +433,7 @@ func TestAppend_WithNilRecord_ShouldReturnError(t *testing.T) {
 
 func TestReadFrom_WithNegativeOffset_ShouldReturnError(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
 	// Act
@@ -444,7 +443,7 @@ func TestReadFrom_WithNegativeOffset_ShouldReturnError(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for negative offset, got nil")
 	}
-	if err != eventlog.ErrNegativeOffset {
+	if err != ErrNegativeOffset {
 		t.Errorf("Expected ErrNegativeOffset, got %v", err)
 	}
 	if results != nil {
@@ -454,7 +453,7 @@ func TestReadFrom_WithNegativeOffset_ShouldReturnError(t *testing.T) {
 
 func TestReadFrom_WithNegativeMaxCount_ShouldReturnError(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
 	// Act
@@ -464,7 +463,7 @@ func TestReadFrom_WithNegativeMaxCount_ShouldReturnError(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for negative max count, got nil")
 	}
-	if err != eventlog.ErrNegativeMaxCount {
+	if err != ErrNegativeMaxCount {
 		t.Errorf("Expected ErrNegativeMaxCount, got %v", err)
 	}
 	if results != nil {
@@ -474,10 +473,10 @@ func TestReadFrom_WithNegativeMaxCount_ShouldReturnError(t *testing.T) {
 
 func TestReadFrom_WithZeroMaxCount_ShouldReturnEmpty(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	_, err := log.Append(testContext(), eventlog.NewRecord("test", []byte("test")))
+	_, err := log.Append(testContext(), NewRecord("test", []byte("test")))
 	if err != nil {
 		t.Fatalf("Failed to append record: %v", err)
 	}
@@ -496,7 +495,7 @@ func TestReadFrom_WithZeroMaxCount_ShouldReturnEmpty(t *testing.T) {
 
 func TestReplay_WithNegativeOffset_ShouldReturnError(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
 	// Act
@@ -505,7 +504,7 @@ func TestReplay_WithNegativeOffset_ShouldReturnError(t *testing.T) {
 	// Wait for error
 	select {
 	case err := <-errChan:
-		if err != eventlog.ErrNegativeOffset {
+		if err != ErrNegativeOffset {
 			t.Errorf("Expected ErrNegativeOffset, got %v", err)
 		}
 	case <-eventChan:
@@ -519,10 +518,10 @@ func TestReplay_WithNegativeOffset_ShouldReturnError(t *testing.T) {
 
 func TestAppend_WithEmptyTopic_ShouldWork(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	record := eventlog.NewRecord("", []byte("test"))
+	record := NewRecord("", []byte("test"))
 
 	// Act
 	result, err := log.Append(testContext(), record)
@@ -541,10 +540,10 @@ func TestAppend_WithEmptyTopic_ShouldWork(t *testing.T) {
 
 func TestAppend_WithEmptyPayload_ShouldWork(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	record := eventlog.NewRecord("test-topic", []byte{})
+	record := NewRecord("test-topic", []byte{})
 
 	// Act
 	result, err := log.Append(testContext(), record)
@@ -566,10 +565,10 @@ func TestAppend_WithEmptyPayload_ShouldWork(t *testing.T) {
 
 func TestAppend_WithNilPayload_ShouldWork(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	record := eventlog.NewRecord("test-topic", nil)
+	record := NewRecord("test-topic", nil)
 
 	// Act
 	result, err := log.Append(testContext(), record)
@@ -591,10 +590,10 @@ func TestAppend_WithNilPayload_ShouldWork(t *testing.T) {
 
 func TestAppend_WithNilHeaders_ShouldWork(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
-	record := eventlog.NewRecordWithHeaders("test-topic", []byte("test"), nil)
+	record := NewRecordWithHeaders("test-topic", []byte("test"), nil)
 
 	// Act
 	result, err := log.Append(testContext(), record)
@@ -623,7 +622,7 @@ func TestAppend_WithNilHeaders_ShouldWork(t *testing.T) {
 
 func TestConcurrentAppends_ShouldHaveUniqueOffsets(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
 	const taskCount = 10
@@ -636,7 +635,7 @@ func TestConcurrentAppends_ShouldHaveUniqueOffsets(t *testing.T) {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			record := eventlog.NewRecord("topic"+string(rune('0'+index)), []byte("event"+string(rune('0'+index))))
+			record := NewRecord("topic"+string(rune('0'+index)), []byte("event"+string(rune('0'+index))))
 			result, err := log.Append(testContext(), record)
 			results[index] = result
 			errors[index] = err
@@ -678,19 +677,19 @@ func TestConcurrentAppends_ShouldHaveUniqueOffsets(t *testing.T) {
 
 func TestConcurrentReads_ShouldReturnConsistentResults(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 	defer log.Close()
 
 	// Add some test data
-	_, err := log.Append(testContext(), eventlog.NewRecord("topic1", []byte("event1")))
+	_, err := log.Append(testContext(), NewRecord("topic1", []byte("event1")))
 	if err != nil {
 		t.Fatalf("Failed to append event1: %v", err)
 	}
-	_, err = log.Append(testContext(), eventlog.NewRecord("topic2", []byte("event2")))
+	_, err = log.Append(testContext(), NewRecord("topic2", []byte("event2")))
 	if err != nil {
 		t.Fatalf("Failed to append event2: %v", err)
 	}
-	_, err = log.Append(testContext(), eventlog.NewRecord("topic3", []byte("event3")))
+	_, err = log.Append(testContext(), NewRecord("topic3", []byte("event3")))
 	if err != nil {
 		t.Fatalf("Failed to append event3: %v", err)
 	}
@@ -751,9 +750,9 @@ func TestConcurrentReads_ShouldReturnConsistentResults(t *testing.T) {
 
 func TestClose_ShouldClearEvents(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 
-	_, err := log.Append(testContext(), eventlog.NewRecord("topic1", []byte("event1")))
+	_, err := log.Append(testContext(), NewRecord("topic1", []byte("event1")))
 	if err != nil {
 		t.Fatalf("Failed to append record: %v", err)
 	}
@@ -793,7 +792,7 @@ func TestClose_ShouldClearEvents(t *testing.T) {
 
 func TestClose_ShouldBeIdempotent(t *testing.T) {
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
+	log := NewInMemoryEventLog()
 
 	// Act & Assert - Multiple closes should not return error
 	err := log.Close()
@@ -817,8 +816,8 @@ func TestOperations_AfterClose_ShouldStillWork(t *testing.T) {
 	// but return empty/default results since we cleared the data
 
 	// Arrange
-	log := eventlog.NewInMemoryEventLog()
-	_, err := log.Append(testContext(), eventlog.NewRecord("test", []byte("test")))
+	log := NewInMemoryEventLog()
+	_, err := log.Append(testContext(), NewRecord("test", []byte("test")))
 	if err != nil {
 		t.Fatalf("Failed to append record: %v", err)
 	}
@@ -882,7 +881,7 @@ func TestOperations_AfterClose_ShouldStillWork(t *testing.T) {
 	}
 
 	// Should be able to append new events after close
-	newRecord, err := log.Append(testContext(), eventlog.NewRecord("new", []byte("new")))
+	newRecord, err := log.Append(testContext(), NewRecord("new", []byte("new")))
 	if err != nil {
 		t.Fatalf("Should be able to append after close, got %v", err)
 	}
