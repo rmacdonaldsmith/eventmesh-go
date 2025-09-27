@@ -8,10 +8,8 @@ import (
 )
 
 // TestInMemoryRoutingTable_WildcardMatching tests wildcard pattern matching
-// TODO: This is a placeholder for Phase 2 implementation (REQ-RT-001)
-// Current Phase 1 implementation only supports exact topic matching
+// Phase 2 implementation of REQ-RT-001
 func TestInMemoryRoutingTable_WildcardMatching(t *testing.T) {
-	t.Skip("Wildcard matching not implemented in Phase 1 - placeholder for Phase 2 (REQ-RT-001)")
 
 	rt := NewInMemoryRoutingTable()
 	defer rt.Close()
@@ -53,9 +51,8 @@ func TestInMemoryRoutingTable_WildcardMatching(t *testing.T) {
 }
 
 // TestInMemoryRoutingTable_WildcardPrecedence tests precedence between exact and wildcard matches
-// TODO: This is a placeholder for Phase 2 implementation (REQ-RT-001)
+// Phase 2 implementation of REQ-RT-001
 func TestInMemoryRoutingTable_WildcardPrecedence(t *testing.T) {
-	t.Skip("Wildcard precedence not implemented in Phase 1 - placeholder for Phase 2 (REQ-RT-001)")
 
 	rt := NewInMemoryRoutingTable()
 	defer rt.Close()
@@ -106,9 +103,8 @@ func TestInMemoryRoutingTable_WildcardPrecedence(t *testing.T) {
 }
 
 // TestInMemoryRoutingTable_ComplexWildcardPatterns tests various wildcard patterns
-// TODO: This is a placeholder for Phase 2 implementation (REQ-RT-001)
+// Phase 2 implementation of REQ-RT-001
 func TestInMemoryRoutingTable_ComplexWildcardPatterns(t *testing.T) {
-	t.Skip("Complex wildcard patterns not implemented in Phase 1 - placeholder for Phase 2 (REQ-RT-001)")
 
 	rt := NewInMemoryRoutingTable()
 	defer rt.Close()

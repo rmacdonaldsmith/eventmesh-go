@@ -3,6 +3,7 @@ package routingtable
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
@@ -21,6 +22,30 @@ func NewInMemoryRoutingTable() *InMemoryRoutingTable {
 	return &InMemoryRoutingTable{
 		subscriptions: make(map[string][]routingtable.Subscriber),
 	}
+}
+
+// matchesPattern checks if a topic matches a subscription pattern
+// Supports single-level wildcards: orders.*, *.created
+func matchesPattern(pattern, topic string) bool {
+	// Handle exact matches first (fast path)
+	if pattern == topic {
+		return true
+	}
+
+	// Only handle single-level wildcards
+	patternParts := strings.Split(pattern, ".")
+	topicParts := strings.Split(topic, ".")
+
+	if len(patternParts) != len(topicParts) {
+		return false
+	}
+
+	for i, part := range patternParts {
+		if part != "*" && part != topicParts[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Subscribe adds a subscription for a topic to a subscriber
@@ -79,7 +104,7 @@ func (rt *InMemoryRoutingTable) Unsubscribe(ctx context.Context, topic string, s
 }
 
 // GetSubscribers returns all subscribers interested in the given topic
-// For MVP, this only does exact topic matching (no wildcards yet)
+// Supports both exact topic matching and wildcard pattern matching
 func (rt *InMemoryRoutingTable) GetSubscribers(ctx context.Context, topic string) ([]routingtable.Subscriber, error) {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
@@ -88,15 +113,28 @@ func (rt *InMemoryRoutingTable) GetSubscribers(ctx context.Context, topic string
 		return nil, errors.New("routing table is closed")
 	}
 
-	subscribers := rt.subscriptions[topic]
-	if len(subscribers) == 0 {
+	var result []routingtable.Subscriber
+
+	// 1. Add exact match subscribers
+	if exactSubs := rt.subscriptions[topic]; len(exactSubs) > 0 {
+		result = append(result, exactSubs...)
+	}
+
+	// 2. Check all subscription patterns for wildcard matches
+	for pattern, subs := range rt.subscriptions {
+		if pattern != topic && matchesPattern(pattern, topic) {
+			result = append(result, subs...)
+		}
+	}
+
+	if len(result) == 0 {
 		return []routingtable.Subscriber{}, nil
 	}
 
 	// Return a copy to avoid external modification
-	result := make([]routingtable.Subscriber, len(subscribers))
-	copy(result, subscribers)
-	return result, nil
+	resultCopy := make([]routingtable.Subscriber, len(result))
+	copy(resultCopy, result)
+	return resultCopy, nil
 }
 
 // GetAllSubscriptions returns all current subscriptions
