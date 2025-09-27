@@ -11,13 +11,8 @@ import (
 )
 
 // Helper function to create test context with timeout
-// For tests, we use a simple timeout context. In a real application,
-// you should call the cancel function to avoid context leaks.
 func testContext() context.Context {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// In tests, we let the timeout handle cleanup to keep test code simple
-	// In production code, always call cancel() to avoid leaks
-	_ = cancel // Acknowledge that we have the cancel function
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
 	return ctx
 }
 
