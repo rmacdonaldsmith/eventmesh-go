@@ -2,8 +2,6 @@ package eventlog
 
 import (
 	"time"
-
-	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
 // Record implements the eventlog.EventRecord interface.
@@ -94,4 +92,4 @@ func (r *Record) Headers() map[string]string {
 }
 
 // Verify that Record implements the EventRecord interface at compile time
-var _ eventlog.EventRecord = (*Record)(nil)
+var _ EventRecord = (*Record)(nil)

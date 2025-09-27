@@ -35,7 +35,7 @@ func main() {
 
 	var appendedRecords []eventlogpkg.EventRecord
 	for _, event := range events {
-		record := eventlog.NewRecord(event.topic, []byte(event.payload))
+		record := eventlogpkg.NewRecord(event.topic, []byte(event.payload))
 		appended, err := eventLog.Append(ctx, record)
 		if err != nil {
 			log.Fatalf("Failed to append event: %v", err)
@@ -92,7 +92,7 @@ done:
 		"request-id":   "req-456",
 		"content-type": "application/json",
 	}
-	recordWithHeaders := eventlog.NewRecordWithHeaders("user-events", []byte(`{"action": "login", "timestamp": "2023-01-01T12:00:00Z"}`), headers)
+	recordWithHeaders := eventlogpkg.NewRecordWithHeaders("user-events", []byte(`{"action": "login", "timestamp": "2023-01-01T12:00:00Z"}`), headers)
 	appended, err := eventLog.Append(ctx, recordWithHeaders)
 	if err != nil {
 		log.Fatalf("Failed to append event with headers: %v", err)

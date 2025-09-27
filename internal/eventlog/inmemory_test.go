@@ -3,6 +3,8 @@ package eventlog
 import (
 	"context"
 	"testing"
+
+	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
 func TestImplementationCompilation(t *testing.T) {
@@ -10,7 +12,7 @@ func TestImplementationCompilation(t *testing.T) {
 	// We'll add comprehensive tests in Phase 3
 
 	// Test Record creation
-	record := NewRecord("test-topic", []byte("test payload"))
+	record := eventlog.NewRecord("test-topic", []byte("test payload"))
 	if record.Topic() != "test-topic" {
 		t.Errorf("Expected topic 'test-topic', got '%s'", record.Topic())
 	}

@@ -22,7 +22,7 @@ var (
 // It is safe for concurrent use.
 type InMemoryEventLog struct {
 	mu         sync.RWMutex
-	events     []*Record
+	events     []*eventlog.Record
 	nextOffset int64
 	closed     bool
 }
@@ -30,7 +30,7 @@ type InMemoryEventLog struct {
 // NewInMemoryEventLog creates a new in-memory event log.
 func NewInMemoryEventLog() *InMemoryEventLog {
 	return &InMemoryEventLog{
-		events:     make([]*Record, 0),
+		events:     make([]*eventlog.Record, 0),
 		nextOffset: 0,
 		closed:     false,
 	}
@@ -57,31 +57,21 @@ func (log *InMemoryEventLog) Append(ctx context.Context, record eventlog.EventRe
 
 	// Create a new Record with the assigned offset
 	// We need to ensure we have a concrete Record type to store
-	var storedRecord *Record
-	if r, ok := record.(*Record); ok {
-		// If it's already our Record type, create a copy with the new offset
-		storedRecord = &Record{
-			offset:    log.nextOffset,
-			topic:     r.topic,
-			payload:   r.payload,
-			timestamp: r.timestamp,
-			headers:   r.headers,
-		}
+	var storedRecord *eventlog.Record
+	if r, ok := record.(*eventlog.Record); ok {
+		// If it's already our Record type, use WithOffset to create a copy
+		storedRecord = r.WithOffset(log.nextOffset)
 	} else {
-		// If it's a different implementation, extract the data
-		storedRecord = &Record{
-			offset:    log.nextOffset,
-			topic:     record.Topic(),
-			payload:   record.Payload(),
-			timestamp: record.Timestamp(),
-			headers:   record.Headers(),
-		}
+		// If it's a different implementation, extract the data and create new Record
+		baseRecord := eventlog.NewRecordWithHeaders(
+			record.Topic(),
+			record.Payload(),
+			record.Headers(),
+		)
+		storedRecord = baseRecord.WithOffset(log.nextOffset)
 	}
 
-	// Ensure headers are never nil
-	if storedRecord.headers == nil {
-		storedRecord.headers = make(map[string]string)
-	}
+	// Headers are ensured to be non-nil by the constructor methods
 
 	log.events = append(log.events, storedRecord)
 	log.nextOffset++
@@ -117,7 +107,7 @@ func (log *InMemoryEventLog) ReadFrom(ctx context.Context, startOffset int64, ma
 	count := 0
 
 	for _, event := range log.events {
-		if event.offset >= startOffset {
+		if event.Offset() >= startOffset {
 			results = append(results, event)
 			count++
 			if count >= maxCount {
@@ -161,9 +151,9 @@ func (log *InMemoryEventLog) Replay(ctx context.Context, startOffset int64) (<-c
 
 		log.mu.RLock()
 		// Create a copy of relevant events to avoid holding the lock during iteration
-		var eventsToReplay []*Record
+		var eventsToReplay []*eventlog.Record
 		for _, event := range log.events {
-			if event.offset >= startOffset {
+			if event.Offset() >= startOffset {
 				eventsToReplay = append(eventsToReplay, event)
 			}
 		}
