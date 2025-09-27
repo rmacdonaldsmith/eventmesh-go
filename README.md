@@ -117,6 +117,14 @@ This Go implementation was systematically ported from a C#/.NET codebase:
 - 100% pass rate with comprehensive edge case and error handling coverage
 - Concurrent access patterns validated with Go concurrency primitives
 
+## Post-MVP Backlog
+
+**Performance Testing and Optimization:**
+- RoutingTable performance benchmarks for topic matching operations
+- Load testing for concurrent subscription operations
+- Memory usage profiling for large-scale topic/subscriber counts
+- Comparison benchmarks between different data structures (maps vs tries)
+
 ## Future Development
 
 As development progresses, consider adding:
