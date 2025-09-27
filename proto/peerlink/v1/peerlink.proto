@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package peerlink.v1;
+
+option go_package = "github.com/rmacdonaldsmith/eventmesh-go/proto/peerlink/v1;peerlinkv1";
+
+// Top-level streaming service.
+// Each peer establishes a single long-lived bidirectional stream.
+service PeerLink {
+  rpc EventStream(stream PeerMessage) returns (stream PeerMessage);
+}
+
+// Wrapper message for all frame types.
+message PeerMessage {
+  oneof kind {
+    Handshake handshake = 1;
+    Event event = 2;
+    Ack ack = 3;
+    Heartbeat heartbeat = 4;
+  }
+}
+
+// Sent once at stream startup.
+message Handshake {
+  string node_id = 1;            // Unique peer identifier
+  uint32 protocol_version = 2;   // Major.minor encoded as XYY (e.g. 100 = v1.0)
+  repeated string features = 3;  // Optional supported features (for negotiation)
+}
+
+// Application-level event payload.
+// MVP assumes events are partitioned logs.
+message Event {
+  string topic = 1;
+  uint32 partition = 2;
+  int64 offset = 3;              // Log offset
+  bytes payload = 4;             // Raw event bytes
+}
+
+// ACK from receiver to sender.
+// Used for at-least-once replay semantics.
+message Ack {
+  string topic = 1;
+  uint32 partition = 2;
+  int64 offset = 3;              // Highest contiguous offset received/applied
+}
+
+// Lightweight heartbeat/ping.
+// Can also carry RTT measurement.
+message Heartbeat {
+  int64 timestamp_unix_ms = 1;
+}
