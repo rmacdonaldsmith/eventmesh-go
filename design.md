@@ -133,9 +133,120 @@ Each component has a set of detailed, testable requirements expressed using the 
 
 ### Peer Link Requirements
 
-- REQ-PL-001 Secure Connection Lifecycle
-- REQ-PL-002 Backpressure and Flow Control
-- REQ-PL-003 Heartbeats and Failure Detection
+Each mesh node uses **PeerLinks** to maintain persistent connections to other mesh nodes. These connections form the backbone of the mesh, allowing events and subscription data to flow between nodes. PeerLinks are expected to handle:
+
+- Connection lifecycle (establish, maintain, reconnect, close).
+- Data streaming (events, subscription updates).
+- Backpressure and retransmission.
+- Health monitoring (heartbeats, failure detection).
+
+Security (mTLS) is **deferred from MVP**. An appendix in the main design doc outlines a future approach using Smallstep.
+
+- **REQ-PL-001 Connection Lifecycle**  
+  *Guarantee a single, long‑lived connection per peer with automatic reconnects.*  
+  **Acceptance Criteria**  
+  - gRPC/HTTP2 implementation for peer to peer communication
+  - Peer identity (`node_id`) exchanged during handshake.  
+  - Exactly one active connection between any two peers (de‑dup rules when both dial: keep higher `node_id` as dialer, close the other).  
+  - Reconnect with exponential backoff + jitter; max backoff configurable; cancellation via context.  
+  - Graceful shutdown closes stream and drains in‑flight sends.
+
+- **REQ-PL-002 Minimal Bounded Flow Control (MVP)**  
+  *Prevent unbounded memory growth; advanced credit/priority control deferred to backlog.*  
+  **Acceptance Criteria**  
+  - Outbound `sendQueue` is bounded (configurable).  
+  - If queue is full: block with timeout; on timeout either drop oldest or drop new (policy configurable).  
+  - gRPC/HTTP2 stream backpressure is leveraged; no busy loops when peer is slow.  
+  - Metrics for queue depth, drops, and send latency are exposed.
+
+- **REQ-PL-003 Heartbeats & Failure Detection**  
+  *Detect peer liveness and surface state changes to membership/routing.*  
+  **Acceptance Criteria**  
+  - Periodic ping (e.g., 2s–10s configurable) with deadline; 3 consecutive failures ⇒ mark `Unhealthy`.  
+  - State transitions (Healthy/Unhealthy/Disconnected) emitted as events.  
+  - Optionally piggyback heartbeats on data frames when traffic is present.
+
+- **REQ-PL-004 At‑Least‑Once Cross‑Node Delivery (ACK/Resume)**  
+  *Ensure resend after disconnect without gaps; duplicates are acceptable.*  
+  **Acceptance Criteria**  
+  - Per (topic, partition) highest‑acked offset tracked per peer.  
+  - Receiver acks contiguously applied offsets (coalesced).  
+  - On reconnect, sender resumes from last ack+1 using EventLog replay.  
+  - Receiver applies idempotently (drop duplicates by offset) and preserves per‑partition ordering.
+
+- **REQ-PL-005 Protocol Version & Peer Identity**  
+  *Make wire protocol evolvable and safe.*  
+  **Acceptance Criteria**  
+  - Handshake exchanges `protocol_version`, `node_id`, and optional `features`.  
+  - Reject incompatible major versions.  
+  - Minor versions may carry feature flags for optional capabilities.  
+  - **Feature negotiation**: during handshake, peers advertise supported feature flags (e.g., compression, batching). MVP only requires validating protocol version and exchanging `node_id`; full feature negotiation can be deferred. This provides a forward‑compatible hook without implementing complex branching logic in MVP.
+
+- **REQ-PL-006 Observability**  
+  *Expose minimal metrics/logs for ops.*  
+  **Acceptance Criteria**  
+  - Metrics: connection_state, reconnects_total, bytes_sent/received, messages_sent/received, queue_depth, drops_total, rtt_ms (heartbeat), send_latency_ms p50/p95.  
+  - Structured logs for connect/reconnect/close, backoff, errors; trace spans around send/recv.
+
+- **REQ-PL-007 Config & Limits**  
+  *Centralize knobs and safe defaults.*  
+  **Acceptance Criteria**  
+  - Static peer list (host:port, node_id), queue sizes, timeouts, max_message_bytes, backoff params.  
+  - Hard caps on concurrent streams (1 per peer in MVP), and message size enforcement.
+
+- **REQ-PL-008 Initial Peer Link Protobuf Definition**
+
+syntax = "proto3";
+
+package peerlink.v1;
+
+// Top-level streaming service.
+// Each peer establishes a single long-lived bidirectional stream.
+service PeerLink {
+  rpc EventStream(stream PeerMessage) returns (stream PeerMessage);
+}
+
+// Wrapper message for all frame types.
+message PeerMessage {
+  oneof kind {
+    Handshake handshake = 1;
+    Event event = 2;
+    Ack ack = 3;
+    Heartbeat heartbeat = 4;
+  }
+}
+
+// Sent once at stream startup.
+message Handshake {
+  string node_id = 1;            // Unique peer identifier
+  uint32 protocol_version = 2;   // Major.minor encoded as XYY (e.g. 100 = v1.0)
+  repeated string features = 3;  // Optional supported features (for negotiation)
+}
+
+// Application-level event payload.
+// MVP assumes events are partitioned logs.
+message Event {
+  string topic = 1;
+  uint32 partition = 2;
+  int64 offset = 3;              // Log offset
+  bytes payload = 4;             // Raw event bytes
+}
+
+// ACK from receiver to sender.
+// Used for at-least-once replay semantics.
+message Ack {
+  string topic = 1;
+  uint32 partition = 2;
+  int64 offset = 3;              // Highest contiguous offset received/applied
+}
+
+// Lightweight heartbeat/ping.
+// Can also carry RTT measurement.
+message Heartbeat {
+  int64 timestamp_unix_ms = 1;
+}
+
+
 
 ### Mesh Node Requirements
 
@@ -166,6 +277,14 @@ Each component has a set of detailed, testable requirements expressed using the 
 
 - **Retention Policy:** Support time-based or size-based log retention, ensuring expired segments are removed safely without affecting active readers.
 - **Log Compaction:** Provide optional log compaction to discard older events or keep only the latest event per key for space efficiency.
+- **Peer Link:** follow up work to support secutity and flow / backpressure controls.
+- mTLS support (handshake, certs via Smallstep).  
+- Advanced flow control (credits, prioritization, rate limiting).  
+- Multi‑stream per peer (control vs data; per‑partition streams).  
+- Automatic peer discovery; NAT traversal.  
+- Cert rotation; mutual auth via SPIFFE/SPIRE.  
+- Adaptive batching and compression.  
+- Per‑topic quotas and fairness.
 
 ---
 
@@ -192,3 +311,33 @@ Mesh Node B → Subscriber: Deliver Event
 
 This sequence shows clear separation of responsibilities: nodes handle persistence and routing decisions; peer links only transmit events; and subscribers receive events once they are safely logged on their connected node.
 
+## Appendix B: Secure mTLS Between Mesh Nodes
+
+### mTLS & PKI Requirements
+
+**CA Setup**
+Use smallstep step-ca as the internal Certificate Authority.
+Single containerized service running inside the mesh.
+Root CA kept offline; Intermediate CA used for signing.
+
+**Node Enrollment**
+Each Go node (container) generates its own keypair on startup.
+Certificates are issued by step-ca via provisioners (password/JWK/secret).
+All nodes are provisioned with the root CA certificate to establish trust.
+
+**mTLS Configuration**
+Services use tls.RequireAndVerifyClientCert.
+Clients verify server certificates against the CA bundle.
+Node identities encoded in certificate SANs (e.g., spiffe://mesh/prod/node-42).
+Optional Go hook (VerifyPeerCertificate) to enforce authorization policies.
+
+**Rotation & Revocation**
+Certificates are short-lived (e.g., 24h).
+Nodes run step ca renew --daemon for automatic renewal.
+Revocation handled implicitly by expiration (no CRL/OCSP needed).
+
+**Rationale**
+Smallstep is lightweight, battle-tested PKI.
+Minimal infra overhead compared to Vault/Istio.
+Automated lifecycle management, secure by default.
+Scales well for dozens–hundreds of nodes in an MVP.
