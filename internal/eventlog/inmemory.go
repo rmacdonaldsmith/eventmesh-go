@@ -17,28 +17,28 @@ var (
 	ErrNilRecord = errors.New("record cannot be nil")
 )
 
-// InMemoryEventLog implements the eventlog.EventLog interface using in-memory storage.
-// This is equivalent to the C# InMemoryEventLog class.
+// InMemoryEventLog implements the eventlog.EventLog interface using in-memory topic-partitioned storage.
+// Each topic has its own independent event sequence and offset counter starting from 0.
 // It is safe for concurrent use.
 type InMemoryEventLog struct {
-	mu         sync.RWMutex
-	events     []*eventlog.Record
-	nextOffset int64
-	closed     bool
+	mu                sync.RWMutex
+	eventsByTopic     map[string][]*eventlog.Record // topic -> events
+	nextOffsetByTopic map[string]int64              // topic -> nextOffset
+	closed            bool
 }
 
-// NewInMemoryEventLog creates a new in-memory event log.
+// NewInMemoryEventLog creates a new in-memory topic-partitioned event log.
 func NewInMemoryEventLog() *InMemoryEventLog {
 	return &InMemoryEventLog{
-		events:     make([]*eventlog.Record, 0),
-		nextOffset: 0,
-		closed:     false,
+		eventsByTopic:     make(map[string][]*eventlog.Record),
+		nextOffsetByTopic: make(map[string]int64),
+		closed:            false,
 	}
 }
 
-// Append appends a new event to the log.
-// The Offset will be assigned by the log and set on the returned record.
-func (log *InMemoryEventLog) Append(ctx context.Context, record eventlog.EventRecord) (eventlog.EventRecord, error) {
+// AppendToTopic appends a new event to a specific topic.
+// The Offset will be assigned by the log per topic and set on the returned record.
+func (log *InMemoryEventLog) AppendToTopic(ctx context.Context, topic string, record eventlog.EventRecord) (eventlog.EventRecord, error) {
 	if record == nil {
 		return nil, ErrNilRecord
 	}
@@ -53,14 +53,15 @@ func (log *InMemoryEventLog) Append(ctx context.Context, record eventlog.EventRe
 	log.mu.Lock()
 	defer log.mu.Unlock()
 
-	// Note: Allow operations after close (like C# version), but they work with empty state
+	// Get the current offset for this topic (0 if topic doesn't exist yet)
+	currentOffset := log.nextOffsetByTopic[topic]
 
-	// Create a new Record with the assigned offset
+	// Create a new Record with the assigned topic-specific offset
 	// We need to ensure we have a concrete Record type to store
 	var storedRecord *eventlog.Record
 	if r, ok := record.(*eventlog.Record); ok {
 		// If it's already our Record type, use WithOffset to create a copy
-		storedRecord = r.WithOffset(log.nextOffset)
+		storedRecord = r.WithOffset(currentOffset)
 	} else {
 		// If it's a different implementation, extract the data and create new Record
 		baseRecord := eventlog.NewRecordWithHeaders(
@@ -68,19 +69,18 @@ func (log *InMemoryEventLog) Append(ctx context.Context, record eventlog.EventRe
 			record.Payload(),
 			record.Headers(),
 		)
-		storedRecord = baseRecord.WithOffset(log.nextOffset)
+		storedRecord = baseRecord.WithOffset(currentOffset)
 	}
 
-	// Headers are ensured to be non-nil by the constructor methods
-
-	log.events = append(log.events, storedRecord)
-	log.nextOffset++
+	// Append to the topic's event slice
+	log.eventsByTopic[topic] = append(log.eventsByTopic[topic], storedRecord)
+	log.nextOffsetByTopic[topic]++
 
 	return storedRecord, nil
 }
 
-// ReadFrom reads events starting at a given offset, up to a max count.
-func (log *InMemoryEventLog) ReadFrom(ctx context.Context, startOffset int64, maxCount int) ([]eventlog.EventRecord, error) {
+// ReadFromTopic reads events from a specific topic starting at a given offset, up to a max count.
+func (log *InMemoryEventLog) ReadFromTopic(ctx context.Context, topic string, startOffset int64, maxCount int) ([]eventlog.EventRecord, error) {
 	if startOffset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -103,10 +103,17 @@ func (log *InMemoryEventLog) ReadFrom(ctx context.Context, startOffset int64, ma
 		return make([]eventlog.EventRecord, 0), nil
 	}
 
+	// Get events for the specific topic
+	topicEvents := log.eventsByTopic[topic]
+	if topicEvents == nil {
+		// Topic doesn't exist, return empty slice
+		return make([]eventlog.EventRecord, 0), nil
+	}
+
 	results := make([]eventlog.EventRecord, 0, maxCount)
 	count := 0
 
-	for _, event := range log.events {
+	for _, event := range topicEvents {
 		if event.Offset() >= startOffset {
 			results = append(results, event)
 			count++
@@ -119,8 +126,8 @@ func (log *InMemoryEventLog) ReadFrom(ctx context.Context, startOffset int64, ma
 	return results, nil
 }
 
-// GetEndOffset gets the current end offset (next append position).
-func (log *InMemoryEventLog) GetEndOffset(ctx context.Context) (int64, error) {
+// GetTopicEndOffset gets the current end offset for a specific topic (next append position).
+func (log *InMemoryEventLog) GetTopicEndOffset(ctx context.Context, topic string) (int64, error) {
 	// Check if context is cancelled
 	select {
 	case <-ctx.Done():
@@ -131,12 +138,13 @@ func (log *InMemoryEventLog) GetEndOffset(ctx context.Context) (int64, error) {
 	log.mu.RLock()
 	defer log.mu.RUnlock()
 
-	return log.nextOffset, nil
+	// Return the next offset for the topic (0 if topic doesn't exist)
+	return log.nextOffsetByTopic[topic], nil
 }
 
-// Replay replays events from a given offset via a channel.
+// ReplayTopic replays events from a specific topic starting at a given offset via a channel.
 // The channel will be closed when all events are sent or context is cancelled.
-func (log *InMemoryEventLog) Replay(ctx context.Context, startOffset int64) (<-chan eventlog.EventRecord, <-chan error) {
+func (log *InMemoryEventLog) ReplayTopic(ctx context.Context, topic string, startOffset int64) (<-chan eventlog.EventRecord, <-chan error) {
 	eventChan := make(chan eventlog.EventRecord)
 	errChan := make(chan error, 1) // Buffered to prevent blocking
 
@@ -150,9 +158,10 @@ func (log *InMemoryEventLog) Replay(ctx context.Context, startOffset int64) (<-c
 		}
 
 		log.mu.RLock()
-		// Create a copy of relevant events to avoid holding the lock during iteration
+		// Create a copy of relevant events from the specific topic to avoid holding the lock during iteration
+		topicEvents := log.eventsByTopic[topic]
 		var eventsToReplay []*eventlog.Record
-		for _, event := range log.events {
+		for _, event := range topicEvents {
 			if event.Offset() >= startOffset {
 				eventsToReplay = append(eventsToReplay, event)
 			}
@@ -187,7 +196,7 @@ func (log *InMemoryEventLog) Compact(ctx context.Context) error {
 	return nil
 }
 
-// Close closes the event log and clears all events.
+// Close closes the event log and clears all topics and events.
 // This is equivalent to the C# Dispose method.
 func (log *InMemoryEventLog) Close() error {
 	log.mu.Lock()
@@ -197,8 +206,9 @@ func (log *InMemoryEventLog) Close() error {
 		return nil // Already closed, idempotent
 	}
 
-	log.events = log.events[:0] // Clear slice but keep capacity
-	log.nextOffset = 0
+	// Clear all topic data
+	log.eventsByTopic = make(map[string][]*eventlog.Record)
+	log.nextOffsetByTopic = make(map[string]int64)
 	log.closed = true
 
 	return nil

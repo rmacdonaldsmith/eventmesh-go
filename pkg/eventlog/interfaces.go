@@ -25,24 +25,24 @@ type EventRecord interface {
 	Headers() map[string]string
 }
 
-// EventLog defines the interface for append-only event storage.
-// This is equivalent to IEventLog in the C# implementation.
+// EventLog defines the interface for topic-scoped append-only event storage.
+// Each topic has its own independent offset sequence starting from 0.
 type EventLog interface {
 	io.Closer // Go equivalent of IDisposable
 
-	// AppendAsync appends a new event to the log.
-	// The Offset will be assigned by the log and set on the returned record.
-	Append(ctx context.Context, record EventRecord) (EventRecord, error)
+	// AppendToTopic appends a new event to a specific topic.
+	// The Offset will be assigned by the log per topic and set on the returned record.
+	AppendToTopic(ctx context.Context, topic string, record EventRecord) (EventRecord, error)
 
-	// ReadFrom reads events starting at a given offset, up to a max count.
-	ReadFrom(ctx context.Context, startOffset int64, maxCount int) ([]EventRecord, error)
+	// ReadFromTopic reads events from a specific topic starting at a given offset, up to a max count.
+	ReadFromTopic(ctx context.Context, topic string, startOffset int64, maxCount int) ([]EventRecord, error)
 
-	// GetEndOffset gets the current end offset (next append position).
-	GetEndOffset(ctx context.Context) (int64, error)
+	// GetTopicEndOffset gets the current end offset for a specific topic (next append position).
+	GetTopicEndOffset(ctx context.Context, topic string) (int64, error)
 
-	// Replay replays events from a given offset via a channel.
+	// ReplayTopic replays events from a specific topic starting at a given offset via a channel.
 	// The channel will be closed when all events are sent or context is cancelled.
-	Replay(ctx context.Context, startOffset int64) (<-chan EventRecord, <-chan error)
+	ReplayTopic(ctx context.Context, topic string, startOffset int64) (<-chan EventRecord, <-chan error)
 
 	// Compact performs log compaction or cleanup (future use).
 	Compact(ctx context.Context) error
