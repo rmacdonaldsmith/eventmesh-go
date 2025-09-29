@@ -57,20 +57,12 @@ func (log *InMemoryEventLog) AppendToTopic(ctx context.Context, topic string, re
 	currentOffset := log.nextOffsetByTopic[topic]
 
 	// Create a new Record with the assigned topic-specific offset
-	// We need to ensure we have a concrete Record type to store
-	var storedRecord *eventlog.Record
-	if r, ok := record.(*eventlog.Record); ok {
-		// If it's already our Record type, use WithOffset to create a copy
-		storedRecord = r.WithOffset(currentOffset)
-	} else {
-		// If it's a different implementation, extract the data and create new Record
-		baseRecord := eventlog.NewRecordWithHeaders(
-			record.Topic(),
-			record.Payload(),
-			record.Headers(),
-		)
-		storedRecord = baseRecord.WithOffset(currentOffset)
-	}
+	// This works with any EventRecord implementation
+	storedRecord := eventlog.NewRecordWithHeaders(
+		record.Topic(),
+		record.Payload(),
+		record.Headers(),
+	).WithOffset(currentOffset)
 
 	// Append to the topic's event slice
 	log.eventsByTopic[topic] = append(log.eventsByTopic[topic], storedRecord)
