@@ -215,3 +215,46 @@ func TestEventLog_GetTopicEndOffset(t *testing.T) {
 		t.Errorf("Expected end offset 2 for topicA, got %d", endOffset)
 	}
 }
+
+// TestEventLog_TopicValidation tests that empty topics are rejected
+func TestEventLog_TopicValidation(t *testing.T) {
+	log := NewInMemoryEventLog()
+	defer log.Close()
+
+	ctx := context.Background()
+
+	// Test AppendToTopic with empty topic
+	record := eventlog.NewRecord("valid-topic", []byte("data"))
+	_, err := log.AppendToTopic(ctx, "", record)
+	if err == nil {
+		t.Error("Expected error when appending to empty topic")
+	}
+
+	// Test ReadFromTopic with empty topic
+	_, err = log.ReadFromTopic(ctx, "", 0, 10)
+	if err == nil {
+		t.Error("Expected error when reading from empty topic")
+	}
+
+	// Test GetTopicEndOffset with empty topic
+	_, err = log.GetTopicEndOffset(ctx, "")
+	if err == nil {
+		t.Error("Expected error when getting end offset for empty topic")
+	}
+
+	// Test ReplayTopic with empty topic
+	eventChan, errChan := log.ReplayTopic(ctx, "", 0)
+
+	// Should get error from errChan
+	var replayErr error
+	select {
+	case replayErr = <-errChan:
+		// Expected
+	case <-eventChan:
+		t.Error("Expected error, but got event from empty topic replay")
+	}
+
+	if replayErr == nil {
+		t.Error("Expected error when replaying empty topic")
+	}
+}

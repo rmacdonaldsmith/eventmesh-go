@@ -15,6 +15,8 @@ var (
 	ErrNegativeMaxCount = errors.New("max count cannot be negative")
 	// ErrNilRecord is returned when a nil record is provided
 	ErrNilRecord = errors.New("record cannot be nil")
+	// ErrEmptyTopic is returned when an empty topic is provided
+	ErrEmptyTopic = errors.New("topic cannot be empty")
 )
 
 // InMemoryEventLog implements the eventlog.EventLog interface using in-memory topic-partitioned storage.
@@ -36,18 +38,36 @@ func NewInMemoryEventLog() *InMemoryEventLog {
 	}
 }
 
+// checkContext checks if the context is cancelled and returns the context error if so
+func (log *InMemoryEventLog) checkContext(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}
+
+// validateTopic validates that a topic is not empty
+func validateTopic(topic string) error {
+	if topic == "" {
+		return ErrEmptyTopic
+	}
+	return nil
+}
+
 // AppendToTopic appends a new event to a specific topic.
 // The Offset will be assigned by the log per topic and set on the returned record.
 func (log *InMemoryEventLog) AppendToTopic(ctx context.Context, topic string, record eventlog.EventRecord) (eventlog.EventRecord, error) {
+	if err := validateTopic(topic); err != nil {
+		return nil, err
+	}
 	if record == nil {
 		return nil, ErrNilRecord
 	}
 
-	// Check if context is cancelled
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	if err := log.checkContext(ctx); err != nil {
+		return nil, err
 	}
 
 	log.mu.Lock()
@@ -73,6 +93,9 @@ func (log *InMemoryEventLog) AppendToTopic(ctx context.Context, topic string, re
 
 // ReadFromTopic reads events from a specific topic starting at a given offset, up to a max count.
 func (log *InMemoryEventLog) ReadFromTopic(ctx context.Context, topic string, startOffset int64, maxCount int) ([]eventlog.EventRecord, error) {
+	if err := validateTopic(topic); err != nil {
+		return nil, err
+	}
 	if startOffset < 0 {
 		return nil, ErrNegativeOffset
 	}
@@ -80,11 +103,8 @@ func (log *InMemoryEventLog) ReadFromTopic(ctx context.Context, topic string, st
 		return nil, ErrNegativeMaxCount
 	}
 
-	// Check if context is cancelled
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	if err := log.checkContext(ctx); err != nil {
+		return nil, err
 	}
 
 	log.mu.RLock()
@@ -92,24 +112,22 @@ func (log *InMemoryEventLog) ReadFromTopic(ctx context.Context, topic string, st
 
 	// Handle zero maxCount case early
 	if maxCount == 0 {
-		return make([]eventlog.EventRecord, 0), nil
+		return nil, nil
 	}
 
 	// Get events for the specific topic
 	topicEvents := log.eventsByTopic[topic]
 	if topicEvents == nil {
 		// Topic doesn't exist, return empty slice
-		return make([]eventlog.EventRecord, 0), nil
+		return nil, nil
 	}
 
 	results := make([]eventlog.EventRecord, 0, maxCount)
-	count := 0
 
 	for _, event := range topicEvents {
 		if event.Offset() >= startOffset {
 			results = append(results, event)
-			count++
-			if count >= maxCount {
+			if len(results) >= maxCount {
 				break
 			}
 		}
@@ -120,11 +138,11 @@ func (log *InMemoryEventLog) ReadFromTopic(ctx context.Context, topic string, st
 
 // GetTopicEndOffset gets the current end offset for a specific topic (next append position).
 func (log *InMemoryEventLog) GetTopicEndOffset(ctx context.Context, topic string) (int64, error) {
-	// Check if context is cancelled
-	select {
-	case <-ctx.Done():
-		return 0, ctx.Err()
-	default:
+	if err := validateTopic(topic); err != nil {
+		return 0, err
+	}
+	if err := log.checkContext(ctx); err != nil {
+		return 0, err
 	}
 
 	log.mu.RLock()
@@ -144,6 +162,10 @@ func (log *InMemoryEventLog) ReplayTopic(ctx context.Context, topic string, star
 		defer close(eventChan)
 		defer close(errChan)
 
+		if err := validateTopic(topic); err != nil {
+			errChan <- err
+			return
+		}
 		if startOffset < 0 {
 			errChan <- ErrNegativeOffset
 			return
@@ -177,11 +199,8 @@ func (log *InMemoryEventLog) ReplayTopic(ctx context.Context, topic string, star
 
 // Compact performs log compaction or cleanup (future use).
 func (log *InMemoryEventLog) Compact(ctx context.Context) error {
-	// Check if context is cancelled
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
+	if err := log.checkContext(ctx); err != nil {
+		return err
 	}
 
 	// No-op for in-memory implementation
