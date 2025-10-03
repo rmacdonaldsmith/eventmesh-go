@@ -21,8 +21,8 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Example 1: Append some events
-	fmt.Println("\n1. Appending events:")
+	// Example 1: Append events to different topics
+	fmt.Println("\n1. Appending events to topics:")
 	events := []struct {
 		topic   string
 		payload string
@@ -36,36 +36,38 @@ func main() {
 	var appendedRecords []eventlogpkg.EventRecord
 	for _, event := range events {
 		record := eventlogpkg.NewRecord(event.topic, []byte(event.payload))
-		appended, err := eventLog.Append(ctx, record)
+		appended, err := eventLog.AppendToTopic(ctx, event.topic, record)
 		if err != nil {
 			log.Fatalf("Failed to append event: %v", err)
 		}
 		appendedRecords = append(appendedRecords, appended)
-		fmt.Printf("  Offset %d: [%s] %s\n", appended.Offset(), appended.Topic(), string(appended.Payload()))
+		fmt.Printf("  Topic %s, Offset %d: %s\n", appended.Topic(), appended.Offset(), string(appended.Payload()))
 	}
 
-	// Example 2: Read events from a specific offset
-	fmt.Println("\n2. Reading events from offset 1:")
-	readEvents, err := eventLog.ReadFrom(ctx, 1, 10)
+	// Example 2: Read events from a specific topic
+	fmt.Println("\n2. Reading events from 'orders' topic starting at offset 0:")
+	readEvents, err := eventLog.ReadFromTopic(ctx, "orders", 0, 10)
 	if err != nil {
 		log.Fatalf("Failed to read events: %v", err)
 	}
 
 	for _, event := range readEvents {
-		fmt.Printf("  Offset %d: [%s] %s\n", event.Offset(), event.Topic(), string(event.Payload()))
+		fmt.Printf("  Topic %s, Offset %d: %s\n", event.Topic(), event.Offset(), string(event.Payload()))
 	}
 
-	// Example 3: Get current end offset
-	fmt.Println("\n3. Current end offset:")
-	endOffset, err := eventLog.GetEndOffset(ctx)
-	if err != nil {
-		log.Fatalf("Failed to get end offset: %v", err)
+	// Example 3: Get end offset for specific topics
+	fmt.Println("\n3. Topic end offsets:")
+	for _, topic := range []string{"orders", "payments", "inventory"} {
+		endOffset, err := eventLog.GetTopicEndOffset(ctx, topic)
+		if err != nil {
+			log.Fatalf("Failed to get end offset for topic %s: %v", topic, err)
+		}
+		fmt.Printf("  Topic '%s' end offset: %d\n", topic, endOffset)
 	}
-	fmt.Printf("  End offset: %d (next append position)\n", endOffset)
 
-	// Example 4: Replay all events using channels
-	fmt.Println("\n4. Replaying all events from offset 0:")
-	eventChan, errChan := eventLog.Replay(ctx, 0)
+	// Example 4: Replay events from a specific topic
+	fmt.Println("\n4. Replaying 'orders' topic from offset 0:")
+	eventChan, errChan := eventLog.ReplayTopic(ctx, "orders", 0)
 
 	for {
 		select {
@@ -74,7 +76,7 @@ func main() {
 				fmt.Println("  Replay completed!")
 				goto done
 			}
-			fmt.Printf("  Replayed offset %d: [%s] %s\n", event.Offset(), event.Topic(), string(event.Payload()))
+			fmt.Printf("  Replayed Topic %s, Offset %d: %s\n", event.Topic(), event.Offset(), string(event.Payload()))
 		case err := <-errChan:
 			if err != nil {
 				log.Fatalf("Replay error: %v", err)
@@ -93,12 +95,12 @@ done:
 		"content-type": "application/json",
 	}
 	recordWithHeaders := eventlogpkg.NewRecordWithHeaders("user-events", []byte(`{"action": "login", "timestamp": "2023-01-01T12:00:00Z"}`), headers)
-	appended, err := eventLog.Append(ctx, recordWithHeaders)
+	appended, err := eventLog.AppendToTopic(ctx, "user-events", recordWithHeaders)
 	if err != nil {
 		log.Fatalf("Failed to append event with headers: %v", err)
 	}
 
-	fmt.Printf("  Offset %d: [%s] %s\n", appended.Offset(), appended.Topic(), string(appended.Payload()))
+	fmt.Printf("  Topic %s, Offset %d: %s\n", appended.Topic(), appended.Offset(), string(appended.Payload()))
 	fmt.Println("  Headers:")
 	for key, value := range appended.Headers() {
 		fmt.Printf("    %s: %s\n", key, value)

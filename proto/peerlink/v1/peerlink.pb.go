@@ -198,13 +198,13 @@ func (x *Handshake) GetFeatures() []string {
 }
 
 // Application-level event payload.
-// MVP assumes events are partitioned logs.
+// Events are organized by topic with independent offset sequences per topic.
 type Event struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Topic         string                 `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
-	Partition     uint32                 `protobuf:"varint,2,opt,name=partition,proto3" json:"partition,omitempty"`
-	Offset        int64                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`  // Log offset
-	Payload       []byte                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"` // Raw event bytes
+	Offset        int64                  `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"`                                                                            // Topic-specific log offset
+	Payload       []byte                 `protobuf:"bytes,3,opt,name=payload,proto3" json:"payload,omitempty"`                                                                           // Raw event bytes
+	Headers       map[string]string      `protobuf:"bytes,4,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // Key-value metadata
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -246,13 +246,6 @@ func (x *Event) GetTopic() string {
 	return ""
 }
 
-func (x *Event) GetPartition() uint32 {
-	if x != nil {
-		return x.Partition
-	}
-	return 0
-}
-
 func (x *Event) GetOffset() int64 {
 	if x != nil {
 		return x.Offset
@@ -267,13 +260,19 @@ func (x *Event) GetPayload() []byte {
 	return nil
 }
 
+func (x *Event) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
 // ACK from receiver to sender.
-// Used for at-least-once replay semantics.
+// Used for at-least-once replay semantics per topic.
 type Ack struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Topic         string                 `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
-	Partition     uint32                 `protobuf:"varint,2,opt,name=partition,proto3" json:"partition,omitempty"`
-	Offset        int64                  `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"` // Highest contiguous offset received/applied
+	Offset        int64                  `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"` // Highest contiguous offset received/applied for topic
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -315,13 +314,6 @@ func (x *Ack) GetTopic() string {
 	return ""
 }
 
-func (x *Ack) GetPartition() uint32 {
-	if x != nil {
-		return x.Partition
-	}
-	return 0
-}
-
 func (x *Ack) GetOffset() int64 {
 	if x != nil {
 		return x.Offset
@@ -332,10 +324,10 @@ func (x *Ack) GetOffset() int64 {
 // Lightweight heartbeat/ping.
 // Can also carry RTT measurement.
 type Heartbeat struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	TimestampUnixMs int64                  `protobuf:"varint,1,opt,name=timestamp_unix_ms,json=timestampUnixMs,proto3" json:"timestamp_unix_ms,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Timestamp     int64                  `protobuf:"varint,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Heartbeat) Reset() {
@@ -368,9 +360,9 @@ func (*Heartbeat) Descriptor() ([]byte, []int) {
 	return file_proto_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *Heartbeat) GetTimestampUnixMs() int64 {
+func (x *Heartbeat) GetTimestamp() int64 {
 	if x != nil {
-		return x.TimestampUnixMs
+		return x.Timestamp
 	}
 	return 0
 }
@@ -389,18 +381,20 @@ const file_proto_peerlink_v1_peerlink_proto_rawDesc = "" +
 	"\tHandshake\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x12\x1a\n" +
-	"\bfeatures\x18\x03 \x03(\tR\bfeatures\"m\n" +
+	"\bfeatures\x18\x03 \x03(\tR\bfeatures\"\xc6\x01\n" +
 	"\x05Event\x12\x14\n" +
-	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1c\n" +
-	"\tpartition\x18\x02 \x01(\rR\tpartition\x12\x16\n" +
-	"\x06offset\x18\x03 \x01(\x03R\x06offset\x12\x18\n" +
-	"\apayload\x18\x04 \x01(\fR\apayload\"Q\n" +
+	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x16\n" +
+	"\x06offset\x18\x02 \x01(\x03R\x06offset\x12\x18\n" +
+	"\apayload\x18\x03 \x01(\fR\apayload\x129\n" +
+	"\aheaders\x18\x04 \x03(\v2\x1f.peerlink.v1.Event.HeadersEntryR\aheaders\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"3\n" +
 	"\x03Ack\x12\x14\n" +
-	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x1c\n" +
-	"\tpartition\x18\x02 \x01(\rR\tpartition\x12\x16\n" +
-	"\x06offset\x18\x03 \x01(\x03R\x06offset\"7\n" +
-	"\tHeartbeat\x12*\n" +
-	"\x11timestamp_unix_ms\x18\x01 \x01(\x03R\x0ftimestampUnixMs2Q\n" +
+	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x16\n" +
+	"\x06offset\x18\x02 \x01(\x03R\x06offset\")\n" +
+	"\tHeartbeat\x12\x1c\n" +
+	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp2Q\n" +
 	"\bPeerLink\x12E\n" +
 	"\vEventStream\x12\x18.peerlink.v1.PeerMessage\x1a\x18.peerlink.v1.PeerMessage(\x010\x01BFZDgithub.com/rmacdonaldsmith/eventmesh-go/proto/peerlink/v1;peerlinkv1b\x06proto3"
 
@@ -416,26 +410,28 @@ func file_proto_peerlink_v1_peerlink_proto_rawDescGZIP() []byte {
 	return file_proto_peerlink_v1_peerlink_proto_rawDescData
 }
 
-var file_proto_peerlink_v1_peerlink_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_proto_peerlink_v1_peerlink_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_proto_peerlink_v1_peerlink_proto_goTypes = []any{
 	(*PeerMessage)(nil), // 0: peerlink.v1.PeerMessage
 	(*Handshake)(nil),   // 1: peerlink.v1.Handshake
 	(*Event)(nil),       // 2: peerlink.v1.Event
 	(*Ack)(nil),         // 3: peerlink.v1.Ack
 	(*Heartbeat)(nil),   // 4: peerlink.v1.Heartbeat
+	nil,                 // 5: peerlink.v1.Event.HeadersEntry
 }
 var file_proto_peerlink_v1_peerlink_proto_depIdxs = []int32{
 	1, // 0: peerlink.v1.PeerMessage.handshake:type_name -> peerlink.v1.Handshake
 	2, // 1: peerlink.v1.PeerMessage.event:type_name -> peerlink.v1.Event
 	3, // 2: peerlink.v1.PeerMessage.ack:type_name -> peerlink.v1.Ack
 	4, // 3: peerlink.v1.PeerMessage.heartbeat:type_name -> peerlink.v1.Heartbeat
-	0, // 4: peerlink.v1.PeerLink.EventStream:input_type -> peerlink.v1.PeerMessage
-	0, // 5: peerlink.v1.PeerLink.EventStream:output_type -> peerlink.v1.PeerMessage
-	5, // [5:6] is the sub-list for method output_type
-	4, // [4:5] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 4: peerlink.v1.Event.headers:type_name -> peerlink.v1.Event.HeadersEntry
+	0, // 5: peerlink.v1.PeerLink.EventStream:input_type -> peerlink.v1.PeerMessage
+	0, // 6: peerlink.v1.PeerLink.EventStream:output_type -> peerlink.v1.PeerMessage
+	6, // [6:7] is the sub-list for method output_type
+	5, // [5:6] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_proto_peerlink_v1_peerlink_proto_init() }
@@ -455,7 +451,7 @@ func file_proto_peerlink_v1_peerlink_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_peerlink_v1_peerlink_proto_rawDesc), len(file_proto_peerlink_v1_peerlink_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -28,24 +28,23 @@ message Handshake {
 }
 
 // Application-level event payload.
-// MVP assumes events are partitioned logs.
+// Events are organized by topic with independent offset sequences per topic.
 message Event {
   string topic = 1;
-  uint32 partition = 2;
-  int64 offset = 3;              // Log offset
-  bytes payload = 4;             // Raw event bytes
+  int64 offset = 2;                     // Topic-specific log offset
+  bytes payload = 3;                    // Raw event bytes
+  map<string, string> headers = 4;      // Key-value metadata
 }
 
 // ACK from receiver to sender.
-// Used for at-least-once replay semantics.
+// Used for at-least-once replay semantics per topic.
 message Ack {
   string topic = 1;
-  uint32 partition = 2;
-  int64 offset = 3;              // Highest contiguous offset received/applied
+  int64 offset = 2;              // Highest contiguous offset received/applied for topic
 }
 
 // Lightweight heartbeat/ping.
 // Can also carry RTT measurement.
 message Heartbeat {
-  int64 timestamp_unix_ms = 1;
+  int64 timestamp = 1;
 }
