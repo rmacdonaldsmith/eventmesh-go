@@ -320,13 +320,9 @@ func TestGRPCPeerLink_ReceiveEvents(t *testing.T) {
 
 // TestGRPCPeerLink_BoundedQueue tests bounded send queue functionality
 func TestGRPCPeerLink_BoundedQueue(t *testing.T) {
-	config := &Config{
-		NodeID:        "test-node",
-		ListenAddress: "localhost:0",
-		SendQueueSize: 2, // Small queue for testing
-		SendTimeout:   100 * time.Millisecond,
-	}
-	config.SetDefaults()
+	config := testConfig()
+	config.SendQueueSize = 2                      // Small queue for testing
+	config.SendTimeout = 100 * time.Millisecond  // Fast timeout for testing
 
 	peerLink, err := NewGRPCPeerLink(config)
 	if err != nil {
@@ -369,6 +365,7 @@ func TestGRPCPeerLink_BoundedQueue(t *testing.T) {
 	}
 
 	// Sending another event should timeout and return error (queue full)
+	// Use shorter timeout than config to ensure we hit timeout before queue space opens up
 	shortCtx, shortCancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer shortCancel()
 
@@ -381,5 +378,15 @@ func TestGRPCPeerLink_BoundedQueue(t *testing.T) {
 	drops := peerLink.GetDropsCount("peer-1")
 	if drops != 1 {
 		t.Errorf("Expected 1 drop after timeout, got %d", drops)
+	}
+
+	// Test metrics for non-existent peer should return zero values
+	depth = peerLink.GetQueueDepth("non-existent")
+	if depth != 0 {
+		t.Errorf("Expected queue depth 0 for non-existent peer, got %d", depth)
+	}
+	drops = peerLink.GetDropsCount("non-existent")
+	if drops != 0 {
+		t.Errorf("Expected drops count 0 for non-existent peer, got %d", drops)
 	}
 }
