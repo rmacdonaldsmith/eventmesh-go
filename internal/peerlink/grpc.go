@@ -386,3 +386,35 @@ func (g *GRPCPeerLink) GetDropsCount(peerID string) int64 {
 	}
 	return 0
 }
+
+// PeerMetrics represents metrics for a single peer
+type PeerMetrics struct {
+	PeerID       string          `json:"peer_id"`
+	QueueDepth   int             `json:"queue_depth"`
+	DropsCount   int64           `json:"drops_count"`
+	HealthState  PeerHealthState `json:"health_state"`
+	FailureCount int             `json:"failure_count"`
+}
+
+// GetAllPeerMetrics returns metrics for all peers
+func (g *GRPCPeerLink) GetAllPeerMetrics() []PeerMetrics {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	result := make([]PeerMetrics, 0, len(g.metrics))
+	for peerID, metrics := range g.metrics {
+		queueDepth := 0
+		if queue, exists := g.sendQueues[peerID]; exists {
+			queueDepth = len(queue)
+		}
+
+		result = append(result, PeerMetrics{
+			PeerID:       peerID,
+			QueueDepth:   queueDepth,
+			DropsCount:   metrics.dropsCount,
+			HealthState:  metrics.healthState,
+			FailureCount: metrics.failureCount,
+		})
+	}
+	return result
+}

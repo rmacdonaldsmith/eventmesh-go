@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 )
 
@@ -490,5 +491,161 @@ func TestPeerHealthState_String(t *testing.T) {
 		if result != test.expected {
 			t.Errorf("Expected %s.String() = %s, got %s", test.state, test.expected, result)
 		}
+	}
+}
+
+// TestGRPCPeerLink_Metrics tests the metrics collection functionality
+func TestGRPCPeerLink_Metrics(t *testing.T) {
+	config := &Config{
+		NodeID:        "test-node",
+		ListenAddress: "localhost:0",
+		SendQueueSize: 2, // Small queue for testing drops
+		SendTimeout:   100 * time.Millisecond,
+	}
+	peerLink, err := NewGRPCPeerLink(config)
+	if err != nil {
+		t.Fatalf("Failed to create GRPCPeerLink: %v", err)
+	}
+
+	// Test metrics for non-existent peer
+	if peerLink.GetQueueDepth("nonexistent") != 0 {
+		t.Error("Expected queue depth 0 for non-existent peer")
+	}
+	if peerLink.GetDropsCount("nonexistent") != 0 {
+		t.Error("Expected drops count 0 for non-existent peer")
+	}
+
+	// Connect a peer to create metrics
+	peer := &simplePeerNode{id: "test-peer", address: "localhost:8080", healthy: true}
+	err = peerLink.Connect(context.Background(), peer)
+	if err != nil {
+		t.Fatalf("Failed to connect peer: %v", err)
+	}
+
+	// Test initial metrics
+	if peerLink.GetQueueDepth("test-peer") != 0 {
+		t.Error("Expected initial queue depth to be 0")
+	}
+	if peerLink.GetDropsCount("test-peer") != 0 {
+		t.Error("Expected initial drops count to be 0")
+	}
+
+	// Test queue depth by sending messages
+	event1 := eventlog.NewRecord("test", []byte("test1"))
+	event2 := eventlog.NewRecord("test", []byte("test2"))
+
+	err = peerLink.SendEvent(context.Background(), "test-peer", event1)
+	if err != nil {
+		t.Fatalf("Failed to send event1: %v", err)
+	}
+	if peerLink.GetQueueDepth("test-peer") != 1 {
+		t.Errorf("Expected queue depth 1, got %d", peerLink.GetQueueDepth("test-peer"))
+	}
+
+	err = peerLink.SendEvent(context.Background(), "test-peer", event2)
+	if err != nil {
+		t.Fatalf("Failed to send event2: %v", err)
+	}
+	if peerLink.GetQueueDepth("test-peer") != 2 {
+		t.Errorf("Expected queue depth 2, got %d", peerLink.GetQueueDepth("test-peer"))
+	}
+
+	// Test drops count by filling queue and causing drops
+	event3 := eventlog.NewRecord("test", []byte("test3"))
+	err = peerLink.SendEvent(context.Background(), "test-peer", event3)
+
+	// This should cause a drop since queue is full (size 2) and timeout is short
+	if err == nil {
+		t.Error("Expected error when queue is full, but got none")
+	}
+	if peerLink.GetDropsCount("test-peer") != 1 {
+		t.Errorf("Expected drops count 1, got %d", peerLink.GetDropsCount("test-peer"))
+	}
+}
+
+// TestGRPCPeerLink_GetAllPeerMetrics tests the aggregate metrics functionality
+func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
+	config := &Config{
+		NodeID:        "test-node",
+		ListenAddress: "localhost:0",
+		SendQueueSize: 10,
+		SendTimeout:   1 * time.Second,
+	}
+	peerLink, err := NewGRPCPeerLink(config)
+	if err != nil {
+		t.Fatalf("Failed to create GRPCPeerLink: %v", err)
+	}
+
+	// Test empty metrics
+	metrics := peerLink.GetAllPeerMetrics()
+	if len(metrics) != 0 {
+		t.Errorf("Expected 0 metrics, got %d", len(metrics))
+	}
+
+	// Connect multiple peers
+	peer1 := &simplePeerNode{id: "peer1", address: "localhost:8081", healthy: true}
+	peer2 := &simplePeerNode{id: "peer2", address: "localhost:8082", healthy: true}
+
+	err = peerLink.Connect(context.Background(), peer1)
+	if err != nil {
+		t.Fatalf("Failed to connect peer1: %v", err)
+	}
+	err = peerLink.Connect(context.Background(), peer2)
+	if err != nil {
+		t.Fatalf("Failed to connect peer2: %v", err)
+	}
+
+	// Send events to create different queue depths
+	event := eventlog.NewRecord("test", []byte("test"))
+	err = peerLink.SendEvent(context.Background(), "peer1", event)
+	if err != nil {
+		t.Fatalf("Failed to send event to peer1: %v", err)
+	}
+
+	// Set different health states
+	peerLink.SetPeerHealth("peer2", PeerUnhealthy)
+
+	// Get all metrics
+	metrics = peerLink.GetAllPeerMetrics()
+	if len(metrics) != 2 {
+		t.Fatalf("Expected 2 metrics, got %d", len(metrics))
+	}
+
+	// Find metrics for each peer
+	var peer1Metrics, peer2Metrics *PeerMetrics
+	for i := range metrics {
+		if metrics[i].PeerID == "peer1" {
+			peer1Metrics = &metrics[i]
+		} else if metrics[i].PeerID == "peer2" {
+			peer2Metrics = &metrics[i]
+		}
+	}
+
+	// Verify peer1 metrics
+	if peer1Metrics == nil {
+		t.Fatal("peer1 metrics not found")
+	}
+	if peer1Metrics.QueueDepth != 1 {
+		t.Errorf("Expected peer1 queue depth 1, got %d", peer1Metrics.QueueDepth)
+	}
+	if peer1Metrics.HealthState != PeerHealthy {
+		t.Errorf("Expected peer1 health state Healthy, got %v", peer1Metrics.HealthState)
+	}
+	if peer1Metrics.DropsCount != 0 {
+		t.Errorf("Expected peer1 drops count 0, got %d", peer1Metrics.DropsCount)
+	}
+
+	// Verify peer2 metrics
+	if peer2Metrics == nil {
+		t.Fatal("peer2 metrics not found")
+	}
+	if peer2Metrics.QueueDepth != 0 {
+		t.Errorf("Expected peer2 queue depth 0, got %d", peer2Metrics.QueueDepth)
+	}
+	if peer2Metrics.HealthState != PeerUnhealthy {
+		t.Errorf("Expected peer2 health state Unhealthy, got %v", peer2Metrics.HealthState)
+	}
+	if peer2Metrics.DropsCount != 0 {
+		t.Errorf("Expected peer2 drops count 0, got %d", peer2Metrics.DropsCount)
 	}
 }

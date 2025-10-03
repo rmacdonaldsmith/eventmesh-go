@@ -90,40 +90,65 @@ Each component has a set of detailed, testable requirements expressed using the 
 
 ### Event Log Requirements
 
-#### REQ-LOG-001 Append-Only Storage
+#### REQ-LOG-001 Append-Only Storage (Per Topic/Partition)
 
-**Description:** The Event Log must persist events in append-only segments, never overwriting existing records.\
-**Success Criteria:**
+**Description:**  
+The Event Log must persist events in append-only segments on a per-topic (or per-topic/partition) basis, never overwriting existing records.  
 
-- Appending never overwrites existing records.
-- Events are durable after crashes.
-- Corrupted writes are detected and truncated to the last valid record.
+**Success Criteria:**  
+- Appending never overwrites existing records within a topic/partition.  
+- Events are durable after crashes.  
+- Corrupted writes are detected and truncated to the last valid record.  
 
-#### REQ-LOG-002 Replay Support
+#### REQ-LOG-002 Replay Support (Per Topic/Partition)
 
-**Description:** The Event Log must support replay from any offset for local and remote subscribers.\
-**Success Criteria:**
+**Description:**  
+The Event Log must support replay from any offset within a topic/partition for local and remote subscribers.  
 
-- Replay starts from the chosen offset.
-- Ordering of events is preserved.
-- Replay matches committed events with no gaps.
+**Success Criteria:**  
+- Replay starts from the chosen offset within a topic.  
+- Ordering of events is preserved per topic/partition.  
+- Replay matches committed events with no gaps.  
 
 #### REQ-LOG-003 Crash Recovery
 
-**Description:** On restart, the Event Log must recover to the last committed state without data loss.\
-**Success Criteria:**
+**Description:**  
+On restart, the Event Log must recover to the last committed state without data loss.  
 
-- Log validates and reopens cleanly.
-- Corrupted tails are truncated.
-- Replay works after restart.
+**Success Criteria:**  
+- Log validates and reopens cleanly.  
+- Corrupted tails are truncated.  
+- Replay works after restart.  
 
-#### REQ-LOG-004 Indexing
+#### REQ-LOG-004 Indexing (Per Topic/Partition)
 
-**Description:** Maintain an offset-based index for efficient seek during replay.\
-**Success Criteria:**
+**Description:**  
+Maintain an offset-based index per topic/partition for efficient seek during replay.  
 
-- Seek time is O(log n) for offsets.
-- Index survives restart and crash recovery.
+**Success Criteria:**  
+- Seek time is O(log n) for offsets within a topic.  
+- Index survives restart and crash recovery.  
+
+#### REQ-LOG-005 Topic-Based Retrieval
+
+**Description:**  
+The Event Log must support efficient retrieval of events scoped to a given topic or topic/partition.  
+
+**Success Criteria:**  
+- Queries for a topic only scan/index that topic’s log.  
+- Retrieval latency is predictable even as the number of topics grows.  
+- Retrieval works for both sequential read and offset-based seek.  
+
+#### REQ-LOG-006 Topic-Based Replay Semantics
+
+**Description:**  
+The Event Log must allow subscribers to re-consume events from a chosen topic (or topic/partition) starting from a stored offset or timestamp.  
+
+**Success Criteria:**  
+- Subscribers can resume from their last known offset within a topic.  
+- Replay preserves per-topic ordering guarantees.  
+- Replay across multiple topics is independent; a slow replay on one topic does not block others.  
+
 
 ### Routing Table Requirements
 
@@ -164,12 +189,11 @@ Security (mTLS) is **deferred from MVP**. An appendix in the main design doc out
   **Acceptance Criteria**  
   - Periodic ping (e.g., 2s–10s configurable) with deadline; 3 consecutive failures ⇒ mark `Unhealthy`.  
   - State transitions (Healthy/Unhealthy/Disconnected) emitted as events.  
-  - Optionally piggyback heartbeats on data frames when traffic is present.
 
 - **REQ-PL-004 At‑Least‑Once Cross‑Node Delivery (ACK/Resume)**  
   *Ensure resend after disconnect without gaps; duplicates are acceptable.*  
   **Acceptance Criteria**  
-  - Per (topic, partition) highest‑acked offset tracked per peer.  
+  - Per (topic) highest‑acked offset tracked per peer.  
   - Receiver acks contiguously applied offsets (coalesced).  
   - On reconnect, sender resumes from last ack+1 using EventLog replay.  
   - Receiver applies idempotently (drop duplicates by offset) and preserves per‑partition ordering.
@@ -194,21 +218,17 @@ Security (mTLS) is **deferred from MVP**. An appendix in the main design doc out
   - Static peer list (host:port, node_id), queue sizes, timeouts, max_message_bytes, backoff params.  
   - Hard caps on concurrent streams (1 per peer in MVP), and message size enforcement.
 
-- **REQ-PL-008 Initial Peer Link Protobuf Definition**
+### PeerLink Protocol Definition
 
+```proto
 syntax = "proto3";
 
-package peerlink.v1;
-
-// Top-level streaming service.
-// Each peer establishes a single long-lived bidirectional stream.
 service PeerLink {
   rpc EventStream(stream PeerMessage) returns (stream PeerMessage);
 }
 
-// Wrapper message for all frame types.
-message PeerMessage {
-  oneof kind {
+message PeerMessage { // Wrapper frame type. Acts as an envelope type that wraps all possible protocol messages (handshake, event, ack, heartbeat) into a single frame so they can all be sent over one gRPC streaming RPC. This avoids defining multiple RPC methods or streams.
+  oneof msg {
     Handshake handshake = 1;
     Event event = 2;
     Ack ack = 3;
@@ -216,37 +236,73 @@ message PeerMessage {
   }
 }
 
-// Sent once at stream startup.
 message Handshake {
-  string node_id = 1;            // Unique peer identifier
-  uint32 protocol_version = 2;   // Major.minor encoded as XYY (e.g. 100 = v1.0)
-  repeated string features = 3;  // Optional supported features (for negotiation)
+  string node_id = 1;
+  int32 protocol_version = 2;
+  repeated string features = 3; // optional
 }
 
-// Application-level event payload.
-// MVP assumes events are partitioned logs.
 message Event {
   string topic = 1;
-  uint32 partition = 2;
-  int64 offset = 3;              // Log offset
-  bytes payload = 4;             // Raw event bytes
+  int64 offset = 2;
+  bytes payload = 3;
+  map<string,string> headers = 4;
 }
 
-// ACK from receiver to sender.
-// Used for at-least-once replay semantics.
 message Ack {
   string topic = 1;
-  uint32 partition = 2;
-  int64 offset = 3;              // Highest contiguous offset received/applied
+  int64 offset = 2;
 }
 
-// Lightweight heartbeat/ping.
-// Can also carry RTT measurement.
 message Heartbeat {
-  int64 timestamp_unix_ms = 1;
+  int64 timestamp = 1;
 }
+```
 
+### Peer Link Protocol Stages
 
+#### Stage A: Connection & Handshake
+
+After both handshake messages are exchanged and validated, there’s nothing extra to do at the gRPC/HTTP2 layer. The bidirectional stream is already established at the transport level. At the application layer, you simply mark the connection state as Connected and begin normal message exchange (events, acks, heartbeats). Any further protocol work—such as replaying missed events—should happen at the app layer, not the gRPC transport level.
+
+- **Initiator → Responder**: Sends `PeerMessage{handshake}` with `node_id`, `protocol_version`. The expectation is that the Initiator always sends first after dialing.
+- **Responder → Initiator**: Replies with its own `handshake`. The expectation is that the Responder waits for the Initiator’s handshake, then responds.
+- Both sides validate:
+  - Major version must match.
+  - `node_id` must not equal local (self-loop).
+- If invalid → close stream.
+- On success → transition state to **Connected**.
+
+#### Stage B: Event Delivery
+
+- For each event that should be forwarded:
+  - Wrap as `PeerMessage{event}` with topic, offset, payload, headers.
+  - Send over the stream.
+- Receiver, on receiving `event`:
+  - Persist via the EventLog into local log - durable write.
+  - Apply to local subscribers (asynchronously; ACK is not delayed until downstream delivery completes).
+  - Issue `Ack` with highest contiguous offset applied for that topic. ACK is sent after durable append, not after full propagation, to keep latency bounded.
+
+#### Stage C: Acknowledgements & Resume
+
+- Sender tracks the last `Ack` **per topic** so it can resume correctly for each stream of events.
+- ACKs include both the topic name and highest contiguous offset applied for that topic.
+- Even though the EventLog is append-only, the application maintains an in-memory mapping of per-topic offsets to support replay-by-topic.
+- If connection drops:
+  - On reconnect, sender replays from `lastAck+1` for each topic using `EventLog.Replay(topic, offset)`.
+- Duplicate events are safe — idempotent application ensures correctness.
+
+#### Stage D: Heartbeats
+
+- Periodically send `Heartbeat{timestamp}`.
+- Receiver replies with an ack heartbeat or measures RTT.
+- Missed heartbeats beyond threshold → mark peer unhealthy, trigger reconnect.
+
+#### Stage E: Graceful Shutdown
+
+- Either side may close the stream.
+- Sender flushes events, receiver sends final acks.
+- Transition state → Disconnected, schedule reconnect with backoff.
 
 ### Mesh Node Requirements
 
