@@ -390,3 +390,105 @@ func TestGRPCPeerLink_BoundedQueue(t *testing.T) {
 		t.Errorf("Expected drops count 0 for non-existent peer, got %d", drops)
 	}
 }
+
+// TestGRPCPeerLink_HealthState tests peer health state management
+func TestGRPCPeerLink_HealthState(t *testing.T) {
+	config := testConfig()
+
+	peerLink, err := NewGRPCPeerLink(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating GRPCPeerLink, got: %v", err)
+	}
+	defer peerLink.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Test health state for non-existent peer
+	healthState := peerLink.GetPeerHealthState("non-existent")
+	if healthState != PeerDisconnected {
+		t.Errorf("Expected PeerDisconnected for non-existent peer, got %s", healthState)
+	}
+
+	// Connect a test peer
+	testPeer := &simplePeerNode{
+		id:      "peer-1",
+		address: "localhost:9999",
+		healthy: false,
+	}
+	err = peerLink.Connect(ctx, testPeer)
+	if err != nil {
+		t.Fatalf("Expected no error connecting peer, got: %v", err)
+	}
+
+	// Newly connected peer should be Healthy
+	healthState = peerLink.GetPeerHealthState("peer-1")
+	if healthState != PeerHealthy {
+		t.Errorf("Expected PeerHealthy for newly connected peer, got %s", healthState)
+	}
+
+	// Test GetPeerHealth interface method
+	isHealthy, err := peerLink.GetPeerHealth(ctx, "peer-1")
+	if err != nil {
+		t.Fatalf("Expected no error getting peer health, got: %v", err)
+	}
+	if !isHealthy {
+		t.Error("Expected peer to be healthy, got false")
+	}
+
+	// Test setting health state to Unhealthy
+	peerLink.SetPeerHealth("peer-1", PeerUnhealthy)
+	healthState = peerLink.GetPeerHealthState("peer-1")
+	if healthState != PeerUnhealthy {
+		t.Errorf("Expected PeerUnhealthy after SetPeerHealth, got %s", healthState)
+	}
+
+	// GetPeerHealth should now return false
+	isHealthy, err = peerLink.GetPeerHealth(ctx, "peer-1")
+	if err != nil {
+		t.Fatalf("Expected no error getting peer health, got: %v", err)
+	}
+	if isHealthy {
+		t.Error("Expected peer to be unhealthy, got true")
+	}
+
+	// Test Disconnect sets health to Disconnected
+	err = peerLink.Disconnect(ctx, "peer-1")
+	if err != nil {
+		t.Fatalf("Expected no error disconnecting peer, got: %v", err)
+	}
+
+	healthState = peerLink.GetPeerHealthState("peer-1")
+	if healthState != PeerDisconnected {
+		t.Errorf("Expected PeerDisconnected after disconnect, got %s", healthState)
+	}
+
+	// Test GetPeerHealth for disconnected peer still works (uses metrics)
+	isHealthy, err = peerLink.GetPeerHealth(ctx, "peer-1")
+	if err != nil {
+		t.Fatalf("Expected no error getting health for disconnected peer, got: %v", err)
+	}
+	if isHealthy {
+		t.Error("Expected disconnected peer to be unhealthy, got true")
+	}
+}
+
+// TestPeerHealthState_String tests the string representation of health states
+func TestPeerHealthState_String(t *testing.T) {
+	tests := []struct {
+		state    PeerHealthState
+		expected string
+	}{
+		{PeerHealthy, "Healthy"},
+		{PeerUnhealthy, "Unhealthy"},
+		{PeerDisconnected, "Disconnected"},
+		{PeerHealthState(999), "Unknown"},
+	}
+
+	for _, test := range tests {
+		result := test.state.String()
+		if result != test.expected {
+			t.Errorf("Expected %s.String() = %s, got %s", test.state, test.expected, result)
+		}
+	}
+}

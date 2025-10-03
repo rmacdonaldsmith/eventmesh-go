@@ -20,9 +20,33 @@ type queuedMessage struct {
 	sentAt time.Time
 }
 
+// PeerHealthState represents the health state of a peer
+type PeerHealthState int
+
+const (
+	PeerHealthy PeerHealthState = iota
+	PeerUnhealthy
+	PeerDisconnected
+)
+
+func (s PeerHealthState) String() string {
+	switch s {
+	case PeerHealthy:
+		return "Healthy"
+	case PeerUnhealthy:
+		return "Unhealthy"
+	case PeerDisconnected:
+		return "Disconnected"
+	default:
+		return "Unknown"
+	}
+}
+
 // peerMetrics tracks basic metrics per peer
 type peerMetrics struct {
-	dropsCount int64 // Number of dropped messages due to queue full
+	dropsCount     int64           // Number of dropped messages due to queue full
+	healthState    PeerHealthState // Current health state
+	failureCount   int             // Number of consecutive failures
 }
 
 // GRPCPeerLink implements the PeerLink interface using gRPC for peer-to-peer communication
@@ -161,7 +185,9 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 	// Create metrics for this peer if it doesn't exist
 	if _, exists := g.metrics[peerID]; !exists {
 		g.metrics[peerID] = &peerMetrics{
-			dropsCount: 0,
+			dropsCount:   0,
+			healthState:  PeerHealthy,
+			failureCount: 0,
 		}
 	}
 
@@ -186,7 +212,16 @@ func (g *GRPCPeerLink) Disconnect(ctx context.Context, peerID string) error {
 		delete(g.sendQueues, peerID)
 	}
 
-	// Keep metrics for observability (don't delete)
+	// Set health state to Disconnected and keep metrics for observability
+	if metrics, exists := g.metrics[peerID]; exists {
+		oldState := metrics.healthState
+		if oldState != PeerDisconnected {
+			metrics.healthState = PeerDisconnected
+			// Basic logging of state transitions
+			// TODO: Replace with proper logger when available
+			// fmt.Printf("Peer %s health transition: %s -> %s\n", peerID, oldState, PeerDisconnected)
+		}
+	}
 
 	return nil
 }
@@ -263,7 +298,40 @@ func (g *GRPCPeerLink) GetConnectedPeers(ctx context.Context) ([]peerlink.PeerNo
 
 // GetPeerHealth returns health status for a specific peer node
 func (g *GRPCPeerLink) GetPeerHealth(ctx context.Context, peerID string) (bool, error) {
-	return false, errors.New("not implemented")
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if metrics, exists := g.metrics[peerID]; exists {
+		return metrics.healthState == PeerHealthy, nil
+	}
+	return false, errors.New("peer not found")
+}
+
+// GetPeerHealthState returns the detailed health state for a specific peer
+func (g *GRPCPeerLink) GetPeerHealthState(peerID string) PeerHealthState {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if metrics, exists := g.metrics[peerID]; exists {
+		return metrics.healthState
+	}
+	return PeerDisconnected
+}
+
+// SetPeerHealth sets the health state for a specific peer with logging
+func (g *GRPCPeerLink) SetPeerHealth(peerID string, newState PeerHealthState) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if metrics, exists := g.metrics[peerID]; exists {
+		oldState := metrics.healthState
+		if oldState != newState {
+			metrics.healthState = newState
+			// Basic logging of state transitions
+			// TODO: Replace with proper logger when available
+			// fmt.Printf("Peer %s health transition: %s -> %s\n", peerID, oldState, newState)
+		}
+	}
 }
 
 // StartHeartbeats begins health monitoring for all connected peers
