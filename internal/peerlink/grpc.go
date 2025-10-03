@@ -5,12 +5,25 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 	peerlinkv1 "github.com/rmacdonaldsmith/eventmesh-go/proto/peerlink/v1"
 	"google.golang.org/grpc"
 )
+
+// queuedMessage represents a message in the send queue
+type queuedMessage struct {
+	peerID string
+	event  eventlog.EventRecord
+	sentAt time.Time
+}
+
+// peerMetrics tracks basic metrics per peer
+type peerMetrics struct {
+	dropsCount int64 // Number of dropped messages due to queue full
+}
 
 // GRPCPeerLink implements the PeerLink interface using gRPC for peer-to-peer communication
 type GRPCPeerLink struct {
@@ -22,6 +35,8 @@ type GRPCPeerLink struct {
 	listener        net.Listener
 	started         bool
 	connectedPeers  map[string]peerlink.PeerNode // peerID -> PeerNode
+	sendQueues      map[string]chan queuedMessage // peerID -> send queue
+	metrics         map[string]*peerMetrics       // peerID -> metrics
 }
 
 // NewGRPCPeerLink creates a new GRPCPeerLink with the given configuration
@@ -39,6 +54,8 @@ func NewGRPCPeerLink(config *Config) (*GRPCPeerLink, error) {
 		closed:         false,
 		started:        false,
 		connectedPeers: make(map[string]peerlink.PeerNode),
+		sendQueues:     make(map[string]chan queuedMessage),
+		metrics:        make(map[string]*peerMetrics),
 	}, nil
 }
 
@@ -131,9 +148,22 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 		return errors.New("PeerLink is closed")
 	}
 
-	// For Phase 3.2 stub: just add to connected peers map without actual connection
-	// Real connection logic will be implemented in later phases
-	g.connectedPeers[peer.ID()] = peer
+	peerID := peer.ID()
+
+	// Add to connected peers map
+	g.connectedPeers[peerID] = peer
+
+	// Create send queue for this peer if it doesn't exist
+	if _, exists := g.sendQueues[peerID]; !exists {
+		g.sendQueues[peerID] = make(chan queuedMessage, g.config.SendQueueSize)
+	}
+
+	// Create metrics for this peer if it doesn't exist
+	if _, exists := g.metrics[peerID]; !exists {
+		g.metrics[peerID] = &peerMetrics{
+			dropsCount: 0,
+		}
+	}
 
 	return nil
 }
@@ -147,9 +177,16 @@ func (g *GRPCPeerLink) Disconnect(ctx context.Context, peerID string) error {
 		return errors.New("PeerLink is closed")
 	}
 
-	// For Phase 3.2 stub: just remove from connected peers map
-	// Real disconnection logic will be implemented in later phases
+	// Remove from connected peers map
 	delete(g.connectedPeers, peerID)
+
+	// Close and remove send queue
+	if queue, exists := g.sendQueues[peerID]; exists {
+		close(queue)
+		delete(g.sendQueues, peerID)
+	}
+
+	// Keep metrics for observability (don't delete)
 
 	return nil
 }
@@ -157,21 +194,44 @@ func (g *GRPCPeerLink) Disconnect(ctx context.Context, peerID string) error {
 // SendEvent streams an event to the specified peer node
 func (g *GRPCPeerLink) SendEvent(ctx context.Context, peerID string, event eventlog.EventRecord) error {
 	g.mu.RLock()
-	defer g.mu.RUnlock()
-
 	if g.closed {
+		g.mu.RUnlock()
 		return errors.New("PeerLink is closed")
 	}
 
-	// For Phase 3.2 stub: just return success without actually sending
-	// Real event sending logic will be implemented in later phases
-	// This validates that the peer exists in our connected peers map
-	if _, exists := g.connectedPeers[peerID]; !exists {
-		// For stub mode, we'll be lenient and allow sending to non-connected peers
-		// Real implementation would return an error here
+	// Get the send queue for this peer
+	queue, queueExists := g.sendQueues[peerID]
+	metrics, metricsExist := g.metrics[peerID]
+	g.mu.RUnlock()
+
+	if !queueExists {
+		return errors.New("peer not connected")
 	}
 
-	return nil
+	// Create queued message
+	msg := queuedMessage{
+		peerID: peerID,
+		event:  event,
+		sentAt: time.Now(),
+	}
+
+	// Try to send to queue with timeout (bounded queue behavior)
+	timeoutCtx, cancel := context.WithTimeout(ctx, g.config.SendTimeout)
+	defer cancel()
+
+	select {
+	case queue <- msg:
+		// Successfully queued
+		return nil
+	case <-timeoutCtx.Done():
+		// Queue is full and timeout expired - increment drops counter
+		if metricsExist {
+			g.mu.Lock()
+			metrics.dropsCount++
+			g.mu.Unlock()
+		}
+		return errors.New("send queue full - message dropped")
+	}
 }
 
 // ReceiveEvents returns a channel for receiving events from peer nodes
@@ -235,4 +295,26 @@ func (g *GRPCPeerLink) Close() error {
 
 	g.closed = true
 	return nil
+}
+
+// GetQueueDepth returns the current depth of the send queue for a peer
+func (g *GRPCPeerLink) GetQueueDepth(peerID string) int {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if queue, exists := g.sendQueues[peerID]; exists {
+		return len(queue)
+	}
+	return 0
+}
+
+// GetDropsCount returns the number of dropped messages for a peer
+func (g *GRPCPeerLink) GetDropsCount(peerID string) int64 {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if metrics, exists := g.metrics[peerID]; exists {
+		return metrics.dropsCount
+	}
+	return 0
 }

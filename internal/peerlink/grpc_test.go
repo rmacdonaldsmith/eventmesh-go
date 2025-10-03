@@ -258,9 +258,9 @@ func TestGRPCPeerLink_SendEvent(t *testing.T) {
 
 	// Test sending to non-existent peer
 	err = peerLink.SendEvent(ctx, "non-existent-peer", nil)
-	// Should succeed in stub mode even for non-existent peers
-	if err != nil {
-		t.Fatalf("Expected SendEvent to succeed for non-existent peer in stub mode, got: %v", err)
+	// Should fail for non-connected peers (improved behavior in Phase 3.3)
+	if err == nil {
+		t.Error("Expected error when sending to non-connected peer, got nil")
 	}
 }
 
@@ -306,5 +306,71 @@ func TestGRPCPeerLink_ReceiveEvents(t *testing.T) {
 		// Expected - channel is closed in stub implementation
 	case <-ctx.Done():
 		t.Error("Test timeout - expected immediate response from stub")
+	}
+}
+
+// TestGRPCPeerLink_BoundedQueue tests bounded send queue functionality
+func TestGRPCPeerLink_BoundedQueue(t *testing.T) {
+	config := &Config{
+		NodeID:        "test-node",
+		ListenAddress: "localhost:0",
+		SendQueueSize: 2, // Small queue for testing
+		SendTimeout:   100 * time.Millisecond,
+	}
+	config.SetDefaults()
+
+	peerLink, err := NewGRPCPeerLink(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating GRPCPeerLink, got: %v", err)
+	}
+	defer peerLink.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Connect a test peer first
+	testPeer := &simplePeerNode{
+		id:      "peer-1",
+		address: "localhost:9999",
+		healthy: false,
+	}
+	err = peerLink.Connect(ctx, testPeer)
+	if err != nil {
+		t.Fatalf("Expected no error connecting peer, got: %v", err)
+	}
+
+	// Test queue depth starts at 0
+	depth := peerLink.GetQueueDepth("peer-1")
+	if depth != 0 {
+		t.Errorf("Expected initial queue depth 0, got %d", depth)
+	}
+
+	// Send events to fill the queue
+	for i := 0; i < 2; i++ {
+		err = peerLink.SendEvent(ctx, "peer-1", nil)
+		if err != nil {
+			t.Fatalf("Expected no error sending event %d, got: %v", i, err)
+		}
+	}
+
+	// Queue should now be full
+	depth = peerLink.GetQueueDepth("peer-1")
+	if depth != 2 {
+		t.Errorf("Expected queue depth 2 after sending 2 events, got %d", depth)
+	}
+
+	// Sending another event should timeout and return error (queue full)
+	shortCtx, shortCancel := context.WithTimeout(ctx, 50*time.Millisecond)
+	defer shortCancel()
+
+	err = peerLink.SendEvent(shortCtx, "peer-1", nil)
+	if err == nil {
+		t.Error("Expected error when queue is full and timeout expires, got nil")
+	}
+
+	// Check drops counter
+	drops := peerLink.GetDropsCount("peer-1")
+	if drops != 1 {
+		t.Errorf("Expected 1 drop after timeout, got %d", drops)
 	}
 }

@@ -10,6 +10,7 @@ type Config struct {
 	NodeID            string
 	ListenAddress     string
 	SendQueueSize     int
+	SendTimeout       time.Duration
 	HeartbeatInterval time.Duration
 	MaxMessageSize    int
 }
@@ -28,7 +29,10 @@ func (c *Config) Validate() error {
 // SetDefaults sets sensible default values for unset configuration fields
 func (c *Config) SetDefaults() {
 	if c.SendQueueSize <= 0 {
-		c.SendQueueSize = 1000
+		c.SendQueueSize = 100 // Simplified default as per plan
+	}
+	if c.SendTimeout <= 0 {
+		c.SendTimeout = 1 * time.Second
 	}
 	if c.HeartbeatInterval <= 0 {
 		c.HeartbeatInterval = 5 * time.Second
