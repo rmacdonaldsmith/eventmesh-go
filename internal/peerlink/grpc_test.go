@@ -153,6 +153,16 @@ func (p *simplePeerNode) ID() string      { return p.id }
 func (p *simplePeerNode) Address() string { return p.address }
 func (p *simplePeerNode) IsHealthy() bool { return p.healthy }
 
+// testConfig returns a standard test configuration
+func testConfig() *Config {
+	config := &Config{
+		NodeID:        "test-node",
+		ListenAddress: "localhost:0",
+	}
+	config.SetDefaults()
+	return config
+}
+
 // TestGRPCPeerLink_ConnectGetPeers tests basic connection management
 func TestGRPCPeerLink_ConnectGetPeers(t *testing.T) {
 	config := &Config{
@@ -179,7 +189,7 @@ func TestGRPCPeerLink_ConnectGetPeers(t *testing.T) {
 		t.Errorf("Expected 0 connected peers initially, got %d", len(peers))
 	}
 
-	// Try to connect to a peer (should work but not actually connect for now)
+	// Connect a test peer (tracks in memory without actual gRPC connection)
 	testPeer := &simplePeerNode{
 		id:      "peer-1",
 		address: "localhost:9999", // Non-existent address for testing
@@ -187,9 +197,9 @@ func TestGRPCPeerLink_ConnectGetPeers(t *testing.T) {
 	}
 
 	err = peerLink.Connect(ctx, testPeer)
-	// For stub implementation, we expect this to succeed (not actually connect)
+	// Connect should succeed and track peer in connected peers map
 	if err != nil {
-		t.Fatalf("Expected Connect to succeed in stub mode, got: %v", err)
+		t.Fatalf("Expected Connect to succeed, got: %v", err)
 	}
 
 	// After connecting, should show up in GetConnectedPeers
@@ -248,12 +258,11 @@ func TestGRPCPeerLink_SendEvent(t *testing.T) {
 		t.Fatalf("Expected no error connecting peer, got: %v", err)
 	}
 
-	// Create a dummy event (we'll need to import eventlog package for this)
-	// For now, let's just test that SendEvent doesn't crash with a nil event
+	// Test sending event (queues message without actual gRPC transmission)
 	err = peerLink.SendEvent(ctx, "peer-1", nil)
-	// For stub implementation, we expect this to succeed (not actually send)
+	// SendEvent should succeed and queue message for connected peer
 	if err != nil {
-		t.Fatalf("Expected SendEvent to succeed in stub mode, got: %v", err)
+		t.Fatalf("Expected SendEvent to succeed for connected peer, got: %v", err)
 	}
 
 	// Test sending to non-existent peer
