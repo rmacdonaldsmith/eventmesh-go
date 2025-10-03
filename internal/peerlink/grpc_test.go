@@ -406,9 +406,12 @@ func TestGRPCPeerLink_HealthState(t *testing.T) {
 	defer cancel()
 
 	// Test health state for non-existent peer
-	healthState := peerLink.GetPeerHealthState("non-existent")
-	if healthState != PeerDisconnected {
-		t.Errorf("Expected PeerDisconnected for non-existent peer, got %s", healthState)
+	healthState, err := peerLink.GetPeerHealth(ctx, "non-existent")
+	if err == nil {
+		t.Error("Expected error for non-existent peer")
+	}
+	if healthState != peerlink.PeerDisconnected {
+		t.Errorf("Expected peerlink.PeerDisconnected for non-existent peer, got %s", healthState)
 	}
 
 	// Connect a test peer
@@ -423,34 +426,22 @@ func TestGRPCPeerLink_HealthState(t *testing.T) {
 	}
 
 	// Newly connected peer should be Healthy
-	healthState = peerLink.GetPeerHealthState("peer-1")
-	if healthState != PeerHealthy {
-		t.Errorf("Expected PeerHealthy for newly connected peer, got %s", healthState)
-	}
-
-	// Test GetPeerHealth interface method
-	isHealthy, err := peerLink.GetPeerHealth(ctx, "peer-1")
+	healthState, err = peerLink.GetPeerHealth(ctx, "peer-1")
 	if err != nil {
 		t.Fatalf("Expected no error getting peer health, got: %v", err)
 	}
-	if !isHealthy {
-		t.Error("Expected peer to be healthy, got false")
+	if healthState != peerlink.PeerHealthy {
+		t.Errorf("Expected peerlink.PeerHealthy for newly connected peer, got %s", healthState)
 	}
 
 	// Test setting health state to Unhealthy
-	peerLink.SetPeerHealth("peer-1", PeerUnhealthy)
-	healthState = peerLink.GetPeerHealthState("peer-1")
-	if healthState != PeerUnhealthy {
-		t.Errorf("Expected PeerUnhealthy after SetPeerHealth, got %s", healthState)
-	}
-
-	// GetPeerHealth should now return false
-	isHealthy, err = peerLink.GetPeerHealth(ctx, "peer-1")
+	peerLink.SetPeerHealth("peer-1", peerlink.PeerUnhealthy)
+	healthState, err = peerLink.GetPeerHealth(ctx, "peer-1")
 	if err != nil {
 		t.Fatalf("Expected no error getting peer health, got: %v", err)
 	}
-	if isHealthy {
-		t.Error("Expected peer to be unhealthy, got true")
+	if healthState != peerlink.PeerUnhealthy {
+		t.Errorf("Expected peerlink.PeerUnhealthy after SetPeerHealth, got %s", healthState)
 	}
 
 	// Test Disconnect sets health to Disconnected
@@ -459,31 +450,25 @@ func TestGRPCPeerLink_HealthState(t *testing.T) {
 		t.Fatalf("Expected no error disconnecting peer, got: %v", err)
 	}
 
-	healthState = peerLink.GetPeerHealthState("peer-1")
-	if healthState != PeerDisconnected {
-		t.Errorf("Expected PeerDisconnected after disconnect, got %s", healthState)
-	}
-
-	// Test GetPeerHealth for disconnected peer still works (uses metrics)
-	isHealthy, err = peerLink.GetPeerHealth(ctx, "peer-1")
+	healthState, err = peerLink.GetPeerHealth(ctx, "peer-1")
 	if err != nil {
 		t.Fatalf("Expected no error getting health for disconnected peer, got: %v", err)
 	}
-	if isHealthy {
-		t.Error("Expected disconnected peer to be unhealthy, got true")
+	if healthState != peerlink.PeerDisconnected {
+		t.Errorf("Expected peerlink.PeerDisconnected after disconnect, got %s", healthState)
 	}
 }
 
 // TestPeerHealthState_String tests the string representation of health states
 func TestPeerHealthState_String(t *testing.T) {
 	tests := []struct {
-		state    PeerHealthState
+		state    peerlink.PeerHealthState
 		expected string
 	}{
-		{PeerHealthy, "Healthy"},
-		{PeerUnhealthy, "Unhealthy"},
-		{PeerDisconnected, "Disconnected"},
-		{PeerHealthState(999), "Unknown"},
+		{peerlink.PeerHealthy, "Healthy"},
+		{peerlink.PeerUnhealthy, "Unhealthy"},
+		{peerlink.PeerDisconnected, "Disconnected"},
+		{peerlink.PeerHealthState(999), "Unknown"},
 	}
 
 	for _, test := range tests {
@@ -603,7 +588,7 @@ func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
 	}
 
 	// Set different health states
-	peerLink.SetPeerHealth("peer2", PeerUnhealthy)
+	peerLink.SetPeerHealth("peer2", peerlink.PeerUnhealthy)
 
 	// Get all metrics
 	metrics = peerLink.GetAllPeerMetrics()
@@ -628,7 +613,7 @@ func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
 	if peer1Metrics.QueueDepth != 1 {
 		t.Errorf("Expected peer1 queue depth 1, got %d", peer1Metrics.QueueDepth)
 	}
-	if peer1Metrics.HealthState != PeerHealthy {
+	if peer1Metrics.HealthState != peerlink.PeerHealthy {
 		t.Errorf("Expected peer1 health state Healthy, got %v", peer1Metrics.HealthState)
 	}
 	if peer1Metrics.DropsCount != 0 {
@@ -642,7 +627,7 @@ func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
 	if peer2Metrics.QueueDepth != 0 {
 		t.Errorf("Expected peer2 queue depth 0, got %d", peer2Metrics.QueueDepth)
 	}
-	if peer2Metrics.HealthState != PeerUnhealthy {
+	if peer2Metrics.HealthState != peerlink.PeerUnhealthy {
 		t.Errorf("Expected peer2 health state Unhealthy, got %v", peer2Metrics.HealthState)
 	}
 	if peer2Metrics.DropsCount != 0 {

@@ -7,6 +7,28 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
+// PeerHealthState represents the health state of a peer
+type PeerHealthState int
+
+const (
+	PeerHealthy PeerHealthState = iota
+	PeerUnhealthy
+	PeerDisconnected
+)
+
+func (s PeerHealthState) String() string {
+	switch s {
+	case PeerHealthy:
+		return "Healthy"
+	case PeerUnhealthy:
+		return "Unhealthy"
+	case PeerDisconnected:
+		return "Disconnected"
+	default:
+		return "Unknown"
+	}
+}
+
 // PeerNode represents a remote mesh node in the cluster
 type PeerNode interface {
 	// ID returns unique identifier for this peer node
@@ -48,7 +70,7 @@ type PeerLink interface {
 	GetConnectedPeers(ctx context.Context) ([]PeerNode, error)
 
 	// GetPeerHealth returns health status for a specific peer node.
-	GetPeerHealth(ctx context.Context, peerID string) (bool, error)
+	GetPeerHealth(ctx context.Context, peerID string) (PeerHealthState, error)
 
 	// StartHeartbeats begins health monitoring for all connected peers.
 	// Implements REQ-PL-003: heartbeats and failure detection.

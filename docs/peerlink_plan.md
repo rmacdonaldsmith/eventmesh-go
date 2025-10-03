@@ -102,22 +102,24 @@ Implement gRPC-based PeerLink component for secure peer-to-peer communication be
 ### ~~**Phase 3.5: At-Least-Once Delivery (REQ-PL-004)**~~ ❌ **DROPPED FROM MVP**
 **Rationale**: Too complex for MVP - requires deep EventLog integration, persistent state management, and complex replay logic. This is a perfect post-MVP feature that can be added once the basic mesh is working.
 
-### **Phase 3.6: Configuration & Observability (REQ-PL-006, REQ-PL-007)** ⏳
+### **Phase 3.6: Configuration & Observability (REQ-PL-006, REQ-PL-007)** ✅ COMPLETED
 **Goal**: Extend existing Config with queue/heartbeat settings (per design.md REQ-PL-007)
 
 **Extended Config (build on existing):**
-- Add `SendQueueSize int` (default 100)
-- Add `HeartbeatInterval time.Duration` (default 5s)
-- Add `SendTimeout time.Duration` (default 1s)
+- ✅ All required config fields already present (SendQueueSize, HeartbeatInterval, SendTimeout)
+- ✅ Added comprehensive config tests including value preservation
+- ✅ Verified defaults match design spec (100 queue, 1s timeout, 5s heartbeat)
 
 **Basic Metrics (REQ-PL-006):**
-- Queue depth gauge (from Phase 3.3)
-- Drops counter (from Phase 3.3)
-- Connection state per peer (from Phase 3.4)
+- ✅ Added PeerMetrics struct with JSON serialization for monitoring
+- ✅ Implemented GetAllPeerMetrics() for aggregate metrics collection
+- ✅ Comprehensive metrics tests covering queue depth, drops, health states
+- ✅ All metrics working correctly for multiple peers with different states
 
-**Scope:**
-- Extend existing Config struct, don't create new one
-- **Defer**: Advanced metrics (latency histograms, bytes counters), structured logging
+**Completed:**
+- Enhanced config validation and testing with 17 total tests passing
+- Basic observability ready for monitoring integration
+- **Committed**: bfea38f - Phase 3.6: Configuration & Observability
 
 ### **Phase 3.7: Final Integration** ⏳
 **Goal**: Combine all phases into working PeerLink component
@@ -177,17 +179,17 @@ pkg/peerlink/
 
 ## Implementation Status
 
-**Current Phase**: 3.5 - At-Least-Once Delivery Stub
-**Last Completed**: 3.4 - Heartbeats & Health Monitoring ✅
-**Next Action**: Begin Phase 3.5 implementation of ACK/Resume framework
+**Current Phase**: 3.7 - Final Integration
+**Last Completed**: 3.6 - Configuration & Observability ✅
+**Next Action**: Begin Phase 3.7 final integration and end-to-end testing
 **Target**: Working PeerLink component enabling basic EventMesh node communication
 
 ### **Progress Summary**
-- **Completed Phases**: 3.1 (Protobuf) + 3.2 (Lifecycle) + 3.3 (Bounded Queues) + 3.4 (Health Monitoring)
-- **Test Count**: 15 passing (Config, lifecycle, queues, health states, metrics)
-- **Commits**: 5 total (Config + Protobuf + Lifecycle + Queues + Health monitoring)
+- **Completed Phases**: 3.1 (Protobuf) + 3.2 (Lifecycle) + 3.3 (Bounded Queues) + 3.4 (Health Monitoring) + 3.6 (Config/Observability)
+- **Test Count**: 17 passing (Config, lifecycle, queues, health states, metrics)
+- **Commits**: 6 total (Config + Protobuf + Lifecycle + Queues + Health monitoring + Config/Observability)
 - **TDD Approach**: Strict RED → GREEN → REFACTOR → COMMIT cycle
-- **Current Focus**: Basic ACK/Resume framework for Phase 3.5
+- **Current Focus**: Final integration testing for Phase 3.7
 
 ### **Completed Work**
 ✅ **Phase 3.1: Protobuf & gRPC Foundation**
@@ -212,13 +214,19 @@ pkg/peerlink/
 - **State Transitions**: Automatic Healthy on Connect, Disconnected on Disconnect
 - **Comprehensive Testing**: 15 tests covering all health state scenarios
 
+✅ **Phase 3.6: Configuration & Observability (REQ-PL-006, REQ-PL-007)**
+- **Extended Configuration**: Enhanced config tests with proper validation
+- **Aggregate Metrics**: GetAllPeerMetrics() with JSON serialization support
+- **Comprehensive Testing**: 17 total tests covering all functionality
+- **Monitoring Ready**: Basic observability for production monitoring
+
 ### **Next Immediate Steps**
-🔄 **Phase 3.5: At-Least-Once Delivery Stub** (Next phase)
-1. Add basic ACK tracking framework per peer
-2. Add methods for tracking highest acknowledged offset per topic
-3. Add placeholder logic for resume semantics
-4. Keep actual ACK protocol as stub for now
-5. Focus on framework over full implementation
+🔄 **Phase 3.7: Final Integration** (Current phase)
+1. Create end-to-end integration test
+2. Verify all implemented requirements work together
+3. Test basic PeerLink functionality across all phases
+4. Ensure clean interface compliance
+5. Prepare for MVP completion
 
 ### **Disciplined Approach Validation**
 - ✅ Small focused batches (single component per commit)
