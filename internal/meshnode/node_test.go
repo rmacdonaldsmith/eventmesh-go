@@ -310,13 +310,97 @@ func TestGRPCMeshNode_StubMethods(t *testing.T) {
 		t.Error("Expected error from Unsubscribe stub")
 	}
 
-	// Test AuthenticateClient stub
-	client, err := node.AuthenticateClient(ctx, nil)
-	if err == nil {
-		t.Error("Expected error from AuthenticateClient stub")
+	// Note: AuthenticateClient is no longer a stub - tested separately
+}
+
+// TestGRPCMeshNode_AuthenticateClient tests the AuthenticateClient implementation
+func TestGRPCMeshNode_AuthenticateClient(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8083")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	if client != nil {
-		t.Error("Expected nil client from AuthenticateClient stub")
+	defer node.Close()
+
+	ctx := context.Background()
+
+	// Test valid client authentication
+	client1, err := node.AuthenticateClient(ctx, "client-1")
+	if err != nil {
+		t.Errorf("Expected no error for valid client ID, got %v", err)
+	}
+	if client1 == nil {
+		t.Error("Expected non-nil client for valid authentication")
+	}
+	if client1.ID() != "client-1" {
+		t.Errorf("Expected client ID 'client-1', got '%s'", client1.ID())
+	}
+	if !client1.IsAuthenticated() {
+		t.Error("Expected client to be authenticated")
+	}
+
+	// Test client is added to tracking
+	clients, err := node.GetConnectedClients(ctx)
+	if err != nil {
+		t.Errorf("Expected no error getting connected clients, got %v", err)
+	}
+	if len(clients) != 1 {
+		t.Errorf("Expected 1 connected client, got %d", len(clients))
+	}
+
+	// Test authenticating same client returns existing instance
+	client1Again, err := node.AuthenticateClient(ctx, "client-1")
+	if err != nil {
+		t.Errorf("Expected no error for duplicate client ID, got %v", err)
+	}
+	if client1Again != client1 {
+		t.Error("Expected same client instance for duplicate authentication")
+	}
+
+	// Test second unique client
+	client2, err := node.AuthenticateClient(ctx, "client-2")
+	if err != nil {
+		t.Errorf("Expected no error for second valid client ID, got %v", err)
+	}
+	if client2 == nil {
+		t.Error("Expected non-nil client for valid authentication")
+	}
+	if client2.ID() != "client-2" {
+		t.Errorf("Expected client ID 'client-2', got '%s'", client2.ID())
+	}
+
+	// Verify both clients are tracked
+	clients, err = node.GetConnectedClients(ctx)
+	if err != nil {
+		t.Errorf("Expected no error getting connected clients, got %v", err)
+	}
+	if len(clients) != 2 {
+		t.Errorf("Expected 2 connected clients, got %d", len(clients))
+	}
+
+	// Test nil credentials
+	_, err = node.AuthenticateClient(ctx, nil)
+	if err == nil {
+		t.Error("Expected error for nil credentials")
+	}
+
+	// Test empty client ID
+	_, err = node.AuthenticateClient(ctx, "")
+	if err == nil {
+		t.Error("Expected error for empty client ID")
+	}
+
+	// Test non-string credentials
+	_, err = node.AuthenticateClient(ctx, 123)
+	if err == nil {
+		t.Error("Expected error for non-string credentials")
+	}
+
+	// Test authentication on closed node
+	node.Close()
+	_, err = node.AuthenticateClient(ctx, "client-3")
+	if err == nil {
+		t.Error("Expected error for authentication on closed node")
 	}
 }
 

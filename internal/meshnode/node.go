@@ -351,9 +351,41 @@ func (n *GRPCMeshNode) Unsubscribe(ctx context.Context, client meshnode.Client, 
 }
 
 // AuthenticateClient validates and authenticates a connecting client.
-// FOR MVP: This is a stub implementation (REQ-MNODE-001 descoped from MVP)
+// FOR MVP: Creates a TrustedClient (REQ-MNODE-001 descoped from MVP)
 func (n *GRPCMeshNode) AuthenticateClient(ctx context.Context, credentials interface{}) (meshnode.Client, error) {
-	return nil, fmt.Errorf("AuthenticateClient not implemented yet - will be implemented in Phase 4.4")
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.closed {
+		return nil, fmt.Errorf("cannot authenticate to closed mesh node")
+	}
+
+	if credentials == nil {
+		return nil, fmt.Errorf("credentials cannot be nil")
+	}
+
+	// For MVP: credentials is expected to be a client ID string
+	clientID, ok := credentials.(string)
+	if !ok {
+		return nil, fmt.Errorf("credentials must be a string client ID")
+	}
+
+	if clientID == "" {
+		return nil, fmt.Errorf("client ID cannot be empty")
+	}
+
+	// Check if client already exists
+	if existingClient, exists := n.clients[clientID]; exists {
+		return existingClient, nil // Return existing client
+	}
+
+	// Create new TrustedClient
+	client := NewTrustedClient(clientID)
+
+	// Add to client tracking
+	n.clients[clientID] = client
+
+	return client, nil
 }
 
 // GetEventLog returns the node's event log interface.
