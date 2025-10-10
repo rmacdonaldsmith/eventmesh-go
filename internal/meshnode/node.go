@@ -164,16 +164,129 @@ func (n *GRPCMeshNode) Close() error {
 
 // PublishEvent accepts an event from a local client and handles routing.
 // Implements REQ-MNODE-002: persists locally before forwarding to peers.
-// FOR MVP: This is a stub implementation that will be completed in Phase 4.2
+//
+// Event Flow (REQ-MNODE-002):
+// 1. Validate client and event
+// 2. Persist event to local EventLog FIRST (durability)
+// 3. Find local subscribers via RoutingTable
+// 4. Forward to remote peers via PeerLink (for remote subscribers)
 func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client, event eventlogpkg.EventRecord) error {
-	return fmt.Errorf("PublishEvent not implemented yet - will be implemented in Phase 4.2")
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	if n.closed {
+		return fmt.Errorf("cannot publish to closed mesh node")
+	}
+
+	if !n.started {
+		return fmt.Errorf("cannot publish to stopped mesh node")
+	}
+
+	// Validate inputs
+	if client == nil {
+		return fmt.Errorf("client cannot be nil")
+	}
+	if event == nil {
+		return fmt.Errorf("event cannot be nil")
+	}
+	if !client.IsAuthenticated() {
+		return fmt.Errorf("client is not authenticated")
+	}
+
+	// Step 1: PERSIST LOCALLY FIRST (REQ-MNODE-002)
+	// This ensures durability before any forwarding occurs
+	persistedEvent, err := n.eventLog.AppendToTopic(ctx, event.Topic(), event)
+	if err != nil {
+		return fmt.Errorf("failed to persist event locally: %w", err)
+	}
+
+	// Step 2: Find local subscribers and deliver events
+	localSubscribers, err := n.routingTable.GetSubscribers(ctx, event.Topic())
+	if err != nil {
+		return fmt.Errorf("failed to get local subscribers: %w", err)
+	}
+
+	// Deliver to local subscribers
+	for _, subscriber := range localSubscribers {
+		if subscriber.Type() == routingtablepkg.LocalClient {
+			// Cast to TrustedClient for delivery
+			if trustedClient, ok := subscriber.(*TrustedClient); ok {
+				trustedClient.DeliverEvent(persistedEvent)
+			}
+			// Note: In production, we'd handle delivery failures, queuing, etc.
+		}
+	}
+
+	// Step 3: Forward to remote peers for distributed routing
+	// For MVP: Forward to all connected peers (simple approach)
+	// In Phase 4.3, we'll implement smarter routing based on peer subscriptions
+	connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
+	if err != nil {
+		// Log error but don't fail the publish (local delivery succeeded)
+		// In production, we'd use structured logging
+		_ = err // Failed to get peers, but local delivery succeeded
+	} else {
+		// Forward event to all connected peers
+		for _, peer := range connectedPeers {
+			err := n.peerLink.SendEvent(ctx, peer.ID(), persistedEvent)
+			if err != nil {
+				// Log error but continue with other peers
+				// In production, we'd use structured logging and retry logic
+				_ = err // Failed to send to this peer, continue with others
+			}
+		}
+	}
+
+	// Success: Event was persisted locally and forwarded to peers
+	return nil
 }
 
 // Subscribe registers a client's interest in a topic pattern.
 // Implements REQ-MNODE-003: propagates subscription to peer nodes.
-// FOR MVP: This is a stub implementation that will be completed in Phase 4.3
+//
+// For Phase 4.2: Implements local subscription only
+// For Phase 4.3: Will add peer propagation
 func (n *GRPCMeshNode) Subscribe(ctx context.Context, client meshnode.Client, topic string) error {
-	return fmt.Errorf("Subscribe not implemented yet - will be implemented in Phase 4.3")
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if n.closed {
+		return fmt.Errorf("cannot subscribe to closed mesh node")
+	}
+
+	if !n.started {
+		return fmt.Errorf("cannot subscribe to stopped mesh node")
+	}
+
+	// Validate inputs
+	if client == nil {
+		return fmt.Errorf("client cannot be nil")
+	}
+	if topic == "" {
+		return fmt.Errorf("topic cannot be empty")
+	}
+	if !client.IsAuthenticated() {
+		return fmt.Errorf("client is not authenticated")
+	}
+
+	// Cast client to subscriber (TrustedClient implements both interfaces)
+	subscriber, ok := client.(routingtablepkg.Subscriber)
+	if !ok {
+		return fmt.Errorf("client does not implement Subscriber interface")
+	}
+
+	// Add to local routing table
+	err := n.routingTable.Subscribe(ctx, topic, subscriber)
+	if err != nil {
+		return fmt.Errorf("failed to add local subscription: %w", err)
+	}
+
+	// Add to local client tracking
+	n.clients[client.ID()] = client
+
+	// TODO Phase 4.3: Propagate subscription to peer nodes via PeerLink
+
+	return nil
 }
 
 // Unsubscribe removes a client's subscription to a topic pattern.

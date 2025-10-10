@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
+	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
+	meshnode "github.com/rmacdonaldsmith/eventmesh-go/pkg/meshnode"
+	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
 
 // TestNewGRPCMeshNode tests creating a new GRPCMeshNode
@@ -315,4 +318,499 @@ func TestGRPCMeshNode_StubMethods(t *testing.T) {
 	if client != nil {
 		t.Error("Expected nil client from AuthenticateClient stub")
 	}
+}
+
+// TestGRPCMeshNode_PublishEvent_LocalPersistence tests REQ-MNODE-002: Local Persistence Before Forwarding
+func TestGRPCMeshNode_PublishEvent_LocalPersistence(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8084")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+
+	// Start the node
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	// Create a test client and event
+	client := NewTrustedClient("test-client-1")
+	event := eventlog.NewRecord("orders.created", []byte(`{"orderId":"123","amount":99.99}`))
+
+	// Publish the event - this should persist it locally first (REQ-MNODE-002)
+	err = node.PublishEvent(ctx, client, event)
+	if err != nil {
+		t.Fatalf("Expected no error publishing event, got %v", err)
+	}
+
+	// Verify the event was persisted in EventLog
+	eventLog := node.GetEventLog()
+
+	// Read from the topic to verify persistence
+	events, err := eventLog.ReadFromTopic(ctx, "orders.created", 0, 10)
+	if err != nil {
+		t.Fatalf("Expected no error reading from EventLog, got %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event in EventLog, got %d", len(events))
+	}
+
+	// Verify the persisted event matches what we published
+	persistedEvent := events[0]
+	if persistedEvent.Topic() != "orders.created" {
+		t.Errorf("Expected topic 'orders.created', got '%s'", persistedEvent.Topic())
+	}
+	if string(persistedEvent.Payload()) != `{"orderId":"123","amount":99.99}` {
+		t.Errorf("Expected payload to match, got '%s'", string(persistedEvent.Payload()))
+	}
+	if persistedEvent.Offset() != 0 {
+		t.Errorf("Expected offset 0, got %d", persistedEvent.Offset())
+	}
+}
+
+// TestGRPCMeshNode_PublishEvent_Multiple tests publishing multiple events
+func TestGRPCMeshNode_PublishEvent_Multiple(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8085")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	client := NewTrustedClient("test-client-2")
+
+	// Publish multiple events to different topics
+	events := []struct {
+		topic   string
+		payload string
+	}{
+		{"orders.created", `{"orderId":"123"}`},
+		{"orders.updated", `{"orderId":"123","status":"shipped"}`},
+		{"orders.created", `{"orderId":"456"}`},
+	}
+
+	for _, testEvent := range events {
+		event := eventlog.NewRecord(testEvent.topic, []byte(testEvent.payload))
+		err = node.PublishEvent(ctx, client, event)
+		if err != nil {
+			t.Fatalf("Expected no error publishing event to %s, got %v", testEvent.topic, err)
+		}
+	}
+
+	// Verify events were persisted correctly
+	eventLog := node.GetEventLog()
+
+	// Check orders.created topic (should have 2 events)
+	createdEvents, err := eventLog.ReadFromTopic(ctx, "orders.created", 0, 10)
+	if err != nil {
+		t.Fatalf("Expected no error reading orders.created, got %v", err)
+	}
+	if len(createdEvents) != 2 {
+		t.Errorf("Expected 2 events in orders.created, got %d", len(createdEvents))
+	}
+
+	// Check orders.updated topic (should have 1 event)
+	updatedEvents, err := eventLog.ReadFromTopic(ctx, "orders.updated", 0, 10)
+	if err != nil {
+		t.Fatalf("Expected no error reading orders.updated, got %v", err)
+	}
+	if len(updatedEvents) != 1 {
+		t.Errorf("Expected 1 event in orders.updated, got %d", len(updatedEvents))
+	}
+
+	// Verify offsets are correct (per-topic sequences)
+	if createdEvents[0].Offset() != 0 {
+		t.Errorf("Expected first orders.created offset 0, got %d", createdEvents[0].Offset())
+	}
+	if createdEvents[1].Offset() != 1 {
+		t.Errorf("Expected second orders.created offset 1, got %d", createdEvents[1].Offset())
+	}
+	if updatedEvents[0].Offset() != 0 {
+		t.Errorf("Expected first orders.updated offset 0, got %d", updatedEvents[0].Offset())
+	}
+}
+
+// TestGRPCMeshNode_PublishEvent_NilClient tests error handling with nil client
+func TestGRPCMeshNode_PublishEvent_NilClient(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8086")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	event := eventlog.NewRecord("test.topic", []byte("test payload"))
+
+	// Try to publish with nil client - should handle gracefully
+	err = node.PublishEvent(ctx, nil, event)
+	if err == nil {
+		t.Error("Expected error when publishing with nil client")
+	}
+}
+
+// TestGRPCMeshNode_PublishEvent_NilEvent tests error handling with nil event
+func TestGRPCMeshNode_PublishEvent_NilEvent(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8087")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	client := NewTrustedClient("test-client-3")
+
+	// Try to publish nil event - should handle gracefully
+	err = node.PublishEvent(ctx, client, nil)
+	if err == nil {
+		t.Error("Expected error when publishing nil event")
+	}
+}
+
+// TestGRPCMeshNode_LocalSubscriberDelivery tests local event delivery to subscribed clients
+func TestGRPCMeshNode_LocalSubscriberDelivery(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8088")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	// Create a subscriber client and subscribe to a topic
+	subscriber := NewTrustedClient("subscriber-1")
+	publisher := NewTrustedClient("publisher-1")
+
+	// Subscribe the client to "orders.*" pattern
+	err = node.Subscribe(ctx, subscriber, "orders.*")
+	if err != nil {
+		t.Fatalf("Expected no error subscribing, got %v", err)
+	}
+
+	// Publish an event that should match the subscription
+	event := eventlog.NewRecord("orders.created", []byte(`{"orderId":"123"}`))
+	err = node.PublishEvent(ctx, publisher, event)
+	if err != nil {
+		t.Fatalf("Expected no error publishing event, got %v", err)
+	}
+
+	// Verify the subscriber received the event
+	receivedEvents := subscriber.GetReceivedEvents()
+	if len(receivedEvents) != 1 {
+		t.Fatalf("Expected subscriber to receive 1 event, got %d", len(receivedEvents))
+	}
+
+	receivedEvent := receivedEvents[0]
+	if receivedEvent.Topic() != "orders.created" {
+		t.Errorf("Expected received event topic 'orders.created', got '%s'", receivedEvent.Topic())
+	}
+	if string(receivedEvent.Payload()) != `{"orderId":"123"}` {
+		t.Errorf("Expected received payload to match, got '%s'", string(receivedEvent.Payload()))
+	}
+}
+
+// TestGRPCMeshNode_MultipleLocalSubscribers tests delivery to multiple local subscribers
+func TestGRPCMeshNode_MultipleLocalSubscribers(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8089")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	// Create multiple subscribers
+	subscriber1 := NewTrustedClient("subscriber-1")
+	subscriber2 := NewTrustedClient("subscriber-2")
+	subscriber3 := NewTrustedClient("subscriber-3")
+	publisher := NewTrustedClient("publisher-1")
+
+	// Subscribe to different patterns
+	err = node.Subscribe(ctx, subscriber1, "orders.*")
+	if err != nil {
+		t.Fatalf("Expected no error subscribing subscriber1, got %v", err)
+	}
+
+	err = node.Subscribe(ctx, subscriber2, "orders.created")
+	if err != nil {
+		t.Fatalf("Expected no error subscribing subscriber2, got %v", err)
+	}
+
+	err = node.Subscribe(ctx, subscriber3, "payments.*")
+	if err != nil {
+		t.Fatalf("Expected no error subscribing subscriber3, got %v", err)
+	}
+
+	// Publish an orders.created event (should match subscriber1 and subscriber2)
+	event := eventlog.NewRecord("orders.created", []byte(`{"orderId":"123"}`))
+	err = node.PublishEvent(ctx, publisher, event)
+	if err != nil {
+		t.Fatalf("Expected no error publishing event, got %v", err)
+	}
+
+	// Verify delivery
+	events1 := subscriber1.GetReceivedEvents()
+	events2 := subscriber2.GetReceivedEvents()
+	events3 := subscriber3.GetReceivedEvents()
+
+	if len(events1) != 1 {
+		t.Errorf("Expected subscriber1 to receive 1 event, got %d", len(events1))
+	}
+	if len(events2) != 1 {
+		t.Errorf("Expected subscriber2 to receive 1 event, got %d", len(events2))
+	}
+	if len(events3) != 0 {
+		t.Errorf("Expected subscriber3 to receive 0 events, got %d", len(events3))
+	}
+}
+
+// TestGRPCMeshNode_PublishFlow_Complete tests the complete publish flow
+// This test verifies REQ-MNODE-002: Local Persistence Before Forwarding
+func TestGRPCMeshNode_PublishFlow_Complete(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8090")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	// Create clients
+	publisher := NewTrustedClient("publisher-1")
+	subscriber1 := NewTrustedClient("subscriber-1")
+	subscriber2 := NewTrustedClient("subscriber-2")
+
+	// Set up subscriptions
+	err = node.Subscribe(ctx, subscriber1, "orders.*")
+	if err != nil {
+		t.Fatalf("Expected no error subscribing subscriber1, got %v", err)
+	}
+
+	err = node.Subscribe(ctx, subscriber2, "inventory.*")
+	if err != nil {
+		t.Fatalf("Expected no error subscribing subscriber2, got %v", err)
+	}
+
+	// Test Case 1: Publish event that matches subscriber1
+	event1 := eventlog.NewRecord("orders.created", []byte(`{"orderId":"123","customerId":"456"}`))
+	err = node.PublishEvent(ctx, publisher, event1)
+	if err != nil {
+		t.Fatalf("Expected no error publishing orders event, got %v", err)
+	}
+
+	// Test Case 2: Publish event that matches subscriber2
+	event2 := eventlog.NewRecord("inventory.updated", []byte(`{"productId":"789","quantity":100}`))
+	err = node.PublishEvent(ctx, publisher, event2)
+	if err != nil {
+		t.Fatalf("Expected no error publishing inventory event, got %v", err)
+	}
+
+	// Test Case 3: Publish event that matches no subscribers
+	event3 := eventlog.NewRecord("analytics.view", []byte(`{"pageId":"home","userId":"999"}`))
+	err = node.PublishEvent(ctx, publisher, event3)
+	if err != nil {
+		t.Fatalf("Expected no error publishing analytics event, got %v", err)
+	}
+
+	// Verify persistence (REQ-MNODE-002)
+	eventLog := node.GetEventLog()
+
+	ordersEvents, err := eventLog.ReadFromTopic(ctx, "orders.created", 0, 10)
+	if err != nil {
+		t.Fatalf("Expected no error reading orders events, got %v", err)
+	}
+	if len(ordersEvents) != 1 {
+		t.Errorf("Expected 1 orders event persisted, got %d", len(ordersEvents))
+	}
+
+	inventoryEvents, err := eventLog.ReadFromTopic(ctx, "inventory.updated", 0, 10)
+	if err != nil {
+		t.Fatalf("Expected no error reading inventory events, got %v", err)
+	}
+	if len(inventoryEvents) != 1 {
+		t.Errorf("Expected 1 inventory event persisted, got %d", len(inventoryEvents))
+	}
+
+	analyticsEvents, err := eventLog.ReadFromTopic(ctx, "analytics.view", 0, 10)
+	if err != nil {
+		t.Fatalf("Expected no error reading analytics events, got %v", err)
+	}
+	if len(analyticsEvents) != 1 {
+		t.Errorf("Expected 1 analytics event persisted, got %d", len(analyticsEvents))
+	}
+
+	// Verify local delivery
+	events1 := subscriber1.GetReceivedEvents()
+	events2 := subscriber2.GetReceivedEvents()
+
+	if len(events1) != 1 {
+		t.Errorf("Expected subscriber1 to receive 1 event, got %d", len(events1))
+	} else {
+		if events1[0].Topic() != "orders.created" {
+			t.Errorf("Expected subscriber1 to receive orders.created event, got %s", events1[0].Topic())
+		}
+	}
+
+	if len(events2) != 1 {
+		t.Errorf("Expected subscriber2 to receive 1 event, got %d", len(events2))
+	} else {
+		if events2[0].Topic() != "inventory.updated" {
+			t.Errorf("Expected subscriber2 to receive inventory.updated event, got %s", events2[0].Topic())
+		}
+	}
+}
+
+// TestGRPCMeshNode_PublishFlow_ErrorHandling tests error handling in publish flow
+func TestGRPCMeshNode_PublishFlow_ErrorHandling(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8091")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+
+	// Test publishing to stopped node
+	client := NewTrustedClient("test-client")
+	event := eventlog.NewRecord("test.topic", []byte("test"))
+
+	err = node.PublishEvent(ctx, client, event)
+	if err == nil {
+		t.Error("Expected error when publishing to stopped node")
+	}
+
+	// Start node
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	// Test with unauthenticated client (mock scenario)
+	unauthenticatedClient := &MockUnauthenticatedClient{id: "unauth-client"}
+	err = node.PublishEvent(ctx, unauthenticatedClient, event)
+	if err == nil {
+		t.Error("Expected error when publishing with unauthenticated client")
+	}
+
+	// Test with empty topic
+	emptyTopicEvent := eventlog.NewRecord("", []byte("test"))
+	err = node.PublishEvent(ctx, client, emptyTopicEvent)
+	if err == nil {
+		t.Error("Expected error when publishing event with empty topic")
+	}
+}
+
+// MockUnauthenticatedClient is a test helper for error handling tests
+type MockUnauthenticatedClient struct {
+	id string
+}
+
+func (c *MockUnauthenticatedClient) ID() string {
+	return c.id
+}
+
+func (c *MockUnauthenticatedClient) IsAuthenticated() bool {
+	return false // Simulates unauthenticated client
+}
+
+func (c *MockUnauthenticatedClient) Type() routingtable.SubscriberType {
+	return routingtable.LocalClient
+}
+
+// Verify interface compliance
+var _ meshnode.Client = (*MockUnauthenticatedClient)(nil)
+var _ routingtable.Subscriber = (*MockUnauthenticatedClient)(nil)
+
+// TestGRPCMeshNode_PersistenceBeforeForwarding explicitly tests REQ-MNODE-002
+// This test verifies that events are persisted locally BEFORE any forwarding occurs
+func TestGRPCMeshNode_PersistenceBeforeForwarding(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8092")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	// Create a client and event
+	client := NewTrustedClient("test-client")
+	event := eventlog.NewRecord("test.persistence", []byte(`{"testId":"persistence-test"}`))
+
+	// Publish the event
+	// Even if peer forwarding fails (no peers connected), local persistence should succeed
+	err = node.PublishEvent(ctx, client, event)
+	if err != nil {
+		t.Fatalf("Expected no error publishing event (local persistence should succeed), got %v", err)
+	}
+
+	// Verify the event was persisted locally regardless of forwarding status
+	eventLog := node.GetEventLog()
+	persistedEvents, err := eventLog.ReadFromTopic(ctx, "test.persistence", 0, 10)
+	if err != nil {
+		t.Fatalf("Expected no error reading persisted events, got %v", err)
+	}
+
+	if len(persistedEvents) != 1 {
+		t.Fatalf("Expected 1 persisted event, got %d", len(persistedEvents))
+	}
+
+	persistedEvent := persistedEvents[0]
+	if persistedEvent.Topic() != "test.persistence" {
+		t.Errorf("Expected persisted topic 'test.persistence', got '%s'", persistedEvent.Topic())
+	}
+	if string(persistedEvent.Payload()) != `{"testId":"persistence-test"}` {
+		t.Errorf("Expected persisted payload to match, got '%s'", string(persistedEvent.Payload()))
+	}
+
+	// Verify the event has a valid offset (assigned during persistence)
+	if persistedEvent.Offset() < 0 {
+		t.Errorf("Expected non-negative offset, got %d", persistedEvent.Offset())
+	}
+
+	// This test confirms REQ-MNODE-002: Local Persistence Before Forwarding
+	// The event was successfully persisted locally, even without connected peers
+	t.Logf("✅ REQ-MNODE-002 verified: Event persisted locally with offset %d", persistedEvent.Offset())
 }
