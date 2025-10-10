@@ -190,7 +190,7 @@ Security (mTLS) is **deferred from MVP**. An appendix in the main design doc out
   - Periodic ping (e.g., 2s–10s configurable) with deadline; 3 consecutive failures ⇒ mark `Unhealthy`.  
   - State transitions (Healthy/Unhealthy/Disconnected) emitted as events.  
 
-- **REQ-PL-004 At‑Least‑Once Cross‑Node Delivery (ACK/Resume)**  
+- **DROPPED FROM THE PLAN - REQ-PL-004 At‑Least‑Once Cross‑Node Delivery (ACK/Resume)**  
   *Ensure resend after disconnect without gaps; duplicates are acceptable.*  
   **Acceptance Criteria**  
   - Per (topic) highest‑acked offset tracked per peer.  
@@ -306,7 +306,7 @@ After both handshake messages are exchanged and validated, there’s nothing ext
 
 ### Mesh Node Requirements
 
-- REQ-MNODE-001 Authentication of Clients
+- REQ-MNODE-001 Authentication of Clients (descoped from MVP - will add post MVP)
 - REQ-MNODE-002 Local Persistence Before Forwarding
 - REQ-MNODE-003 Subscription Propagation
 
