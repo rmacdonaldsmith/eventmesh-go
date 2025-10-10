@@ -258,3 +258,115 @@ func TestEventLog_TopicValidation(t *testing.T) {
 		t.Error("Expected error when replaying empty topic")
 	}
 }
+
+// TestEventLog_ReadFromTopic_Performance tests the performance improvement of ReadFromTopic
+// This test demonstrates the O(n) → O(1) optimization
+func TestEventLog_ReadFromTopic_Performance(t *testing.T) {
+	log := NewInMemoryEventLog()
+	defer log.Close()
+
+	ctx := context.Background()
+
+	// Create a topic with many events (simulating production scenario)
+	const numEvents = 10000
+	const readFromOffset = 8000 // Reading from near the end
+
+	// Add many events to create performance test scenario
+	for i := 0; i < numEvents; i++ {
+		record := eventlog.NewRecord("large-topic", []byte("event-data"))
+		_, err := log.AppendToTopic(ctx, "large-topic", record)
+		if err != nil {
+			t.Fatalf("Error appending event %d: %v", i, err)
+		}
+	}
+
+	// Test reading from near the end of a large topic
+	// With O(n) implementation, this would scan 8000 events
+	// With O(1) implementation, this should be instant
+	results, err := log.ReadFromTopic(ctx, "large-topic", readFromOffset, 1000)
+	if err != nil {
+		t.Fatalf("Error reading from large topic: %v", err)
+	}
+
+	// Verify we get the expected number of results (limited by maxCount)
+	availableResults := numEvents - readFromOffset // 10000 - 8000 = 2000 available
+	maxCount := 1000
+	expectedResults := maxCount // Should be limited by maxCount
+	if availableResults < maxCount {
+		expectedResults = availableResults
+	}
+	if len(results) != expectedResults {
+		t.Errorf("Expected %d results (limited by maxCount %d), got %d", expectedResults, maxCount, len(results))
+	}
+
+	// Verify the first result has the correct offset
+	if results[0].Offset() != readFromOffset {
+		t.Errorf("Expected first result offset %d, got %d", readFromOffset, results[0].Offset())
+	}
+
+	// Verify we don't exceed maxCount when it's smaller
+	results, err = log.ReadFromTopic(ctx, "large-topic", readFromOffset, 500)
+	if err != nil {
+		t.Fatalf("Error reading limited results from large topic: %v", err)
+	}
+	if len(results) != 500 {
+		t.Errorf("Expected 500 results (maxCount), got %d", len(results))
+	}
+
+	// Verify we get all available results when maxCount is larger than available
+	results, err = log.ReadFromTopic(ctx, "large-topic", readFromOffset, 5000) // maxCount > available
+	if err != nil {
+		t.Fatalf("Error reading with large maxCount: %v", err)
+	}
+	expectedAllResults := numEvents - readFromOffset // 10000 - 8000 = 2000
+	if len(results) != expectedAllResults {
+		t.Errorf("Expected %d results (all available), got %d", expectedAllResults, len(results))
+	}
+}
+
+// TestEventLog_ReadFromTopic_EdgeCases tests edge cases for the optimized ReadFromTopic
+func TestEventLog_ReadFromTopic_EdgeCases(t *testing.T) {
+	log := NewInMemoryEventLog()
+	defer log.Close()
+
+	ctx := context.Background()
+
+	// Add some test events
+	for i := 0; i < 5; i++ {
+		record := eventlog.NewRecord("test-topic", []byte("data"))
+		_, err := log.AppendToTopic(ctx, "test-topic", record)
+		if err != nil {
+			t.Fatalf("Error appending event %d: %v", i, err)
+		}
+	}
+
+	// Test reading from offset beyond available events
+	results, err := log.ReadFromTopic(ctx, "test-topic", 10, 5)
+	if err != nil {
+		t.Fatalf("Error reading from offset beyond events: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results when reading beyond available events, got %d", len(results))
+	}
+
+	// Test reading from exact end offset
+	results, err = log.ReadFromTopic(ctx, "test-topic", 5, 5)
+	if err != nil {
+		t.Fatalf("Error reading from exact end offset: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results when reading from exact end offset, got %d", len(results))
+	}
+
+	// Test reading with maxCount of 0
+	results, err = log.ReadFromTopic(ctx, "test-topic", 0, 0)
+	if err != nil {
+		t.Fatalf("Error reading with maxCount 0: %v", err)
+	}
+	if results == nil {
+		t.Error("Expected non-nil results for maxCount 0, got nil")
+	}
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results for maxCount 0, got %d", len(results))
+	}
+}

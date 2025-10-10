@@ -110,27 +110,42 @@ func (log *InMemoryEventLog) ReadFromTopic(ctx context.Context, topic string, st
 	log.mu.RLock()
 	defer log.mu.RUnlock()
 
-	// Handle zero maxCount case early
+	// Handle zero maxCount case early - return empty slice, not nil
 	if maxCount == 0 {
-		return nil, nil
+		return []eventlog.EventRecord{}, nil
 	}
 
 	// Get events for the specific topic
 	topicEvents := log.eventsByTopic[topic]
 	if topicEvents == nil {
-		// Topic doesn't exist, return empty slice
-		return nil, nil
+		// Topic doesn't exist, return empty slice, not nil
+		return []eventlog.EventRecord{}, nil
 	}
 
-	results := make([]eventlog.EventRecord, 0, maxCount)
+	// O(1) optimization: Since events are stored in offset order and offset == array index,
+	// we can use direct slice indexing instead of linear scanning
 
-	for _, event := range topicEvents {
-		if event.Offset() >= startOffset {
-			results = append(results, event)
-			if len(results) >= maxCount {
-				break
-			}
-		}
+	// Convert startOffset to int for slice indexing
+	startIndex := int(startOffset)
+
+	// If startOffset is beyond available events, return empty slice
+	if startIndex >= len(topicEvents) {
+		return []eventlog.EventRecord{}, nil
+	}
+
+	// Calculate end index based on maxCount
+	endIndex := startIndex + maxCount
+	if endIndex > len(topicEvents) {
+		endIndex = len(topicEvents)
+	}
+
+	// Direct slice operation - O(1) access + O(k) copy where k = result count
+	selectedEvents := topicEvents[startIndex:endIndex]
+
+	// Convert []*eventlog.Record to []eventlog.EventRecord
+	results := make([]eventlog.EventRecord, len(selectedEvents))
+	for i, event := range selectedEvents {
+		results[i] = event
 	}
 
 	return results, nil
@@ -175,9 +190,12 @@ func (log *InMemoryEventLog) ReplayTopic(ctx context.Context, topic string, star
 		// Create a copy of relevant events from the specific topic to avoid holding the lock during iteration
 		topicEvents := log.eventsByTopic[topic]
 		var eventsToReplay []*eventlog.Record
-		for _, event := range topicEvents {
-			if event.Offset() >= startOffset {
-				eventsToReplay = append(eventsToReplay, event)
+
+		if topicEvents != nil {
+			// O(1) optimization: Use direct slice indexing like in ReadFromTopic
+			startIndex := int(startOffset)
+			if startIndex < len(topicEvents) {
+				eventsToReplay = topicEvents[startIndex:]
 			}
 		}
 		log.mu.RUnlock()
