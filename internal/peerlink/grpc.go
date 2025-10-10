@@ -13,6 +13,11 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	// ProtocolVersion represents the current PeerLink protocol version (v1.0)
+	ProtocolVersion uint32 = 100
+)
+
 // queuedMessage represents a message in the send queue
 type queuedMessage struct {
 	peerID string
@@ -136,9 +141,91 @@ func (g *GRPCPeerLink) Stop(ctx context.Context) error {
 
 // EventStream implements the PeerLink gRPC service handler
 func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.PeerMessage, peerlinkv1.PeerMessage]) error {
-	// TODO: Implement full protocol logic in later phases
-	// For now, just return "not implemented" to satisfy the interface
-	return errors.New("EventStream not fully implemented yet")
+	// Basic EventStream implementation for MVP
+	ctx := stream.Context()
+
+	// Wait for handshake message
+	msg, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+
+	// Validate handshake
+	handshake := msg.GetHandshake()
+	if handshake == nil {
+		return errors.New("expected handshake message")
+	}
+
+	peerID := handshake.NodeId
+	if peerID == "" {
+		return errors.New("peer ID cannot be empty")
+	}
+
+	// Register this peer as connected (create send queue if needed)
+	g.mu.Lock()
+	g.registerPeer(peerID)
+	sendQueue := g.sendQueues[peerID]
+	g.mu.Unlock()
+
+	// Send handshake response
+	response := &peerlinkv1.PeerMessage{
+		Kind: &peerlinkv1.PeerMessage_Handshake{
+			Handshake: &peerlinkv1.Handshake{
+				NodeId:          g.config.NodeID,
+				ProtocolVersion: ProtocolVersion,
+			},
+		},
+	}
+
+	if err := stream.Send(response); err != nil {
+		return err
+	}
+
+	// Ensure cleanup on stream close
+	defer func() {
+		g.mu.Lock()
+		if metrics, exists := g.metrics[peerID]; exists {
+			metrics.healthState = peerlink.PeerDisconnected
+		}
+		g.mu.Unlock()
+	}()
+
+	// Handle ongoing message flow
+	for {
+		select {
+		case <-ctx.Done():
+			// Stream closed
+			return ctx.Err()
+
+		case queuedMsg, ok := <-sendQueue:
+			if !ok {
+				// Send queue closed
+				return nil
+			}
+
+			// Convert EventRecord to protobuf Event message
+			event := &peerlinkv1.Event{
+				Topic:   queuedMsg.event.Topic(),
+				Payload: queuedMsg.event.Payload(),
+				Headers: queuedMsg.event.Headers(),
+				Offset:  queuedMsg.event.Offset(),
+			}
+
+			// Wrap in PeerMessage
+			peerMsg := &peerlinkv1.PeerMessage{
+				Kind: &peerlinkv1.PeerMessage_Event{
+					Event: event,
+				},
+			}
+
+			// Send over gRPC stream
+			if err := stream.Send(peerMsg); err != nil {
+				// Failed to send - put message back in queue if possible
+				// For MVP, just return the error
+				return err
+			}
+		}
+	}
 }
 
 // Connect establishes a secure connection to the specified peer node
@@ -155,19 +242,8 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 	// Add to connected peers map
 	g.connectedPeers[peerID] = peer
 
-	// Create send queue for this peer if it doesn't exist
-	if _, exists := g.sendQueues[peerID]; !exists {
-		g.sendQueues[peerID] = make(chan queuedMessage, g.config.SendQueueSize)
-	}
-
-	// Create metrics for this peer if it doesn't exist
-	if _, exists := g.metrics[peerID]; !exists {
-		g.metrics[peerID] = &peerMetrics{
-			dropsCount:   0,
-			healthState:  peerlink.PeerHealthy,
-			failureCount: 0,
-		}
-	}
+	// Register peer (create queue and metrics)
+	g.registerPeer(peerID)
 
 	return nil
 }
@@ -283,6 +359,21 @@ func (g *GRPCPeerLink) GetPeerHealth(ctx context.Context, peerID string) (peerli
 		return metrics.healthState, nil
 	}
 	return peerlink.PeerDisconnected, errors.New("peer not found")
+}
+
+// registerPeer creates send queue and metrics for a peer if they don't exist
+// Must be called with mutex held
+func (g *GRPCPeerLink) registerPeer(peerID string) {
+	if _, exists := g.sendQueues[peerID]; !exists {
+		g.sendQueues[peerID] = make(chan queuedMessage, g.config.SendQueueSize)
+	}
+	if _, exists := g.metrics[peerID]; !exists {
+		g.metrics[peerID] = &peerMetrics{
+			dropsCount:   0,
+			healthState:  peerlink.PeerHealthy,
+			failureCount: 0,
+		}
+	}
 }
 
 // SetPeerHealth sets the health state for a specific peer with logging

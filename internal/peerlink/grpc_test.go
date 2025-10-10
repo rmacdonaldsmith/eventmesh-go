@@ -2,11 +2,14 @@ package peerlink
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
+	peerlinkv1 "github.com/rmacdonaldsmith/eventmesh-go/proto/peerlink/v1"
+	"google.golang.org/grpc"
 )
 
 // TestGRPCPeerLink_InterfaceCompliance verifies that GRPCPeerLink implements the PeerLink interface
@@ -633,4 +636,339 @@ func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
 	if peer2Metrics.DropsCount != 0 {
 		t.Errorf("Expected peer2 drops count 0, got %d", peer2Metrics.DropsCount)
 	}
+}
+
+// TestGRPCPeerLink_EventStreamBasic tests basic EventStream functionality
+func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
+	config := &Config{
+		NodeID:        "test-node",
+		ListenAddress: "localhost:0",
+		SendQueueSize: 10,
+		SendTimeout:   1 * time.Second,
+	}
+
+	peerLink, err := NewGRPCPeerLink(config)
+	if err != nil {
+		t.Fatalf("Failed to create GRPCPeerLink: %v", err)
+	}
+	defer peerLink.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Start the gRPC server
+	err = peerLink.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start PeerLink: %v", err)
+	}
+	defer peerLink.Stop(ctx)
+
+	// Connect a test peer to create the send queue
+	testPeer := &simplePeerNode{id: "peer1", address: "localhost:8080", healthy: true}
+	err = peerLink.Connect(ctx, testPeer)
+	if err != nil {
+		t.Fatalf("Failed to connect peer: %v", err)
+	}
+
+	// Send an event - this should queue the message
+	testEvent := eventlog.NewRecord("test-topic", []byte("test-payload"))
+	err = peerLink.SendEvent(ctx, "peer1", testEvent)
+	if err != nil {
+		t.Fatalf("Failed to send event: %v", err)
+	}
+
+	// Verify the event was queued
+	queueDepth := peerLink.GetQueueDepth("peer1")
+	if queueDepth != 1 {
+		t.Errorf("Expected queue depth 1, got %d", queueDepth)
+	}
+
+	// TODO: This test will fail until we implement EventStream properly
+	// The EventStream should consume from the queue and send over gRPC
+
+	// Try to create a gRPC client connection to test EventStream
+	// This will fail because EventStream is not implemented yet
+	conn, err := grpc.Dial(peerLink.listener.Addr().String(), grpc.WithInsecure())
+	if err != nil {
+		t.Fatalf("Failed to create gRPC client: %v", err)
+	}
+	defer conn.Close()
+
+	client := peerlinkv1.NewPeerLinkClient(conn)
+
+	// Try to establish EventStream - this should eventually work but will fail now
+	stream, err := client.EventStream(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create EventStream: %v", err)
+	}
+	defer stream.CloseSend()
+
+	// Send a handshake message
+	handshake := &peerlinkv1.PeerMessage{
+		Kind: &peerlinkv1.PeerMessage_Handshake{
+			Handshake: &peerlinkv1.Handshake{
+				NodeId:          "test-client",
+				ProtocolVersion: 100,
+			},
+		},
+	}
+
+	err = stream.Send(handshake)
+	if err != nil {
+		t.Fatalf("Failed to send handshake: %v", err)
+	}
+
+	// Try to receive handshake response - this should now work with basic EventStream
+	response, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("Failed to receive handshake response: %v", err)
+	}
+
+	// Verify handshake response
+	responseHandshake := response.GetHandshake()
+	if responseHandshake == nil {
+		t.Error("Expected handshake response")
+	} else {
+		if responseHandshake.NodeId != "test-node" {
+			t.Errorf("Expected node ID 'test-node', got '%s'", responseHandshake.NodeId)
+		}
+		if responseHandshake.ProtocolVersion != 100 {
+			t.Errorf("Expected protocol version 100, got %d", responseHandshake.ProtocolVersion)
+		}
+		t.Logf("Handshake successful: node=%s, version=%d",
+			responseHandshake.NodeId, responseHandshake.ProtocolVersion)
+	}
+
+	// Now test that the EventStream consumes from send queues
+	// First, verify the peer was registered during handshake
+	if peerLink.GetQueueDepth("test-client") != 0 {
+		t.Errorf("Expected queue depth 0 after handshake, got %d", peerLink.GetQueueDepth("test-client"))
+	}
+
+	// Send an event to the peer
+	testEvent2 := eventlog.NewRecord("test-topic", []byte("test-payload"))
+	err2 := peerLink.SendEvent(ctx, "test-client", testEvent2)
+	if err2 != nil {
+		t.Fatalf("Failed to send event: %v", err2)
+	}
+
+	// The EventStream should consume the message and send it over gRPC quickly
+	eventMsg, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("Failed to receive event message: %v", err)
+	}
+
+	// Verify it's an event message
+	event := eventMsg.GetEvent()
+	if event == nil {
+		t.Error("Expected event message")
+	} else {
+		if event.Topic != "test-topic" {
+			t.Errorf("Expected topic 'test-topic', got '%s'", event.Topic)
+		}
+		if string(event.Payload) != "test-payload" {
+			t.Errorf("Expected payload 'test-payload', got '%s'", string(event.Payload))
+		}
+		t.Logf("Event received: topic=%s, payload=%s", event.Topic, string(event.Payload))
+	}
+
+	// Verify the message was consumed from the queue (should be 0 now)
+	if peerLink.GetQueueDepth("test-client") != 0 {
+		t.Errorf("Expected queue depth 0 after consumption, got %d", peerLink.GetQueueDepth("test-client"))
+	}
+
+	// Close the stream properly to end the test
+	if err := stream.CloseSend(); err != nil {
+		t.Logf("Error closing send stream: %v", err)
+	}
+
+	// Cancel the context to terminate the EventStream goroutine
+	cancel()
+}
+
+// TestGRPCPeerLink_EventStreamHandshakeValidation tests handshake validation errors
+func TestGRPCPeerLink_EventStreamHandshakeValidation(t *testing.T) {
+	config := &Config{
+		NodeID:        "test-node",
+		ListenAddress: "localhost:0",
+	}
+
+	peerLink, err := NewGRPCPeerLink(config)
+	if err != nil {
+		t.Fatalf("Failed to create GRPCPeerLink: %v", err)
+	}
+	defer peerLink.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Start the gRPC server
+	err = peerLink.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start PeerLink: %v", err)
+	}
+	defer peerLink.Stop(ctx)
+
+	// Create gRPC client
+	conn, err := grpc.Dial(peerLink.listener.Addr().String(), grpc.WithInsecure())
+	if err != nil {
+		t.Fatalf("Failed to create gRPC client: %v", err)
+	}
+	defer conn.Close()
+
+	client := peerlinkv1.NewPeerLinkClient(conn)
+
+	t.Run("missing handshake message", func(t *testing.T) {
+		stream, err := client.EventStream(ctx)
+		if err != nil {
+			t.Fatalf("Failed to create EventStream: %v", err)
+		}
+		defer stream.CloseSend()
+
+		// Send non-handshake message first
+		eventMsg := &peerlinkv1.PeerMessage{
+			Kind: &peerlinkv1.PeerMessage_Event{
+				Event: &peerlinkv1.Event{
+					Topic:   "test",
+					Payload: []byte("should fail"),
+				},
+			},
+		}
+
+		err = stream.Send(eventMsg)
+		if err != nil {
+			t.Fatalf("Failed to send event message: %v", err)
+		}
+
+		// Should get error response
+		_, err = stream.Recv()
+		if err == nil {
+			t.Error("Expected error for missing handshake, got none")
+		}
+		if !strings.Contains(err.Error(), "expected handshake message") {
+			t.Errorf("Expected 'expected handshake message' error, got: %v", err)
+		}
+	})
+
+	t.Run("empty peer ID", func(t *testing.T) {
+		stream, err := client.EventStream(ctx)
+		if err != nil {
+			t.Fatalf("Failed to create EventStream: %v", err)
+		}
+		defer stream.CloseSend()
+
+		// Send handshake with empty node ID
+		handshake := &peerlinkv1.PeerMessage{
+			Kind: &peerlinkv1.PeerMessage_Handshake{
+				Handshake: &peerlinkv1.Handshake{
+					NodeId:          "", // Empty node ID
+					ProtocolVersion: ProtocolVersion,
+				},
+			},
+		}
+
+		err = stream.Send(handshake)
+		if err != nil {
+			t.Fatalf("Failed to send handshake: %v", err)
+		}
+
+		// Should get error response
+		_, err = stream.Recv()
+		if err == nil {
+			t.Error("Expected error for empty peer ID, got none")
+		}
+		if !strings.Contains(err.Error(), "peer ID cannot be empty") {
+			t.Errorf("Expected 'peer ID cannot be empty' error, got: %v", err)
+		}
+	})
+}
+
+// TestGRPCPeerLink_EventStreamContextCancellation tests proper cleanup on context cancellation
+func TestGRPCPeerLink_EventStreamContextCancellation(t *testing.T) {
+	config := &Config{
+		NodeID:        "test-node",
+		ListenAddress: "localhost:0",
+	}
+
+	peerLink, err := NewGRPCPeerLink(config)
+	if err != nil {
+		t.Fatalf("Failed to create GRPCPeerLink: %v", err)
+	}
+	defer peerLink.Close()
+
+	// Use a short-lived context that we can cancel
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Start the gRPC server
+	err = peerLink.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start PeerLink: %v", err)
+	}
+	defer peerLink.Stop(ctx)
+
+	// Create gRPC client
+	conn, err := grpc.Dial(peerLink.listener.Addr().String(), grpc.WithInsecure())
+	if err != nil {
+		t.Fatalf("Failed to create gRPC client: %v", err)
+	}
+	defer conn.Close()
+
+	client := peerlinkv1.NewPeerLinkClient(conn)
+
+	// Establish EventStream
+	stream, err := client.EventStream(ctx)
+	if err != nil {
+		t.Fatalf("Failed to create EventStream: %v", err)
+	}
+	defer stream.CloseSend()
+
+	// Send handshake
+	handshake := &peerlinkv1.PeerMessage{
+		Kind: &peerlinkv1.PeerMessage_Handshake{
+			Handshake: &peerlinkv1.Handshake{
+				NodeId:          "test-client",
+				ProtocolVersion: ProtocolVersion,
+			},
+		},
+	}
+
+	err = stream.Send(handshake)
+	if err != nil {
+		t.Fatalf("Failed to send handshake: %v", err)
+	}
+
+	// Receive handshake response
+	_, err = stream.Recv()
+	if err != nil {
+		t.Fatalf("Failed to receive handshake response: %v", err)
+	}
+
+	// Verify peer is registered and healthy
+	healthState, err := peerLink.GetPeerHealth(ctx, "test-client")
+	if err != nil {
+		t.Fatalf("Failed to get peer health: %v", err)
+	}
+	if healthState != peerlink.PeerHealthy {
+		t.Errorf("Expected healthy peer, got %v", healthState)
+	}
+
+	// Cancel the context - this should cause EventStream to exit gracefully
+	cancel()
+
+	// Give the EventStream a moment to process the cancellation
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify peer health was updated to Disconnected
+	// We need a new context since the old one was cancelled
+	newCtx := context.Background()
+	healthState, err = peerLink.GetPeerHealth(newCtx, "test-client")
+	if err != nil {
+		t.Fatalf("Failed to get peer health after cancellation: %v", err)
+	}
+	if healthState != peerlink.PeerDisconnected {
+		t.Errorf("Expected disconnected peer after context cancellation, got %v", healthState)
+	}
+
+	t.Logf("Context cancellation handled correctly - peer marked as disconnected")
 }
