@@ -32,6 +32,21 @@ type peerMetrics struct {
 	failureCount   int                        // Number of consecutive failures
 }
 
+// receivedEventRecord implements eventlog.EventRecord for events received from peers
+type receivedEventRecord struct {
+	topic     string
+	payload   []byte
+	headers   map[string]string
+	offset    int64
+	timestamp time.Time
+}
+
+func (r *receivedEventRecord) Topic() string             { return r.topic }
+func (r *receivedEventRecord) Payload() []byte          { return r.payload }
+func (r *receivedEventRecord) Headers() map[string]string { return r.headers }
+func (r *receivedEventRecord) Offset() int64            { return r.offset }
+func (r *receivedEventRecord) Timestamp() time.Time     { return r.timestamp }
+
 // GRPCPeerLink implements the PeerLink interface using gRPC for peer-to-peer communication
 type GRPCPeerLink struct {
 	peerlinkv1.UnimplementedPeerLinkServer
@@ -44,6 +59,7 @@ type GRPCPeerLink struct {
 	connectedPeers  map[string]peerlink.PeerNode // peerID -> PeerNode
 	sendQueues      map[string]chan queuedMessage // peerID -> send queue
 	metrics         map[string]*peerMetrics       // peerID -> metrics
+	subscribers     map[chan eventlog.EventRecord]bool // active ReceiveEvents channels
 }
 
 // NewGRPCPeerLink creates a new GRPCPeerLink with the given configuration
@@ -63,6 +79,7 @@ func NewGRPCPeerLink(config *Config) (*GRPCPeerLink, error) {
 		connectedPeers: make(map[string]peerlink.PeerNode),
 		sendQueues:     make(map[string]chan queuedMessage),
 		metrics:        make(map[string]*peerMetrics),
+		subscribers:    make(map[chan eventlog.EventRecord]bool),
 	}, nil
 }
 
@@ -190,12 +207,47 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 		g.mu.Unlock()
 	}()
 
-	// Handle ongoing message flow
+	// Handle bidirectional message flow
+	// Start goroutine for receiving messages from peer
+	recvDone := make(chan error, 1)
+	go func() {
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				recvDone <- err
+				return
+			}
+
+			// Handle received event messages
+			if eventMsg := msg.GetEvent(); eventMsg != nil {
+				// Convert protobuf Event to EventRecord and distribute to subscribers
+				g.mu.Lock()
+				if !g.closed {
+					// Create a simple EventRecord implementation for received events
+					receivedEvent := &receivedEventRecord{
+						topic:     eventMsg.Topic,
+						payload:   eventMsg.Payload,
+						headers:   eventMsg.Headers,
+						offset:    eventMsg.Offset,
+						timestamp: time.Now(), // Use current time since protobuf doesn't include timestamp
+					}
+					g.distributeEvent(receivedEvent)
+				}
+				g.mu.Unlock()
+			}
+		}
+	}()
+
+	// Handle outgoing message flow
 	for {
 		select {
 		case <-ctx.Done():
 			// Stream closed
 			return ctx.Err()
+
+		case err := <-recvDone:
+			// Receive goroutine finished (error or stream closed)
+			return err
 
 		case queuedMsg, ok := <-sendQueue:
 			if !ok {
@@ -325,10 +377,31 @@ func (g *GRPCPeerLink) SendEvent(ctx context.Context, peerID string, event event
 
 // ReceiveEvents returns a channel for receiving events from peer nodes
 func (g *GRPCPeerLink) ReceiveEvents(ctx context.Context) (<-chan eventlog.EventRecord, <-chan error) {
-	eventChan := make(chan eventlog.EventRecord)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.closed {
+		errChan := make(chan error, 1)
+		errChan <- errors.New("PeerLink is closed")
+		return nil, errChan
+	}
+
+	// Create channels for this subscriber
+	eventChan := make(chan eventlog.EventRecord, 10) // Small buffer to prevent blocking
 	errChan := make(chan error, 1)
-	close(eventChan)
-	errChan <- errors.New("not implemented")
+
+	// Register this channel as a subscriber
+	g.registerSubscriber(eventChan)
+
+	// Handle cleanup when context is cancelled
+	go func() {
+		<-ctx.Done()
+		g.mu.Lock()
+		g.unregisterSubscriber(eventChan)
+		close(eventChan)
+		g.mu.Unlock()
+	}()
+
 	return eventChan, errChan
 }
 
@@ -372,6 +445,31 @@ func (g *GRPCPeerLink) registerPeer(peerID string) {
 			dropsCount:   0,
 			healthState:  peerlink.PeerHealthy,
 			failureCount: 0,
+		}
+	}
+}
+
+// registerSubscriber adds a channel to the subscriber registry
+// Must be called with mutex held
+func (g *GRPCPeerLink) registerSubscriber(ch chan eventlog.EventRecord) {
+	g.subscribers[ch] = true
+}
+
+// unregisterSubscriber removes a channel from the subscriber registry
+// Must be called with mutex held
+func (g *GRPCPeerLink) unregisterSubscriber(ch chan eventlog.EventRecord) {
+	delete(g.subscribers, ch)
+}
+
+// distributeEvent sends an event to all registered subscribers (non-blocking)
+// Must be called with mutex held
+func (g *GRPCPeerLink) distributeEvent(event eventlog.EventRecord) {
+	for subscriber := range g.subscribers {
+		select {
+		case subscriber <- event:
+			// Event sent successfully
+		default:
+			// Subscriber channel is full - skip this subscriber to avoid blocking
 		}
 	}
 }
