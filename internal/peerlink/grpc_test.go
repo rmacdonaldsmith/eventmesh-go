@@ -1015,47 +1015,10 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 	// Set up receiver to listen for events
 	eventChan, errChan := receiver.ReceiveEvents(ctx)
 
-	// Create gRPC connection from sender to receiver
-	conn, err := grpc.Dial(receiver.listener.Addr().String(), grpc.WithInsecure())
-	if err != nil {
-		t.Fatalf("Failed to connect sender to receiver: %v", err)
-	}
-	defer conn.Close()
-
-	client := peerlinkv1.NewPeerLinkClient(conn)
-
-	// Establish EventStream from sender to receiver
-	stream, err := client.EventStream(ctx)
-	if err != nil {
-		t.Fatalf("Failed to create EventStream: %v", err)
-	}
-	defer stream.CloseSend()
-
-	// Send handshake from sender
-	handshake := &peerlinkv1.PeerMessage{
-		Kind: &peerlinkv1.PeerMessage_Handshake{
-			Handshake: &peerlinkv1.Handshake{
-				NodeId:          "sender-node",
-				ProtocolVersion: ProtocolVersion,
-			},
-		},
-	}
-
-	err = stream.Send(handshake)
-	if err != nil {
-		t.Fatalf("Failed to send handshake: %v", err)
-	}
-
-	// Receive handshake response
-	_, err = stream.Recv()
-	if err != nil {
-		t.Fatalf("Failed to receive handshake response: %v", err)
-	}
-
-	// Now test the bidirectional flow:
-	// 1. Register receiver as a connected peer in sender
-	// 2. Sender calls SendEvent()
-	// 3. Should flow through sender's queue → gRPC stream → receiver's EventStream → receiver's ReceiveEvents()
+	// Test the complete bidirectional flow using the PeerLink API:
+	// 1. Connect() establishes gRPC connection and starts queue consumption
+	// 2. SendEvent() queues event which gets streamed automatically
+	// 3. Event flows: sender queue → gRPC → receiver EventStream → receiver ReceiveEvents
 
 	// Create a mock peer node for the receiver
 	receiverPeer := &simplePeerNode{
@@ -1064,11 +1027,14 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 		healthy: true,
 	}
 
-	// Register receiver as connected peer in sender
+	// Connect sender to receiver - this now establishes full gRPC connection
 	err = sender.Connect(ctx, receiverPeer)
 	if err != nil {
 		t.Fatalf("Failed to connect sender to receiver peer: %v", err)
 	}
+
+	// Small delay to allow gRPC connection to establish
+	time.Sleep(100 * time.Millisecond)
 
 	testEvent := eventlog.NewRecord("test-topic", []byte("hello from sender"))
 

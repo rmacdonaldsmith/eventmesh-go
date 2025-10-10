@@ -60,6 +60,8 @@ type GRPCPeerLink struct {
 	sendQueues      map[string]chan queuedMessage // peerID -> send queue
 	metrics         map[string]*peerMetrics       // peerID -> metrics
 	subscribers     map[chan eventlog.EventRecord]bool // active ReceiveEvents channels
+	outboundConns   map[string]*grpc.ClientConn   // peerID -> outbound gRPC connection
+	outboundCancel  map[string]context.CancelFunc // peerID -> cancel func for connection goroutine
 }
 
 // NewGRPCPeerLink creates a new GRPCPeerLink with the given configuration
@@ -80,6 +82,8 @@ func NewGRPCPeerLink(config *Config) (*GRPCPeerLink, error) {
 		sendQueues:     make(map[string]chan queuedMessage),
 		metrics:        make(map[string]*peerMetrics),
 		subscribers:    make(map[chan eventlog.EventRecord]bool),
+		outboundConns:  make(map[string]*grpc.ClientConn),
+		outboundCancel: make(map[string]context.CancelFunc),
 	}, nil
 }
 
@@ -291,13 +295,117 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 
 	peerID := peer.ID()
 
+	// Check if already connected
+	if _, exists := g.outboundConns[peerID]; exists {
+		return nil // Already connected
+	}
+
 	// Add to connected peers map
 	g.connectedPeers[peerID] = peer
 
 	// Register peer (create queue and metrics)
 	g.registerPeer(peerID)
 
+	// Establish outbound gRPC connection
+	conn, err := grpc.Dial(peer.Address(), grpc.WithInsecure())
+	if err != nil {
+		return err
+	}
+
+	// Store connection
+	g.outboundConns[peerID] = conn
+
+	// Create context for connection goroutine
+	connCtx, cancel := context.WithCancel(context.Background())
+	g.outboundCancel[peerID] = cancel
+
+	// Start goroutine to consume from send queue and stream events
+	go g.runOutboundConnection(connCtx, peerID, conn)
+
 	return nil
+}
+
+// runOutboundConnection handles the outbound gRPC connection to a peer
+// Consumes from the peer's send queue and streams events over gRPC
+func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string, conn *grpc.ClientConn) {
+	defer func() {
+		// Clean up connection on exit
+		conn.Close()
+	}()
+
+	// Create gRPC client
+	client := peerlinkv1.NewPeerLinkClient(conn)
+
+	// Establish EventStream
+	stream, err := client.EventStream(ctx)
+	if err != nil {
+		// TODO: Add proper error handling/reconnection logic
+		return
+	}
+	defer stream.CloseSend()
+
+	// Send handshake
+	handshake := &peerlinkv1.PeerMessage{
+		Kind: &peerlinkv1.PeerMessage_Handshake{
+			Handshake: &peerlinkv1.Handshake{
+				NodeId:          g.config.NodeID,
+				ProtocolVersion: ProtocolVersion,
+			},
+		},
+	}
+
+	if err := stream.Send(handshake); err != nil {
+		// TODO: Add proper error handling
+		return
+	}
+
+	// Receive handshake response
+	_, err = stream.Recv()
+	if err != nil {
+		// TODO: Add proper error handling
+		return
+	}
+
+	// Get the send queue for this peer
+	g.mu.RLock()
+	sendQueue := g.sendQueues[peerID]
+	g.mu.RUnlock()
+
+	// Main loop: consume from queue and stream events
+	for {
+		select {
+		case <-ctx.Done():
+			// Connection cancelled
+			return
+
+		case queuedMsg, ok := <-sendQueue:
+			if !ok {
+				// Send queue closed
+				return
+			}
+
+			// Convert EventRecord to protobuf Event message
+			event := &peerlinkv1.Event{
+				Topic:   queuedMsg.event.Topic(),
+				Payload: queuedMsg.event.Payload(),
+				Headers: queuedMsg.event.Headers(),
+				Offset:  queuedMsg.event.Offset(),
+			}
+
+			// Wrap in PeerMessage
+			peerMsg := &peerlinkv1.PeerMessage{
+				Kind: &peerlinkv1.PeerMessage_Event{
+					Event: event,
+				},
+			}
+
+			// Send over gRPC stream
+			if err := stream.Send(peerMsg); err != nil {
+				// TODO: Add proper error handling/reconnection
+				return
+			}
+		}
+	}
 }
 
 // Disconnect closes the connection to the specified peer node
@@ -311,6 +419,15 @@ func (g *GRPCPeerLink) Disconnect(ctx context.Context, peerID string) error {
 
 	// Remove from connected peers map
 	delete(g.connectedPeers, peerID)
+
+	// Cancel outbound connection goroutine
+	if cancel, exists := g.outboundCancel[peerID]; exists {
+		cancel()
+		delete(g.outboundCancel, peerID)
+	}
+
+	// Clean up outbound connection (will be closed by goroutine defer)
+	delete(g.outboundConns, peerID)
 
 	// Close and remove send queue
 	if queue, exists := g.sendQueues[peerID]; exists {
@@ -516,6 +633,13 @@ func (g *GRPCPeerLink) Close() error {
 		g.listener = nil
 		g.started = false
 	}
+
+	// Cancel all outbound connections
+	for _, cancel := range g.outboundCancel {
+		cancel()
+	}
+	g.outboundCancel = nil
+	g.outboundConns = nil
 
 	g.closed = true
 	return nil
