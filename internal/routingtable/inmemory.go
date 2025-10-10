@@ -13,14 +13,14 @@ import (
 // of the RoutingTable interface for MVP functionality.
 type InMemoryRoutingTable struct {
 	mu           sync.RWMutex
-	subscriptions map[string][]routingtable.Subscriber
+	subscriptions map[string]map[string]routingtable.Subscriber // topic -> subscriberID -> subscriber
 	closed       bool
 }
 
 // NewInMemoryRoutingTable creates a new in-memory routing table
 func NewInMemoryRoutingTable() *InMemoryRoutingTable {
 	return &InMemoryRoutingTable{
-		subscriptions: make(map[string][]routingtable.Subscriber),
+		subscriptions: make(map[string]map[string]routingtable.Subscriber),
 	}
 }
 
@@ -64,15 +64,13 @@ func (rt *InMemoryRoutingTable) Subscribe(ctx context.Context, topic string, sub
 		return errors.New("routing table is closed")
 	}
 
-	// Check if subscriber already exists for this topic to avoid duplicates
-	subscribers := rt.subscriptions[topic]
-	for _, existing := range subscribers {
-		if existing.ID() == subscriber.ID() {
-			return nil // Already subscribed
-		}
+	// Initialize topic map if needed
+	if rt.subscriptions[topic] == nil {
+		rt.subscriptions[topic] = make(map[string]routingtable.Subscriber)
 	}
 
-	rt.subscriptions[topic] = append(subscribers, subscriber)
+	// O(1) duplicate check and insertion
+	rt.subscriptions[topic][subscriber.ID()] = subscriber
 	return nil
 }
 
@@ -85,18 +83,13 @@ func (rt *InMemoryRoutingTable) Unsubscribe(ctx context.Context, topic string, s
 		return errors.New("routing table is closed")
 	}
 
-	subscribers := rt.subscriptions[topic]
-	for i, subscriber := range subscribers {
-		if subscriber.ID() == subscriberID {
-			// Remove subscriber by swapping with last element and truncating
-			subscribers[i] = subscribers[len(subscribers)-1]
-			rt.subscriptions[topic] = subscribers[:len(subscribers)-1]
+	if subscribers := rt.subscriptions[topic]; subscribers != nil {
+		// O(1) removal
+		delete(subscribers, subscriberID)
 
-			// Remove topic entry if no subscribers left
-			if len(rt.subscriptions[topic]) == 0 {
-				delete(rt.subscriptions, topic)
-			}
-			return nil
+		// Remove topic entry if no subscribers left
+		if len(subscribers) == 0 {
+			delete(rt.subscriptions, topic)
 		}
 	}
 
@@ -117,13 +110,17 @@ func (rt *InMemoryRoutingTable) GetSubscribers(ctx context.Context, topic string
 
 	// 1. Add exact match subscribers
 	if exactSubs := rt.subscriptions[topic]; len(exactSubs) > 0 {
-		result = append(result, exactSubs...)
+		for _, subscriber := range exactSubs {
+			result = append(result, subscriber)
+		}
 	}
 
 	// 2. Check all subscription patterns for wildcard matches
 	for pattern, subs := range rt.subscriptions {
 		if pattern != topic && matchesPattern(pattern, topic) {
-			result = append(result, subs...)
+			for _, subscriber := range subs {
+				result = append(result, subscriber)
+			}
 		}
 	}
 
@@ -147,8 +144,8 @@ func (rt *InMemoryRoutingTable) GetAllSubscriptions(ctx context.Context) ([]rout
 	}
 
 	var subscriptions []routingtable.Subscription
-	for topic, subscribers := range rt.subscriptions {
-		for _, subscriber := range subscribers {
+	for topic, subscriberMap := range rt.subscriptions {
+		for _, subscriber := range subscriberMap {
 			subscriptions = append(subscriptions, routingtable.Subscription{
 				Topic:      topic,
 				Subscriber: subscriber,
@@ -169,25 +166,20 @@ func (rt *InMemoryRoutingTable) RebuildFromGossip(ctx context.Context, subscript
 	}
 
 	// Clear existing subscriptions
-	rt.subscriptions = make(map[string][]routingtable.Subscriber)
+	rt.subscriptions = make(map[string]map[string]routingtable.Subscriber)
 
 	// Add all subscriptions from gossip data
 	for _, subscription := range subscriptions {
 		topic := subscription.Topic
 		subscriber := subscription.Subscriber
 
-		// Check for duplicates
-		found := false
-		for _, existing := range rt.subscriptions[topic] {
-			if existing.ID() == subscriber.ID() {
-				found = true
-				break
-			}
+		// Initialize topic map if needed
+		if rt.subscriptions[topic] == nil {
+			rt.subscriptions[topic] = make(map[string]routingtable.Subscriber)
 		}
 
-		if !found {
-			rt.subscriptions[topic] = append(rt.subscriptions[topic], subscriber)
-		}
+		// O(1) insertion (duplicates are automatically handled by map)
+		rt.subscriptions[topic][subscriber.ID()] = subscriber
 	}
 
 	return nil
@@ -215,8 +207,8 @@ func (rt *InMemoryRoutingTable) GetSubscriberCount(ctx context.Context) (int, er
 	}
 
 	count := 0
-	for _, subscribers := range rt.subscriptions {
-		count += len(subscribers)
+	for _, subscriberMap := range rt.subscriptions {
+		count += len(subscriberMap)
 	}
 
 	return count, nil
