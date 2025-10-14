@@ -513,4 +513,74 @@ func TestStreamEvents(t *testing.T) {
 			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, status, rr.Body.String())
 		}
 	})
+
+	t.Run("topic_parameter_parsing", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("test-sse-client", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Test valid topic parameter
+		req, err := http.NewRequest("GET", "/api/v1/events/stream?topic=test.events", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		// Add claims to context (simulating middleware)
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Execute request
+		rr := httptest.NewRecorder()
+		handlers.StreamEvents(rr, req)
+
+		// Should succeed with valid topic
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("Expected status %d for valid topic, got %d. Body: %s", http.StatusOK, status, rr.Body.String())
+		}
+
+		// Response should include confirmation of topic filter
+		body := rr.Body.String()
+		if !strings.Contains(body, "test.events") {
+			t.Errorf("Expected response to mention topic 'test.events', got: %s", body)
+		}
+	})
+
+	t.Run("invalid_topic_parameter", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("test-sse-client", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Test invalid topic parameter (empty)
+		req, err := http.NewRequest("GET", "/api/v1/events/stream?topic=", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		// Add claims to context (simulating middleware)
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Execute request
+		rr := httptest.NewRecorder()
+		handlers.StreamEvents(rr, req)
+
+		// Should fail with bad request for invalid topic
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Errorf("Expected status %d for invalid topic, got %d", http.StatusBadRequest, status)
+		}
+	})
 }

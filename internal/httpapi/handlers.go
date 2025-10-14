@@ -164,6 +164,18 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Parse topic query parameter
+	topicFilter := r.URL.Query().Get("topic")
+	hasTopicParam := r.URL.Query().Has("topic")
+
+	if hasTopicParam {
+		// Validate topic filter using existing validation
+		if err := h.validateTopic(topicFilter); err != nil {
+			h.writeError(w, fmt.Sprintf("Invalid topic filter: %v", err), http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -173,9 +185,12 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	// Send success status
 	w.WriteHeader(http.StatusOK)
 
-	// For now, just send a basic comment and return
-	// This will be expanded in subsequent steps
-	w.Write([]byte(": SSE connection established\n\n"))
+	// Send connection established message with topic info
+	if hasTopicParam && topicFilter != "" {
+		w.Write([]byte(fmt.Sprintf(": SSE connection established for topic: %s\n\n", topicFilter)))
+	} else {
+		w.Write([]byte(": SSE connection established for all topics\n\n"))
+	}
 }
 
 // Subscription endpoints
