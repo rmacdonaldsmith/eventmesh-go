@@ -36,3 +36,11 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Backup files
+*.backup
+*.bak
+*~
+
+# Generated protobuf files (uncomment if you prefer to regenerate them)
+# proto/**/*.pb.go
