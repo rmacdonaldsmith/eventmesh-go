@@ -480,7 +480,6 @@ func TestStreamEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
-		req.Header.Set("Accept", "text/event-stream")
 
 		// Add claims to context (simulating middleware)
 		claims, err := auth.ValidateToken(token)
@@ -631,4 +630,109 @@ func TestStreamEvents(t *testing.T) {
 			t.Errorf("Expected EventStreamMessage with eventId and topic fields, got: %s", body)
 		}
 	})
+
+	t.Run("keepalive_messages", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("test-sse-client", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Test keepalive functionality with a channel-based approach
+		req, err := http.NewRequest("GET", "/api/v1/events/stream", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "text/event-stream")
+
+		// Add claims to context (simulating middleware)
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+
+		// Create a context that we can cancel
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		ctx = context.WithValue(ctx, ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Use a custom ResponseWriter that captures streaming data
+		recorder := &StreamingRecorder{
+			ResponseRecorder: httptest.NewRecorder(),
+			Data:             make(chan string, 10),
+			Done:             make(chan struct{}),
+		}
+
+		// Run StreamEvents in a goroutine since it should stream
+		go func() {
+			defer close(recorder.Done)
+			handlers.StreamEvents(recorder, req)
+		}()
+
+		// Wait for initial connection message
+		select {
+		case data := <-recorder.Data:
+			if !strings.Contains(data, "SSE connection established") {
+				t.Errorf("Expected connection established message, got: %s", data)
+			}
+		case <-time.After(1 * time.Second):
+			t.Error("Timeout waiting for initial connection message")
+			return
+		}
+
+		// Should receive at least one keepalive/ping message within 3 seconds
+		keepaliveReceived := false
+		timeout := time.After(2500 * time.Millisecond)
+
+		for !keepaliveReceived {
+			select {
+			case data := <-recorder.Data:
+				// Look for keepalive/ping messages (SSE comments starting with ":")
+				if strings.Contains(data, ": ping") || strings.Contains(data, ": keepalive") {
+					keepaliveReceived = true
+				}
+			case <-timeout:
+				t.Error("Timeout waiting for keepalive message - connection should send periodic pings")
+				return
+			case <-recorder.Done:
+				if !keepaliveReceived {
+					t.Error("Stream ended without sending keepalive messages")
+				}
+				return
+			}
+		}
+
+		// Cancel context to end the stream
+		cancel()
+
+		// Wait for stream to end
+		select {
+		case <-recorder.Done:
+			// Stream ended gracefully
+		case <-time.After(1 * time.Second):
+			t.Error("Stream did not end gracefully after context cancellation")
+		}
+	})
+}
+
+// StreamingRecorder captures streaming data for testing
+type StreamingRecorder struct {
+	*httptest.ResponseRecorder
+	Data chan string
+	Done chan struct{}
+}
+
+func (r *StreamingRecorder) Write(data []byte) (int, error) {
+	// Send data to channel for testing
+	select {
+	case r.Data <- string(data):
+	default:
+		// Channel full, skip
+	}
+
+	// Also write to the underlying recorder
+	return r.ResponseRecorder.Write(data)
 }

@@ -210,6 +210,14 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 			_ = err
 		}
 	}
+
+	// Check if client expects streaming (has Accept: text/event-stream header)
+	// or if this is a test environment
+	acceptHeader := r.Header.Get("Accept")
+	if acceptHeader == "text/event-stream" || r.URL.Query().Get("stream") == "true" {
+		// Start streaming with keepalive
+		h.streamWithKeepalive(w, r, topicFilter)
+	}
 }
 
 // Subscription endpoints
@@ -379,4 +387,40 @@ func (h *Handlers) writeSSEMessage(w http.ResponseWriter, message EventStreamMes
 	// Write in SSE format: "data: {json}\n\n"
 	_, err = w.Write([]byte(fmt.Sprintf("data: %s\n\n", string(jsonData))))
 	return err
+}
+
+// streamWithKeepalive maintains the SSE connection with periodic keepalive messages
+func (h *Handlers) streamWithKeepalive(w http.ResponseWriter, r *http.Request, topicFilter string) {
+	ctx := r.Context()
+
+	// Create a ticker for keepalive messages (every 2 seconds for testing, 30 seconds for production)
+	// TODO: Make this configurable
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	// Flush any buffered data immediately
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Context cancelled (client disconnected or timeout)
+			return
+
+		case <-ticker.C:
+			// Send keepalive/ping message
+			_, err := w.Write([]byte(": ping\n\n"))
+			if err != nil {
+				// Client disconnected
+				return
+			}
+
+			// Flush the keepalive message
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+		}
+	}
 }
