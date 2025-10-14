@@ -97,6 +97,8 @@ eventmesh-go/
 5. **Validation Before Commit:**
 
    ```bash
+   make        # Recommended: runs fmt + vet + test + build
+   # OR
    go fmt ./... && go vet ./... && go test ./...
    ```
 
@@ -107,18 +109,26 @@ eventmesh-go/
 ## 🧰 5. Build & Test Commands
 
 ```bash
-# Build the server binary
+# Use Makefile (recommended)
+make help           # Show all available targets
+make                # Run full pipeline: fmt + vet + test + build
+make build          # Build server binary to bin/eventmesh
+make test           # Run all tests with coverage
+make test-coverage  # Generate detailed HTML coverage report
+make fmt            # Format Go code
+make vet            # Run go vet static analysis
+make clean          # Remove build artifacts
+make run            # Build and start development server
+
+# Direct Go commands (if needed)
 go build -o bin/eventmesh ./cmd/eventmesh
-
-# Run all tests
 go test ./... -v
-
-# Test coverage
 go test ./... -cover
-
-# Format and lint
 go fmt ./...
 go vet ./...
+
+# Advanced linting (optional)
+golangci-lint run   # Comprehensive linting (43 minor issues as of latest)
 ```
 
 Tests are organized by concern:
@@ -193,10 +203,16 @@ var _ EventLog = (*InMemoryEventLog)(nil)
 go test ./internal/meshnode -v -run TestGRPCMeshNode_AuthenticateClient
 
 # Clean & rebuild
+make clean && make build
+# OR
 go clean ./... && go build ./...
 
 # Fix import issues
 go mod tidy && go mod verify
+
+# Check code quality
+make fmt && make vet
+golangci-lint run  # Shows 43 minor style issues (non-critical)
 ```
 
 ---
