@@ -113,23 +113,23 @@ func TestInMemoryRoutingTable_ComplexWildcardPatterns(t *testing.T) {
 	subscriber := routingtable.NewLocalSubscriber("client-1")
 
 	testCases := []struct {
-		pattern     string
-		shouldMatch []string
+		pattern        string
+		shouldMatch    []string
 		shouldNotMatch []string
 	}{
 		{
-			pattern:     "*.created",
-			shouldMatch: []string{"orders.created", "user.created", "inventory.created"},
+			pattern:        "*.created",
+			shouldMatch:    []string{"orders.created", "user.created", "inventory.created"},
 			shouldNotMatch: []string{"orders.updated", "orders.created.v2", "created"},
 		},
 		{
-			pattern:     "orders.*.event",
-			shouldMatch: []string{"orders.payment.event", "orders.shipping.event"},
+			pattern:        "orders.*.event",
+			shouldMatch:    []string{"orders.payment.event", "orders.shipping.event"},
 			shouldNotMatch: []string{"orders.created", "inventory.payment.event", "orders.payment.event.v2"},
 		},
 		{
-			pattern:     "*",
-			shouldMatch: []string{"orders", "users", "inventory"},
+			pattern:        "*",
+			shouldMatch:    []string{"orders", "users", "inventory"},
 			shouldNotMatch: []string{"orders.created", "users.updated"},
 		},
 	}

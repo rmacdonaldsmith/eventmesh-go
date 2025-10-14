@@ -27,9 +27,9 @@ type queuedMessage struct {
 
 // peerMetrics tracks basic metrics per peer
 type peerMetrics struct {
-	dropsCount     int64                      // Number of dropped messages due to queue full
-	healthState    peerlink.PeerHealthState   // Current health state
-	failureCount   int                        // Number of consecutive failures
+	dropsCount   int64                    // Number of dropped messages due to queue full
+	healthState  peerlink.PeerHealthState // Current health state
+	failureCount int                      // Number of consecutive failures
 }
 
 // receivedEventRecord implements eventlog.EventRecord for events received from peers
@@ -41,27 +41,27 @@ type receivedEventRecord struct {
 	timestamp time.Time
 }
 
-func (r *receivedEventRecord) Topic() string             { return r.topic }
-func (r *receivedEventRecord) Payload() []byte          { return r.payload }
+func (r *receivedEventRecord) Topic() string              { return r.topic }
+func (r *receivedEventRecord) Payload() []byte            { return r.payload }
 func (r *receivedEventRecord) Headers() map[string]string { return r.headers }
-func (r *receivedEventRecord) Offset() int64            { return r.offset }
-func (r *receivedEventRecord) Timestamp() time.Time     { return r.timestamp }
+func (r *receivedEventRecord) Offset() int64              { return r.offset }
+func (r *receivedEventRecord) Timestamp() time.Time       { return r.timestamp }
 
 // GRPCPeerLink implements the PeerLink interface using gRPC for peer-to-peer communication
 type GRPCPeerLink struct {
 	peerlinkv1.UnimplementedPeerLinkServer
-	config          *Config
-	closed          bool
-	mu              sync.RWMutex
-	grpcServer      *grpc.Server
-	listener        net.Listener
-	started         bool
-	connectedPeers  map[string]peerlink.PeerNode // peerID -> PeerNode
-	sendQueues      map[string]chan queuedMessage // peerID -> send queue
-	metrics         map[string]*peerMetrics       // peerID -> metrics
-	subscribers     map[chan eventlog.EventRecord]bool // active ReceiveEvents channels
-	outboundConns   map[string]*grpc.ClientConn   // peerID -> outbound gRPC connection
-	outboundCancel  map[string]context.CancelFunc // peerID -> cancel func for connection goroutine
+	config         *Config
+	closed         bool
+	mu             sync.RWMutex
+	grpcServer     *grpc.Server
+	listener       net.Listener
+	started        bool
+	connectedPeers map[string]peerlink.PeerNode       // peerID -> PeerNode
+	sendQueues     map[string]chan queuedMessage      // peerID -> send queue
+	metrics        map[string]*peerMetrics            // peerID -> metrics
+	subscribers    map[chan eventlog.EventRecord]bool // active ReceiveEvents channels
+	outboundConns  map[string]*grpc.ClientConn        // peerID -> outbound gRPC connection
+	outboundCancel map[string]context.CancelFunc      // peerID -> cancel func for connection goroutine
 }
 
 // NewGRPCPeerLink creates a new GRPCPeerLink with the given configuration
@@ -669,11 +669,11 @@ func (g *GRPCPeerLink) GetDropsCount(peerID string) int64 {
 
 // PeerMetrics represents metrics for a single peer
 type PeerMetrics struct {
-	PeerID       string          `json:"peer_id"`
-	QueueDepth   int             `json:"queue_depth"`
-	DropsCount   int64           `json:"drops_count"`
+	PeerID       string                   `json:"peer_id"`
+	QueueDepth   int                      `json:"queue_depth"`
+	DropsCount   int64                    `json:"drops_count"`
 	HealthState  peerlink.PeerHealthState `json:"health_state"`
-	FailureCount int             `json:"failure_count"`
+	FailureCount int                      `json:"failure_count"`
 }
 
 // GetAllPeerMetrics returns metrics for all peers

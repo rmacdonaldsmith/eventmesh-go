@@ -127,7 +127,7 @@ func TestInMemoryRoutingTable_GetTopicCount(t *testing.T) {
 	local2 := routingtable.NewLocalSubscriber("client-2")
 
 	rt.Subscribe(ctx, "orders.created", local1)
-	rt.Subscribe(ctx, "orders.created", local2) // Same topic
+	rt.Subscribe(ctx, "orders.created", local2)    // Same topic
 	rt.Subscribe(ctx, "inventory.updated", local1) // Different topic
 
 	count, err = rt.GetTopicCount(ctx)

@@ -17,12 +17,12 @@
 //   - Client connections: For handling publisher/subscriber clients
 //
 // Architecture:
-//   1. Clients connect to MeshNode and authenticate
-//   2. Clients publish events or subscribe to topics
-//   3. MeshNode persists events locally first (REQ-MNODE-002)
-//   4. MeshNode uses RoutingTable to find interested subscribers
-//   5. MeshNode uses PeerLink to forward events to remote subscribers
-//   6. MeshNode propagates subscription changes via gossip (REQ-MNODE-003)
+//  1. Clients connect to MeshNode and authenticate
+//  2. Clients publish events or subscribe to topics
+//  3. MeshNode persists events locally first (REQ-MNODE-002)
+//  4. MeshNode uses RoutingTable to find interested subscribers
+//  5. MeshNode uses PeerLink to forward events to remote subscribers
+//  6. MeshNode propagates subscription changes via gossip (REQ-MNODE-003)
 //
 // The interfaces use Go idioms:
 //   - context.Context for cancellation and timeouts

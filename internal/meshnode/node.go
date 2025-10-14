@@ -524,13 +524,13 @@ func (n *GRPCMeshNode) GetHealth(ctx context.Context) (meshnode.HealthStatus, er
 	}
 
 	return meshnode.HealthStatus{
-		Healthy:              overallHealthy,
-		EventLogHealthy:      eventLogHealthy,
-		RoutingTableHealthy:  routingTableHealthy,
-		PeerLinkHealthy:      peerLinkHealthy,
-		ConnectedClients:     len(n.clients),
-		ConnectedPeers:       len(peers),
-		Message:              message,
+		Healthy:             overallHealthy,
+		EventLogHealthy:     eventLogHealthy,
+		RoutingTableHealthy: routingTableHealthy,
+		PeerLinkHealthy:     peerLinkHealthy,
+		ConnectedClients:    len(n.clients),
+		ConnectedPeers:      len(peers),
+		Message:             message,
 	}, nil
 }
 

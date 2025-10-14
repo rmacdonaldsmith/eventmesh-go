@@ -23,12 +23,12 @@ const (
 func main() {
 	// Command-line flags
 	var (
-		nodeID       = flag.String("node-id", getDefaultNodeID(), "Unique node identifier")
-		listenAddr   = flag.String("listen", ":8080", "Listen address for client connections")
-		peerAddr     = flag.String("peer-listen", ":9090", "Listen address for peer connections")
-		connectPeer  = flag.String("connect-peer", "", "Address of peer node to connect to (optional)")
-		showVersion  = flag.Bool("version", false, "Show version and exit")
-		showHealth   = flag.Bool("health", false, "Show health status and exit")
+		nodeID      = flag.String("node-id", getDefaultNodeID(), "Unique node identifier")
+		listenAddr  = flag.String("listen", ":8080", "Listen address for client connections")
+		peerAddr    = flag.String("peer-listen", ":9090", "Listen address for peer connections")
+		connectPeer = flag.String("connect-peer", "", "Address of peer node to connect to (optional)")
+		showVersion = flag.Bool("version", false, "Show version and exit")
+		showHealth  = flag.Bool("health", false, "Show health status and exit")
 	)
 	flag.Parse()
 

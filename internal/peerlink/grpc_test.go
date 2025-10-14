@@ -324,8 +324,8 @@ func TestGRPCPeerLink_ReceiveEvents(t *testing.T) {
 // TestGRPCPeerLink_BoundedQueue tests bounded send queue functionality
 func TestGRPCPeerLink_BoundedQueue(t *testing.T) {
 	config := testConfig()
-	config.SendQueueSize = 2                      // Small queue for testing
-	config.SendTimeout = 100 * time.Millisecond  // Fast timeout for testing
+	config.SendQueueSize = 2                    // Small queue for testing
+	config.SendTimeout = 100 * time.Millisecond // Fast timeout for testing
 
 	peerLink, err := NewGRPCPeerLink(config)
 	if err != nil {

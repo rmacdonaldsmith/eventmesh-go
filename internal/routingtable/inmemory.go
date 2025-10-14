@@ -12,9 +12,9 @@ import (
 // InMemoryRoutingTable provides a simple thread-safe in-memory implementation
 // of the RoutingTable interface for MVP functionality.
 type InMemoryRoutingTable struct {
-	mu           sync.RWMutex
+	mu            sync.RWMutex
 	subscriptions map[string]map[string]routingtable.Subscriber // topic -> subscriberID -> subscriber
-	closed       bool
+	closed        bool
 }
 
 // NewInMemoryRoutingTable creates a new in-memory routing table
