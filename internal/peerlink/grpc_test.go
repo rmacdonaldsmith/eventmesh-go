@@ -10,6 +10,7 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 	peerlinkv1 "github.com/rmacdonaldsmith/eventmesh-go/proto/peerlink/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // TestGRPCPeerLink_InterfaceCompliance verifies that GRPCPeerLink implements the PeerLink interface
@@ -687,7 +688,7 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 
 	// Try to create a gRPC client connection to test EventStream
 	// This will fail because EventStream is not implemented yet
-	conn, err := grpc.Dial(peerLink.listener.Addr().String(), grpc.WithInsecure())
+	conn, err := grpc.NewClient(peerLink.listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC client: %v", err)
 	}
@@ -809,7 +810,7 @@ func TestGRPCPeerLink_EventStreamHandshakeValidation(t *testing.T) {
 	defer peerLink.Stop(ctx)
 
 	// Create gRPC client
-	conn, err := grpc.Dial(peerLink.listener.Addr().String(), grpc.WithInsecure())
+	conn, err := grpc.NewClient(peerLink.listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC client: %v", err)
 	}
@@ -907,7 +908,7 @@ func TestGRPCPeerLink_EventStreamContextCancellation(t *testing.T) {
 	defer peerLink.Stop(ctx)
 
 	// Create gRPC client
-	conn, err := grpc.Dial(peerLink.listener.Addr().String(), grpc.WithInsecure())
+	conn, err := grpc.NewClient(peerLink.listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC client: %v", err)
 	}

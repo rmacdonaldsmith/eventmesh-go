@@ -11,6 +11,7 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 	peerlinkv1 "github.com/rmacdonaldsmith/eventmesh-go/proto/peerlink/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -307,7 +308,7 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 	g.registerPeer(peerID)
 
 	// Establish outbound gRPC connection
-	conn, err := grpc.Dial(peer.Address(), grpc.WithInsecure())
+	conn, err := grpc.NewClient(peer.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return err
 	}
