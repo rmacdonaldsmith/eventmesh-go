@@ -157,8 +157,25 @@ func (h *Handlers) PublishEvent(w http.ResponseWriter, r *http.Request) {
 
 // StreamEvents handles GET /api/v1/events/stream
 func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Task 103
-	h.writeError(w, "Not implemented yet - will be implemented in Task 103", http.StatusNotImplemented)
+	// Get authenticated client from context
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// Set SSE headers
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Send success status
+	w.WriteHeader(http.StatusOK)
+
+	// For now, just send a basic comment and return
+	// This will be expanded in subsequent steps
+	w.Write([]byte(": SSE connection established\n\n"))
 }
 
 // Subscription endpoints

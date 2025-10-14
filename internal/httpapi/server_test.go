@@ -444,3 +444,73 @@ func TestErrorHelpers(t *testing.T) {
 		}
 	})
 }
+
+// TestStreamEvents tests the GET /api/v1/events/stream SSE endpoint
+func TestStreamEvents(t *testing.T) {
+	// Create a test mesh node config
+	config := meshnode.NewConfig("test-node", "localhost:8080")
+
+	// Create mesh node
+	node, err := meshnode.NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Failed to create mesh node: %v", err)
+	}
+	defer node.Close()
+
+	// Start the mesh node
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Failed to start mesh node: %v", err)
+	}
+
+	// Create handlers
+	auth := NewJWTAuth("sse-test-secret")
+	handlers := NewHandlers(node, auth)
+
+	t.Run("basic_sse_connection", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("test-sse-client", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Create test request
+		req, err := http.NewRequest("GET", "/api/v1/events/stream", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "text/event-stream")
+
+		// Add claims to context (simulating middleware)
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Execute request
+		rr := httptest.NewRecorder()
+		handlers.StreamEvents(rr, req)
+
+		// Verify SSE response headers
+		if contentType := rr.Header().Get("Content-Type"); contentType != "text/event-stream" {
+			t.Errorf("Expected Content-Type 'text/event-stream', got '%s'", contentType)
+		}
+		if cacheControl := rr.Header().Get("Cache-Control"); cacheControl != "no-cache" {
+			t.Errorf("Expected Cache-Control 'no-cache', got '%s'", cacheControl)
+		}
+		if connection := rr.Header().Get("Connection"); connection != "keep-alive" {
+			t.Errorf("Expected Connection 'keep-alive', got '%s'", connection)
+		}
+		if accessControl := rr.Header().Get("Access-Control-Allow-Origin"); accessControl != "*" {
+			t.Errorf("Expected Access-Control-Allow-Origin '*', got '%s'", accessControl)
+		}
+
+		// Verify response status
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, status, rr.Body.String())
+		}
+	})
+}
