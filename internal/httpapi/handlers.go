@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,12 +9,14 @@ import (
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/meshnode"
 	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
+	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
 
 // HTTPClient represents an HTTP API client for the MeshNode
 type HTTPClient struct {
 	clientID        string
 	isAuthenticated bool
+	eventChan       chan eventlogpkg.EventRecord // Channel for receiving events (for SSE streaming)
 }
 
 // NewHTTPClient creates a new HTTP client from JWT claims
@@ -21,6 +24,7 @@ func NewHTTPClient(claims *JWTClaims) *HTTPClient {
 	return &HTTPClient{
 		clientID:        claims.ClientID,
 		isAuthenticated: true,
+		eventChan:       make(chan eventlogpkg.EventRecord, 100), // Buffered channel like TrustedClient
 	}
 }
 
@@ -32,6 +36,29 @@ func (c *HTTPClient) ID() string {
 // IsAuthenticated returns whether the client is properly authenticated
 func (c *HTTPClient) IsAuthenticated() bool {
 	return c.isAuthenticated
+}
+
+// Type returns the subscriber type for routing table integration
+func (c *HTTPClient) Type() routingtable.SubscriberType {
+	return routingtable.LocalClient
+}
+
+// DeliverEvent delivers an event to this client (for SSE streaming)
+// This method is called by MeshNode when events need to be delivered to local subscribers
+func (c *HTTPClient) DeliverEvent(event eventlogpkg.EventRecord) {
+	// Try to send to channel (non-blocking)
+	select {
+	case c.eventChan <- event:
+		// Event delivered successfully
+	default:
+		// Channel is full, skip (in production, we'd handle this better)
+		// TODO: Add logging or metrics for dropped events
+	}
+}
+
+// GetEventChannel returns the channel for receiving events (for SSE streaming)
+func (c *HTTPClient) GetEventChannel() <-chan eventlogpkg.EventRecord {
+	return c.eventChan
 }
 
 // Handlers contains all HTTP request handlers
@@ -185,38 +212,78 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	// Send success status
 	w.WriteHeader(http.StatusOK)
 
-	// Send connection established message with topic info
-	if hasTopicParam && topicFilter != "" {
-		w.Write([]byte(fmt.Sprintf(": SSE connection established for topic: %s\n\n", topicFilter)))
-	} else {
-		w.Write([]byte(": SSE connection established for all topics\n\n"))
-	}
-
-	// For testing purposes, send a sample event message in proper SSE format
-	// This will be replaced with real event streaming in subsequent steps
-	if hasTopicParam && topicFilter != "" {
-		// Create a sample EventStreamMessage
-		sampleEvent := EventStreamMessage{
-			EventID:   fmt.Sprintf("%s-sample-123", topicFilter),
-			Topic:     topicFilter,
-			Payload:   map[string]interface{}{"message": "Sample event for testing SSE format"},
-			Timestamp: time.Now(),
-			Offset:    1,
-		}
-
-		// Send as SSE data message
-		if err := h.writeSSEMessage(w, sampleEvent); err != nil {
-			// Log error but don't fail the connection
-			_ = err
-		}
-	}
-
 	// Check if client expects streaming (has Accept: text/event-stream header)
 	// or if this is a test environment
 	acceptHeader := r.Header.Get("Accept")
 	if acceptHeader == "text/event-stream" || r.URL.Query().Get("stream") == "true" {
+		// For streaming clients, set up subscription BEFORE sending connection message
+		// Create HTTP client for MeshNode subscription
+		client := NewHTTPClient(claims)
+
+		// If we have a topic filter, subscribe to it in the MeshNode FIRST
+		if hasTopicParam && topicFilter != "" {
+			err := h.meshNode.Subscribe(r.Context(), client, topicFilter)
+			if err != nil {
+				h.writeError(w, fmt.Sprintf("Failed to subscribe to topic: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Send connection established message with topic info AFTER subscription is set up
+		if hasTopicParam && topicFilter != "" {
+			w.Write([]byte(fmt.Sprintf(": SSE connection established for topic: %s\n\n", topicFilter)))
+		} else {
+			w.Write([]byte(": SSE connection established for all topics\n\n"))
+		}
+
+		// For testing purposes, send a sample event message in proper SSE format
+		// This will be replaced with real event streaming in subsequent steps
+		if hasTopicParam && topicFilter != "" {
+			// Create a sample EventStreamMessage
+			sampleEvent := EventStreamMessage{
+				EventID:   fmt.Sprintf("%s-sample-123", topicFilter),
+				Topic:     topicFilter,
+				Payload:   map[string]interface{}{"message": "Sample event for testing SSE format"},
+				Timestamp: time.Now(),
+				Offset:    1,
+			}
+
+			// Send as SSE data message
+			if err := h.writeSSEMessage(w, sampleEvent); err != nil {
+				// Log error but don't fail the connection
+				_ = err
+			}
+		}
+
 		// Start streaming with keepalive
-		h.streamWithKeepalive(w, r, topicFilter)
+		h.streamWithKeepalive(w, r, topicFilter, client)
+	} else {
+		// For non-streaming clients, just send connection message and sample event
+		// Send connection established message with topic info
+		if hasTopicParam && topicFilter != "" {
+			w.Write([]byte(fmt.Sprintf(": SSE connection established for topic: %s\n\n", topicFilter)))
+		} else {
+			w.Write([]byte(": SSE connection established for all topics\n\n"))
+		}
+
+		// For testing purposes, send a sample event message in proper SSE format
+		// This will be replaced with real event streaming in subsequent steps
+		if hasTopicParam && topicFilter != "" {
+			// Create a sample EventStreamMessage
+			sampleEvent := EventStreamMessage{
+				EventID:   fmt.Sprintf("%s-sample-123", topicFilter),
+				Topic:     topicFilter,
+				Payload:   map[string]interface{}{"message": "Sample event for testing SSE format"},
+				Timestamp: time.Now(),
+				Offset:    1,
+			}
+
+			// Send as SSE data message
+			if err := h.writeSSEMessage(w, sampleEvent); err != nil {
+				// Log error but don't fail the connection
+				_ = err
+			}
+		}
 	}
 }
 
@@ -389,8 +456,8 @@ func (h *Handlers) writeSSEMessage(w http.ResponseWriter, message EventStreamMes
 	return err
 }
 
-// streamWithKeepalive maintains the SSE connection with periodic keepalive messages
-func (h *Handlers) streamWithKeepalive(w http.ResponseWriter, r *http.Request, topicFilter string) {
+// streamWithKeepalive maintains the SSE connection with periodic keepalive messages and event delivery
+func (h *Handlers) streamWithKeepalive(w http.ResponseWriter, r *http.Request, topicFilter string, client *HTTPClient) {
 	ctx := r.Context()
 
 	// Create a ticker for keepalive messages (every 2 seconds for testing, 30 seconds for production)
@@ -403,21 +470,70 @@ func (h *Handlers) streamWithKeepalive(w http.ResponseWriter, r *http.Request, t
 		flusher.Flush()
 	}
 
+	// Get the event channel from the client
+	eventChan := client.GetEventChannel()
+
 	for {
 		select {
 		case <-ctx.Done():
 			// Context cancelled (client disconnected or timeout)
+			// Unsubscribe from MeshNode if we had a subscription
+			if topicFilter != "" {
+				// Use background context for cleanup since request context is cancelled
+				cleanupCtx := context.Background()
+				h.meshNode.Unsubscribe(cleanupCtx, client, topicFilter)
+			}
 			return
 
 		case <-ticker.C:
 			// Send keepalive/ping message
 			_, err := w.Write([]byte(": ping\n\n"))
 			if err != nil {
-				// Client disconnected
+				// Client disconnected, cleanup subscription
+				if topicFilter != "" {
+					cleanupCtx := context.Background()
+					h.meshNode.Unsubscribe(cleanupCtx, client, topicFilter)
+				}
 				return
 			}
 
 			// Flush the keepalive message
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+
+		case event := <-eventChan:
+			// Received an event from MeshNode, forward it to SSE client
+			// Convert EventRecord to EventStreamMessage
+			var payload interface{}
+			if event.Payload() != nil {
+				// Try to unmarshal payload as JSON
+				err := json.Unmarshal(event.Payload(), &payload)
+				if err != nil {
+					// If not valid JSON, send as string
+					payload = string(event.Payload())
+				}
+			}
+
+			sseMessage := EventStreamMessage{
+				EventID:   fmt.Sprintf("%s-%d", event.Topic(), event.Offset()),
+				Topic:     event.Topic(),
+				Payload:   payload,
+				Timestamp: event.Timestamp(),
+				Offset:    event.Offset(),
+			}
+
+			// Send the event via SSE
+			if err := h.writeSSEMessage(w, sseMessage); err != nil {
+				// Client disconnected, cleanup subscription
+				if topicFilter != "" {
+					cleanupCtx := context.Background()
+					h.meshNode.Unsubscribe(cleanupCtx, client, topicFilter)
+				}
+				return
+			}
+
+			// Flush the event message
 			if flusher, ok := w.(http.Flusher); ok {
 				flusher.Flush()
 			}

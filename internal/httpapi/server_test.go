@@ -716,6 +716,125 @@ func TestStreamEvents(t *testing.T) {
 			t.Error("Stream did not end gracefully after context cancellation")
 		}
 	})
+
+	t.Run("end_to_end_event_delivery", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("test-sse-client", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Start SSE client subscribing to "test.events" topic
+		sseReq, err := http.NewRequest("GET", "/api/v1/events/stream?topic=test.events", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sseReq.Header.Set("Authorization", "Bearer "+token)
+		sseReq.Header.Set("Accept", "text/event-stream")
+
+		// Add claims to context for SSE request
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+
+		// Create a context that we can cancel
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		ctx = context.WithValue(ctx, ClaimsKey, claims)
+		sseReq = sseReq.WithContext(ctx)
+
+		// Use a custom ResponseWriter that captures streaming data
+		recorder := &StreamingRecorder{
+			ResponseRecorder: httptest.NewRecorder(),
+			Data:             make(chan string, 10),
+			Done:             make(chan struct{}),
+		}
+
+		// Start SSE streaming in a goroutine
+		go func() {
+			defer close(recorder.Done)
+			handlers.StreamEvents(recorder, sseReq)
+		}()
+
+		// Wait for SSE connection to be established
+		select {
+		case data := <-recorder.Data:
+			if !strings.Contains(data, "SSE connection established for topic: test.events") {
+				t.Errorf("Expected SSE connection message, got: %s", data)
+			}
+			t.Logf("✓ SSE connection established: %s", strings.TrimSpace(data))
+		case <-time.After(1 * time.Second):
+			t.Error("Timeout waiting for SSE connection message")
+			return
+		}
+
+		// Now publish an event to the same topic via the HTTP API
+		publishReq := PublishRequest{
+			Topic:   "test.events",
+			Payload: map[string]interface{}{"message": "Hello SSE World", "timestamp": "2025-01-01T00:00:00Z"},
+		}
+
+		publishReqBody, err := json.Marshal(publishReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		pubReq, err := http.NewRequest("POST", "/api/v1/events", strings.NewReader(string(publishReqBody)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pubReq.Header.Set("Content-Type", "application/json")
+		pubReq.Header.Set("Authorization", "Bearer "+token)
+
+		// Add claims to context for publish request
+		pubCtx := context.WithValue(context.Background(), ClaimsKey, claims)
+		pubReq = pubReq.WithContext(pubCtx)
+
+		// Execute publish request
+		pubRR := httptest.NewRecorder()
+		handlers.PublishEvent(pubRR, pubReq)
+
+		// Verify publish succeeded
+		if status := pubRR.Code; status != http.StatusCreated {
+			t.Errorf("Expected publish status %d, got %d. Body: %s", http.StatusCreated, status, pubRR.Body.String())
+		}
+
+		// Now the SSE client should receive the published event
+		eventReceived := false
+		timeout := time.After(3 * time.Second)
+
+		for !eventReceived {
+			select {
+			case data := <-recorder.Data:
+				// Look for the published event in SSE format
+				if strings.Contains(data, "data: {") && strings.Contains(data, "Hello SSE World") {
+					// Parse the event to verify it's properly formatted
+					if strings.Contains(data, "test.events") && strings.Contains(data, "eventId") {
+						eventReceived = true
+						t.Logf("✅ End-to-end event delivery working: %s", data)
+					}
+				}
+			case <-timeout:
+				t.Error("Timeout waiting for published event to be delivered via SSE - integration not working")
+				return
+			case <-recorder.Done:
+				if !eventReceived {
+					t.Error("SSE stream ended without receiving the published event")
+				}
+				return
+			}
+		}
+
+		// Cancel context to end the stream
+		cancel()
+
+		// Verify we got the event
+		if !eventReceived {
+			t.Error("Published event was not delivered to SSE client")
+		}
+	})
 }
 
 // StreamingRecorder captures streaming data for testing

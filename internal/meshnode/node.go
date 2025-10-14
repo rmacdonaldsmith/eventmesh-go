@@ -213,9 +213,9 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 	// Deliver to local subscribers
 	for _, subscriber := range localSubscribers {
 		if subscriber.Type() == routingtablepkg.LocalClient {
-			// Cast to TrustedClient for delivery
-			if trustedClient, ok := subscriber.(*TrustedClient); ok {
-				trustedClient.DeliverEvent(persistedEvent)
+			// Try generic event delivery interface first (works for both TrustedClient and HTTPClient)
+			if eventReceiver, ok := subscriber.(interface{ DeliverEvent(eventlogpkg.EventRecord) }); ok {
+				eventReceiver.DeliverEvent(persistedEvent)
 			}
 			// Note: In production, we'd handle delivery failures, queuing, etc.
 		}
@@ -649,8 +649,9 @@ func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event eventlogp
 
 	for _, subscriber := range localSubscribers {
 		if subscriber.Type() == routingtablepkg.LocalClient {
-			if trustedClient, ok := subscriber.(*TrustedClient); ok {
-				trustedClient.DeliverEvent(persistedEvent)
+			// Try generic event delivery interface (works for both TrustedClient and HTTPClient)
+			if eventReceiver, ok := subscriber.(interface{ DeliverEvent(eventlogpkg.EventRecord) }); ok {
+				eventReceiver.DeliverEvent(persistedEvent)
 			}
 		}
 	}
