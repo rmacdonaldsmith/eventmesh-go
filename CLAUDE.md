@@ -1,5 +1,8 @@
 # CLAUDE.md
 
+Note for all agents:
+We track work in Beads instead of Markdown. Run \`bd quickstart\` to see how.
+
 **Purpose:**
 Provide structured guidance to Claude Code and human contributors when working on the **EventMesh** Go codebase — a distributed event-streaming system built for secure, real-time communication between applications.
 
