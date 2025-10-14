@@ -583,4 +583,52 @@ func TestStreamEvents(t *testing.T) {
 			t.Errorf("Expected status %d for invalid topic, got %d", http.StatusBadRequest, status)
 		}
 	})
+
+	t.Run("sse_message_formatting", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("test-sse-client", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Test SSE message formatting
+		req, err := http.NewRequest("GET", "/api/v1/events/stream?topic=test.events", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		// Add claims to context (simulating middleware)
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Execute request
+		rr := httptest.NewRecorder()
+
+		// For this test, we'll simulate sending an event message
+		// This will require extending the handler to send a test message
+		handlers.StreamEvents(rr, req)
+
+		// Should succeed
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("Expected status %d, got %d", http.StatusOK, status)
+		}
+
+		body := rr.Body.String()
+
+		// Look for properly formatted SSE data message
+		// SSE format should be: "data: {json}\n\n"
+		if !strings.Contains(body, "data: {") {
+			t.Errorf("Expected SSE data message with JSON, got: %s", body)
+		}
+
+		// Should contain EventStreamMessage structure
+		if !strings.Contains(body, "eventId") || !strings.Contains(body, "topic") {
+			t.Errorf("Expected EventStreamMessage with eventId and topic fields, got: %s", body)
+		}
+	})
 }

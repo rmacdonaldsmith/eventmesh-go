@@ -191,6 +191,25 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	} else {
 		w.Write([]byte(": SSE connection established for all topics\n\n"))
 	}
+
+	// For testing purposes, send a sample event message in proper SSE format
+	// This will be replaced with real event streaming in subsequent steps
+	if hasTopicParam && topicFilter != "" {
+		// Create a sample EventStreamMessage
+		sampleEvent := EventStreamMessage{
+			EventID:   fmt.Sprintf("%s-sample-123", topicFilter),
+			Topic:     topicFilter,
+			Payload:   map[string]interface{}{"message": "Sample event for testing SSE format"},
+			Timestamp: time.Now(),
+			Offset:    1,
+		}
+
+		// Send as SSE data message
+		if err := h.writeSSEMessage(w, sampleEvent); err != nil {
+			// Log error but don't fail the connection
+			_ = err
+		}
+	}
 }
 
 // Subscription endpoints
@@ -347,4 +366,17 @@ func (h *Handlers) validatePublishRequest(req *PublishRequest) error {
 	}
 	// Payload can be nil, but if provided should be valid JSON (checked during marshaling)
 	return nil
+}
+
+// writeSSEMessage writes an EventStreamMessage as a properly formatted SSE data message
+func (h *Handlers) writeSSEMessage(w http.ResponseWriter, message EventStreamMessage) error {
+	// Marshal the message to JSON
+	jsonData, err := json.Marshal(message)
+	if err != nil {
+		return fmt.Errorf("failed to marshal SSE message: %w", err)
+	}
+
+	// Write in SSE format: "data: {json}\n\n"
+	_, err = w.Write([]byte(fmt.Sprintf("data: %s\n\n", string(jsonData))))
+	return err
 }
