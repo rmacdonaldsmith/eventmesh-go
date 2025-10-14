@@ -93,4 +93,3 @@ func (j *JWTAuth) ValidateToken(tokenString string) (*JWTClaims, error) {
 
 	return claims, nil
 }
-
