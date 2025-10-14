@@ -1,6 +1,11 @@
 package httpapi
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,6 +204,178 @@ func TestInputValidation(t *testing.T) {
 	})
 }
 
+// TestPublishEvent tests the POST /api/v1/events endpoint
+func TestPublishEvent(t *testing.T) {
+	// Create a test mesh node config
+	config := meshnode.NewConfig("test-node", "localhost:8080")
+
+	// Create mesh node
+	node, err := meshnode.NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Failed to create mesh node: %v", err)
+	}
+	defer node.Close()
+
+	// Start the mesh node
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Failed to start mesh node: %v", err)
+	}
+
+	// Create handlers
+	auth := NewJWTAuth("publish-test-secret")
+	handlers := NewHandlers(node, auth)
+
+	t.Run("successful_event_publish", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("test-publisher", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Create test request
+		requestBody := `{"topic": "test.events", "payload": {"message": "Hello EventMesh", "timestamp": "2025-01-01T00:00:00Z"}}`
+		req, err := http.NewRequest("POST", "/api/v1/events", strings.NewReader(requestBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		// Add claims to context (simulating middleware)
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Execute request
+		rr := httptest.NewRecorder()
+		handlers.PublishEvent(rr, req)
+
+		// Verify response
+		if status := rr.Code; status != http.StatusCreated {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusCreated, status, rr.Body.String())
+		}
+
+		// Parse response
+		var response PublishResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+			t.Errorf("Failed to parse response: %v", err)
+		}
+
+		// Verify response fields
+		if response.EventID == "" {
+			t.Error("Expected EventID to be set")
+		}
+		// EventID should be topic-offset format
+		if !strings.HasPrefix(response.EventID, "test.events-") {
+			t.Errorf("Expected EventID to start with 'test.events-', got %s", response.EventID)
+		}
+		if response.Timestamp.IsZero() {
+			t.Error("Expected Timestamp to be set")
+		}
+	})
+
+	t.Run("missing_authentication", func(t *testing.T) {
+		requestBody := `{"topic": "test.events", "payload": {"message": "Hello"}}`
+		req, err := http.NewRequest("POST", "/api/v1/events", strings.NewReader(requestBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+
+		rr := httptest.NewRecorder()
+		handlers.PublishEvent(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, status)
+		}
+	})
+
+	t.Run("invalid_topic", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("test-publisher", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Test empty topic
+		requestBody := `{"topic": "", "payload": {"message": "Hello"}}`
+		req, err := http.NewRequest("POST", "/api/v1/events", strings.NewReader(requestBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, _ := auth.ValidateToken(token)
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		rr := httptest.NewRecorder()
+		handlers.PublishEvent(rr, req)
+
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, status)
+		}
+	})
+
+	t.Run("invalid_content_type", func(t *testing.T) {
+		token, _, err := auth.GenerateToken("test-publisher", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		req, err := http.NewRequest("POST", "/api/v1/events", strings.NewReader("invalid"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "text/plain") // Wrong content type
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, _ := auth.ValidateToken(token)
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		rr := httptest.NewRecorder()
+		handlers.PublishEvent(rr, req)
+
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, status)
+		}
+	})
+
+	t.Run("nil_payload", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("test-publisher", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Test nil payload (should be allowed)
+		requestBody := `{"topic": "test.events"}`
+		req, err := http.NewRequest("POST", "/api/v1/events", strings.NewReader(requestBody))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, _ := auth.ValidateToken(token)
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		rr := httptest.NewRecorder()
+		handlers.PublishEvent(rr, req)
+
+		if status := rr.Code; status != http.StatusCreated {
+			t.Errorf("Expected status %d for nil payload, got %d. Body: %s", http.StatusCreated, status, rr.Body.String())
+		}
+	})
+}
+
 // TestPackageStructure verifies all files compile together
 func TestPackageStructure(t *testing.T) {
 	// This test just verifies that all our files compile together properly
@@ -213,6 +390,16 @@ func TestPackageStructure(t *testing.T) {
 	middleware := NewMiddleware(auth)
 	if middleware == nil {
 		t.Error("Expected NewMiddleware to return non-nil")
+	}
+
+	// Test HTTPClient methods
+	claims := &JWTClaims{ClientID: "test-client", IsAdmin: false}
+	client := NewHTTPClient(claims)
+	if client.ID() != "test-client" {
+		t.Errorf("Expected client ID 'test-client', got %s", client.ID())
+	}
+	if !client.IsAuthenticated() {
+		t.Error("Expected client to be authenticated")
 	}
 
 	// Test that our types can be created

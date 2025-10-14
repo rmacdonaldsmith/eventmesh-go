@@ -4,9 +4,35 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/meshnode"
+	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
+
+// HTTPClient represents an HTTP API client for the MeshNode
+type HTTPClient struct {
+	clientID        string
+	isAuthenticated bool
+}
+
+// NewHTTPClient creates a new HTTP client from JWT claims
+func NewHTTPClient(claims *JWTClaims) *HTTPClient {
+	return &HTTPClient{
+		clientID:        claims.ClientID,
+		isAuthenticated: true,
+	}
+}
+
+// ID returns the unique identifier for this client
+func (c *HTTPClient) ID() string {
+	return c.clientID
+}
+
+// IsAuthenticated returns whether the client is properly authenticated
+func (c *HTTPClient) IsAuthenticated() bool {
+	return c.isAuthenticated
+}
 
 // Handlers contains all HTTP request handlers
 type Handlers struct {
@@ -68,8 +94,65 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 
 // PublishEvent handles POST /api/v1/events
 func (h *Handlers) PublishEvent(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Task 102
-	h.writeError(w, "Not implemented yet - will be implemented in Task 102", http.StatusNotImplemented)
+	// Validate JSON content type
+	if err := h.validateJSON(r); err != nil {
+		h.writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Parse request body
+	var req PublishRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate request
+	if err := h.validatePublishRequest(&req); err != nil {
+		h.writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Get authenticated client from context
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// Create HTTP client for MeshNode
+	client := NewHTTPClient(claims)
+
+	// Convert request to EventRecord
+	var payload []byte
+	if req.Payload != nil {
+		payloadBytes, err := json.Marshal(req.Payload)
+		if err != nil {
+			h.writeError(w, "Invalid payload format", http.StatusBadRequest)
+			return
+		}
+		payload = payloadBytes
+	}
+
+	// Create event record
+	eventRecord := eventlogpkg.NewRecord(req.Topic, payload)
+
+	// Publish event through MeshNode
+	ctx := r.Context()
+	err := h.meshNode.PublishEvent(ctx, client, eventRecord)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to publish event: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Create response
+	resp := PublishResponse{
+		EventID:   fmt.Sprintf("%s-%d", req.Topic, eventRecord.Offset()), // Topic + offset as ID
+		Offset:    eventRecord.Offset(), // This will be set by the EventLog
+		Timestamp: time.Now(),
+	}
+
+	h.writeJSON(w, resp, http.StatusCreated)
 }
 
 // StreamEvents handles GET /api/v1/events/stream
@@ -222,5 +305,14 @@ func (h *Handlers) validateTopic(topic string) error {
 			return fmt.Errorf("topic contains invalid characters (allowed: letters, numbers, ., -, _)")
 		}
 	}
+	return nil
+}
+
+// validatePublishRequest validates event publishing request fields
+func (h *Handlers) validatePublishRequest(req *PublishRequest) error {
+	if err := h.validateTopic(req.Topic); err != nil {
+		return err
+	}
+	// Payload can be nil, but if provided should be valid JSON (checked during marshaling)
 	return nil
 }
