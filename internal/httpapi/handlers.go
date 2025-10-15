@@ -354,8 +354,65 @@ func (h *Handlers) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 // CreateSubscription handles POST /api/v1/subscriptions
 func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Task 104
-	h.writeError(w, "Not implemented yet - will be implemented in Task 104", http.StatusNotImplemented)
+	// Validate JSON content type
+	if err := h.validateJSON(r); err != nil {
+		h.writeError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Parse request body
+	var req SubscriptionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate topic is not empty
+	if req.Topic == "" {
+		h.writeError(w, "Topic is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get authenticated client from context
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// Create HTTP client for MeshNode
+	client := NewHTTPClient(claims)
+
+	// Subscribe to topic through MeshNode
+	ctx := r.Context()
+	err := h.meshNode.Subscribe(ctx, client, req.Topic)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to subscribe: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Generate unique subscription ID
+	subscriptionID := fmt.Sprintf("sub-%d", time.Now().UnixNano())
+
+	// Add subscription to client's local tracking
+	err = client.AddSubscription(subscriptionID, req.Topic)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to add subscription: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Create response
+	response := SubscriptionResponse{
+		ID:        subscriptionID,
+		Topic:     req.Topic,
+		ClientID:  claims.ClientID,
+		CreatedAt: time.Now(),
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
 }
 
 // DeleteSubscription handles DELETE /api/v1/subscriptions/{id}

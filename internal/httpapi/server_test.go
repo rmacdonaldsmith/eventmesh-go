@@ -958,3 +958,93 @@ func TestHTTPClient_SubscriptionTracking(t *testing.T) {
 		}
 	})
 }
+
+// TestCreateSubscription tests the POST /api/v1/subscriptions endpoint
+func TestCreateSubscription(t *testing.T) {
+	// Create a test mesh node config
+	config := meshnode.NewConfig("test-node", "localhost:8080")
+
+	// Create mesh node
+	node, err := meshnode.NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Failed to create mesh node: %v", err)
+	}
+	defer node.Close()
+
+	// Start the mesh node
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Failed to start mesh node: %v", err)
+	}
+
+	// Create handlers
+	auth := NewJWTAuth("test-secret")
+	handlers := NewHandlers(node, auth)
+
+	// Create a valid JWT token
+	token, _, err := auth.GenerateToken("test-client", false)
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	t.Run("successful_subscription_creation", func(t *testing.T) {
+		// Create subscription request
+		subscriptionReq := SubscriptionRequest{
+			Topic: "test.events",
+		}
+
+		reqBody, err := json.Marshal(subscriptionReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Create HTTP request
+		req, err := http.NewRequest("POST", "/api/v1/subscriptions", strings.NewReader(string(reqBody)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		// Add claims to context
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Execute request
+		rr := httptest.NewRecorder()
+		handlers.CreateSubscription(rr, req)
+
+		// Check response status
+		if status := rr.Code; status != http.StatusCreated {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusCreated, status, rr.Body.String())
+		}
+
+		// Parse response
+		var resp SubscriptionResponse
+		err = json.Unmarshal(rr.Body.Bytes(), &resp)
+		if err != nil {
+			t.Fatalf("Failed to parse response: %v", err)
+		}
+
+		// Verify response fields
+		if resp.Topic != "test.events" {
+			t.Errorf("Expected topic 'test.events', got '%s'", resp.Topic)
+		}
+
+		if resp.ClientID != "test-client" {
+			t.Errorf("Expected clientId 'test-client', got '%s'", resp.ClientID)
+		}
+
+		if resp.ID == "" {
+			t.Error("Expected non-empty subscription ID")
+		}
+
+		if resp.CreatedAt.IsZero() {
+			t.Error("Expected non-zero CreatedAt timestamp")
+		}
+	})
+}
