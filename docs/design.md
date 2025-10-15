@@ -50,6 +50,51 @@ At the same time, systems are generating ever-larger volumes of data and increas
 
 ---
 
+## HTTP API and Client Connection Management
+
+### HTTPClient Architecture
+
+The EventMesh provides HTTP API endpoints for event publishing and Server-Sent Events (SSE) streaming. The **HTTPClient** component is a **server-side component within the MeshNode** that represents and manages individual client connections.
+
+**Key Architecture Decisions:**
+
+- **HTTPClient is Server-Side**: HTTPClient is NOT a client SDK, but rather a server-side component that represents a connected client within the MeshNode.
+- **One HTTPClient per Connected Client**: Each authenticated HTTP client gets its own HTTPClient instance managed by the MeshNode.
+- **Local Subscription Tracking**: HTTPClient tracks its own subscriptions locally, separate from the mesh-wide RoutingTable.
+
+### Subscription Management Responsibilities
+
+**RoutingTable (Mesh-Level)**:
+- Tracks which **nodes** are interested in which **topics**
+- Used for routing events between mesh nodes
+- Gossip protocol shares topic interests (not individual client subscriptions)
+- Keeps mesh communication lightweight and scalable
+
+**HTTPClient (Client-Level)**:
+- Tracks which **topics** a specific **client** has subscribed to
+- Stores subscription metadata (ID, topic, timestamp)
+- Provides client isolation (clients see only their own subscriptions)
+- Manages subscription lifecycle for HTTP API endpoints
+
+### HTTP API Flow
+
+1. **Client Authentication**: JWT-based authentication creates HTTPClient instance
+2. **Subscription Creation**: `POST /api/v1/subscriptions`
+   - HTTPClient stores subscription locally
+   - MeshNode.Subscribe() registers with RoutingTable for mesh routing
+3. **Event Publishing**: `POST /api/v1/events`
+   - Events flow through existing MeshNode → EventLog → RoutingTable pipeline
+4. **SSE Streaming**: `GET /api/v1/events/stream`
+   - HTTPClient receives events via DeliverEvent() interface
+   - Events forwarded to SSE stream in real-time
+
+This separation ensures:
+- **Scalability**: Mesh gossip remains lightweight (topics only, not individual clients)
+- **Client Isolation**: Each client manages only their own subscriptions
+- **Clean Architecture**: Clear separation between mesh-level routing and client-level management
+
+---
+
 ## Module Interaction Diagram
 
 ```
