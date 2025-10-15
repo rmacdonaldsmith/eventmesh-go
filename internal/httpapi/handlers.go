@@ -102,6 +102,22 @@ func (c *HTTPClient) GetSubscriptions() map[string]*Subscription {
 	return result
 }
 
+// RemoveSubscription removes a subscription for this client
+func (c *HTTPClient) RemoveSubscription(subscriptionID string) error {
+	c.subscriptionMu.Lock()
+	defer c.subscriptionMu.Unlock()
+
+	// Check if subscription exists
+	_, exists := c.subscriptions[subscriptionID]
+	if !exists {
+		return fmt.Errorf("subscription %s not found", subscriptionID)
+	}
+
+	// Remove the subscription
+	delete(c.subscriptions, subscriptionID)
+	return nil
+}
+
 // Handlers contains all HTTP request handlers
 type Handlers struct {
 	meshNode *meshnode.GRPCMeshNode
