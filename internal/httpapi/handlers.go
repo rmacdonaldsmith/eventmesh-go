@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/meshnode"
@@ -12,11 +13,21 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
 
+// Subscription represents a client subscription to a topic
+type Subscription struct {
+	ID        string    `json:"id"`
+	Topic     string    `json:"topic"`
+	ClientID  string    `json:"clientId"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // HTTPClient represents an HTTP API client for the MeshNode
 type HTTPClient struct {
 	clientID        string
 	isAuthenticated bool
 	eventChan       chan eventlogpkg.EventRecord // Channel for receiving events (for SSE streaming)
+	subscriptions   map[string]*Subscription     // Track client's subscriptions
+	subscriptionMu  sync.RWMutex                 // Protect subscriptions map
 }
 
 // NewHTTPClient creates a new HTTP client from JWT claims
@@ -25,6 +36,7 @@ func NewHTTPClient(claims *JWTClaims) *HTTPClient {
 		clientID:        claims.ClientID,
 		isAuthenticated: true,
 		eventChan:       make(chan eventlogpkg.EventRecord, 100), // Buffered channel like TrustedClient
+		subscriptions:   make(map[string]*Subscription),         // Initialize subscriptions map
 	}
 }
 
@@ -59,6 +71,35 @@ func (c *HTTPClient) DeliverEvent(event eventlogpkg.EventRecord) {
 // GetEventChannel returns the channel for receiving events (for SSE streaming)
 func (c *HTTPClient) GetEventChannel() <-chan eventlogpkg.EventRecord {
 	return c.eventChan
+}
+
+// AddSubscription adds a subscription for this client
+func (c *HTTPClient) AddSubscription(subscriptionID, topic string) error {
+	c.subscriptionMu.Lock()
+	defer c.subscriptionMu.Unlock()
+
+	subscription := &Subscription{
+		ID:        subscriptionID,
+		Topic:     topic,
+		ClientID:  c.clientID,
+		CreatedAt: time.Now(),
+	}
+
+	c.subscriptions[subscriptionID] = subscription
+	return nil
+}
+
+// GetSubscriptions returns all subscriptions for this client
+func (c *HTTPClient) GetSubscriptions() map[string]*Subscription {
+	c.subscriptionMu.RLock()
+	defer c.subscriptionMu.RUnlock()
+
+	// Return a copy to prevent concurrent modification
+	result := make(map[string]*Subscription)
+	for id, sub := range c.subscriptions {
+		result[id] = sub
+	}
+	return result
 }
 
 // Handlers contains all HTTP request handlers

@@ -855,3 +855,45 @@ func (r *StreamingRecorder) Write(data []byte) (int, error) {
 	// Also write to the underlying recorder
 	return r.ResponseRecorder.Write(data)
 }
+
+// TestHTTPClient_SubscriptionTracking tests the subscription tracking functionality
+func TestHTTPClient_SubscriptionTracking(t *testing.T) {
+	// Create test JWT claims
+	claims := &JWTClaims{
+		ClientID: "test-client",
+		IsAdmin:  false,
+	}
+
+	// Create HTTPClient
+	client := NewHTTPClient(claims)
+
+	t.Run("AddSubscription", func(t *testing.T) {
+		// This should fail initially since AddSubscription doesn't exist yet
+		subscriptionID := "sub-123"
+		topic := "test.topic"
+
+		err := client.AddSubscription(subscriptionID, topic)
+		if err != nil {
+			t.Fatalf("Expected no error, got: %v", err)
+		}
+
+		// Verify subscription was stored
+		subscriptions := client.GetSubscriptions()
+		if len(subscriptions) != 1 {
+			t.Fatalf("Expected 1 subscription, got %d", len(subscriptions))
+		}
+
+		sub, exists := subscriptions[subscriptionID]
+		if !exists {
+			t.Fatalf("Subscription %s not found", subscriptionID)
+		}
+
+		if sub.Topic != topic {
+			t.Errorf("Expected topic %s, got %s", topic, sub.Topic)
+		}
+
+		if sub.ID != subscriptionID {
+			t.Errorf("Expected ID %s, got %s", subscriptionID, sub.ID)
+		}
+	})
+}
