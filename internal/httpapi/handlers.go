@@ -521,20 +521,159 @@ func (h *Handlers) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 
 // AdminListClients handles GET /api/v1/admin/clients
 func (h *Handlers) AdminListClients(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Task 105
-	h.writeError(w, "Not implemented yet - will be implemented in Task 105", http.StatusNotImplemented)
+	// Get authenticated client from context and verify admin privileges
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	if !claims.IsAdmin {
+		h.writeError(w, "Admin privileges required", http.StatusForbidden)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get all connected clients from mesh node
+	clients, err := h.meshNode.GetConnectedClients(ctx)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to get connected clients: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	var clientInfos []ClientInfo
+	for _, client := range clients {
+		// Get subscriptions for this client
+		subscriptions, err := h.meshNode.GetClientSubscriptions(ctx, client.ID())
+		if err != nil {
+			// Log error but continue with other clients
+			// In production, we'd use proper logging here
+			subscriptions = []meshnodepkg.ClientSubscription{}
+		}
+
+		// Extract subscription topics
+		var topics []string
+		for _, sub := range subscriptions {
+			topics = append(topics, sub.Topic)
+		}
+
+		clientInfo := ClientInfo{
+			ID:            client.ID(),
+			Authenticated: client.IsAuthenticated(),
+			ConnectedAt:   time.Now(), // TODO: Track actual connection time
+			Subscriptions: topics,
+		}
+		clientInfos = append(clientInfos, clientInfo)
+	}
+
+	response := AdminClientsResponse{
+		Clients: clientInfos,
+	}
+
+	h.writeJSON(w, response, http.StatusOK)
 }
 
 // AdminListSubscriptions handles GET /api/v1/admin/subscriptions
 func (h *Handlers) AdminListSubscriptions(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Task 105
-	h.writeError(w, "Not implemented yet - will be implemented in Task 105", http.StatusNotImplemented)
+	// Get authenticated client from context and verify admin privileges
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	if !claims.IsAdmin {
+		h.writeError(w, "Admin privileges required", http.StatusForbidden)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get all subscriptions from the routing table
+	routingTable := h.meshNode.GetRoutingTable()
+	subscriptions, err := routingTable.GetAllSubscriptions(ctx)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to get subscriptions: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Filter for local client subscriptions only and convert to admin format
+	var adminSubscriptions []AdminSubscriptionInfo
+	for _, subscription := range subscriptions {
+		// Only include local client subscriptions (not peer node subscriptions)
+		if subscription.Subscriber.Type() == routingtable.LocalClient {
+			// For admin view, we'll use subscriber ID as both subscription ID and client ID
+			// In a full implementation, we might want to track actual subscription IDs
+			adminSub := AdminSubscriptionInfo{
+				ID:        fmt.Sprintf("%s-%s", subscription.Subscriber.ID(), subscription.Topic),
+				Topic:     subscription.Topic,
+				ClientID:  subscription.Subscriber.ID(),
+				CreatedAt: time.Now(), // TODO: Track actual creation time
+			}
+			adminSubscriptions = append(adminSubscriptions, adminSub)
+		}
+	}
+
+	response := AdminSubscriptionsResponse{
+		Subscriptions: adminSubscriptions,
+	}
+
+	h.writeJSON(w, response, http.StatusOK)
 }
 
 // AdminGetStats handles GET /api/v1/admin/stats
 func (h *Handlers) AdminGetStats(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Task 105
-	h.writeError(w, "Not implemented yet - will be implemented in Task 105", http.StatusNotImplemented)
+	// Get authenticated client from context and verify admin privileges
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	if !claims.IsAdmin {
+		h.writeError(w, "Admin privileges required", http.StatusForbidden)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Get health status for connected clients count
+	health, err := h.meshNode.GetHealth(ctx)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to get health status: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get routing table for additional statistics
+	routingTable := h.meshNode.GetRoutingTable()
+
+	// Get total number of topics
+	topicCount, err := routingTable.GetTopicCount(ctx)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to get topic count: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Get total number of subscriptions
+	subscriberCount, err := routingTable.GetSubscriberCount(ctx)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to get subscriber count: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// For events published, we don't have direct tracking yet
+	// TODO: Implement proper event counting in EventLog
+	eventsPublished := 0
+
+	response := AdminStatsResponse{
+		ConnectedClients:   health.ConnectedClients,
+		TotalSubscriptions: subscriberCount,
+		TotalTopics:        topicCount,
+		EventsPublished:    eventsPublished,
+	}
+
+	h.writeJSON(w, response, http.StatusOK)
 }
 
 // Health endpoint
