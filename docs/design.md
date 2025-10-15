@@ -435,9 +435,12 @@ The HTTP API provides RESTful endpoints for clients to interact with the EventMe
 
 ```
 1. Client → POST /api/v1/subscriptions → HTTPClient → MeshNode.Subscribe()
-2. MeshNode stores subscription state internally
-3. Client → GET /api/v1/subscriptions → HTTPClient → MeshNode.GetSubscriptions()
-4. Client → DELETE /api/v1/subscriptions/{id} → HTTPClient → MeshNode.Unsubscribe()
+   - MeshNode automatically generates subscription ID and stores metadata
+   - MeshNode updates routing table for event delivery
+2. Client → GET /api/v1/subscriptions → HTTPClient → MeshNode.GetClientSubscriptions()
+   - Returns all subscription metadata for the client
+3. Client → DELETE /api/v1/subscriptions/{id} → HTTPClient → MeshNode.UnsubscribeByID()
+   - Removes subscription from routing table and cleans up metadata
 ```
 
 ### State Management and Failures
@@ -462,6 +465,20 @@ HTTPClient is **NOT** a client SDK component. It is a server-side component that
 - Has a lifecycle tied to the HTTP connection/session
 
 **Key Point**: HTTPClient instances are created per HTTP request and do not persist subscription state. All subscription persistence is handled by the MeshNode.
+
+### Implementation Details
+
+**MeshNode Subscription Management:**
+- `GetClientSubscriptions(clientID)` - Returns all subscriptions for a client with metadata
+- `UnsubscribeByID(clientID, subscriptionID)` - Removes specific subscription by ID
+- Thread-safe subscription metadata storage alongside routing table operations
+- Automatic subscription ID generation during Subscribe() calls
+
+**HTTP Handler Implementation:**
+- Handlers delegate all subscription operations to MeshNode methods
+- No local state storage in HTTP layer
+- Proper error handling and HTTP status codes
+- JWT authentication required for all subscription operations
 
 ## Appendix B: Secure mTLS Between Mesh Nodes
 
