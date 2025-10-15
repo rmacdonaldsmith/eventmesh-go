@@ -1196,3 +1196,138 @@ func TestGetSubscriptions(t *testing.T) {
 		}
 	})
 }
+
+func TestDeleteSubscription(t *testing.T) {
+	// Create a test mesh node config
+	config := meshnode.NewConfig("test-node", "localhost:8080")
+
+	// Create mesh node
+	node, err := meshnode.NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Failed to create mesh node: %v", err)
+	}
+	defer node.Close()
+
+	// Start the mesh node
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Failed to start mesh node: %v", err)
+	}
+
+	// Create handlers
+	auth := NewJWTAuth("test-secret")
+	handlers := NewHandlers(node, auth)
+
+	// Generate test JWT token
+	token, _, err := auth.GenerateToken("test-client", false)
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	// Prepare claims for reuse
+	claims, err := auth.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("Failed to validate token: %v", err)
+	}
+
+	t.Run("successful_subscription_deletion", func(t *testing.T) {
+		// First create a subscription to delete
+		subscriptionReq := SubscriptionRequest{Topic: "test.events.delete"}
+		reqBody, _ := json.Marshal(subscriptionReq)
+		createReq := httptest.NewRequest("POST", "/api/v1/subscriptions", strings.NewReader(string(reqBody)))
+		createReq.Header.Set("Authorization", "Bearer "+token)
+		createReq.Header.Set("Content-Type", "application/json")
+
+		// Add claims to context (simulating middleware)
+		createCtx := context.WithValue(createReq.Context(), ClaimsKey, claims)
+		createReq = createReq.WithContext(createCtx)
+
+		createW := httptest.NewRecorder()
+		handlers.CreateSubscription(createW, createReq)
+
+		// Verify subscription was created
+		if createW.Code != http.StatusCreated {
+			t.Fatalf("Failed to create subscription: %d", createW.Code)
+		}
+
+		var createResponse SubscriptionResponse
+		json.NewDecoder(createW.Body).Decode(&createResponse)
+		subscriptionID := createResponse.ID
+
+		// Now delete the subscription
+		deleteReq := httptest.NewRequest("DELETE", "/api/v1/subscriptions/"+subscriptionID, nil)
+		deleteReq.Header.Set("Authorization", "Bearer "+token)
+
+		// Add claims to context (simulating middleware)
+		deleteCtx := context.WithValue(deleteReq.Context(), ClaimsKey, claims)
+		// Add subscription ID to context (simulating handleSubscriptionByID)
+		deleteCtx = context.WithValue(deleteCtx, SubscriptionIDKey, subscriptionID)
+		deleteReq = deleteReq.WithContext(deleteCtx)
+
+		// Process DELETE request
+		deleteW := httptest.NewRecorder()
+		handlers.DeleteSubscription(deleteW, deleteReq)
+
+		// Verify response
+		if deleteW.Code != http.StatusNoContent {
+			t.Errorf("Expected status 204, got %d. Body: %s", deleteW.Code, deleteW.Body.String())
+		}
+
+		// Verify subscription is actually deleted by checking GET response
+		getReq := httptest.NewRequest("GET", "/api/v1/subscriptions", nil)
+		getReq.Header.Set("Authorization", "Bearer "+token)
+		getReq.Header.Set("Content-Type", "application/json")
+
+		// Add claims to context (simulating middleware)
+		getCtx := context.WithValue(getReq.Context(), ClaimsKey, claims)
+		getReq = getReq.WithContext(getCtx)
+
+		getW := httptest.NewRecorder()
+		handlers.GetSubscriptions(getW, getReq)
+
+		var getResponse SubscriptionsListResponse
+		json.NewDecoder(getW.Body).Decode(&getResponse)
+
+		// Should have no subscriptions now
+		if len(getResponse.Subscriptions) != 0 {
+			t.Errorf("Expected no subscriptions after deletion, got %d", len(getResponse.Subscriptions))
+		}
+	})
+
+	t.Run("delete_nonexistent_subscription", func(t *testing.T) {
+		// Try to delete a subscription that doesn't exist
+		nonexistentID := "nonexistent-sub-123"
+		deleteReq := httptest.NewRequest("DELETE", "/api/v1/subscriptions/"+nonexistentID, nil)
+		deleteReq.Header.Set("Authorization", "Bearer "+token)
+
+		// Add claims to context (simulating middleware)
+		deleteCtx := context.WithValue(deleteReq.Context(), ClaimsKey, claims)
+		// Add subscription ID to context (simulating handleSubscriptionByID)
+		deleteCtx = context.WithValue(deleteCtx, SubscriptionIDKey, nonexistentID)
+		deleteReq = deleteReq.WithContext(deleteCtx)
+
+		// Process DELETE request
+		deleteW := httptest.NewRecorder()
+		handlers.DeleteSubscription(deleteW, deleteReq)
+
+		// Verify response
+		if deleteW.Code != http.StatusNotFound {
+			t.Errorf("Expected status 404, got %d. Body: %s", deleteW.Code, deleteW.Body.String())
+		}
+	})
+
+	t.Run("delete_without_authentication", func(t *testing.T) {
+		// Try to delete without authentication
+		deleteReq := httptest.NewRequest("DELETE", "/api/v1/subscriptions/some-sub-123", nil)
+		// No Authorization header
+
+		// Process DELETE request
+		deleteW := httptest.NewRecorder()
+		handlers.DeleteSubscription(deleteW, deleteReq)
+
+		// Verify response
+		if deleteW.Code != http.StatusUnauthorized {
+			t.Errorf("Expected status 401, got %d. Body: %s", deleteW.Code, deleteW.Body.String())
+		}
+	})
+}

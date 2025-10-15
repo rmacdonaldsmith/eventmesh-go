@@ -17,6 +17,8 @@ const (
 	IsAdminKey ContextKey = "is_admin"
 	// ClaimsKey is the context key for JWT claims
 	ClaimsKey ContextKey = "jwt_claims"
+	// SubscriptionIDKey is the context key for subscription ID from URL path
+	SubscriptionIDKey ContextKey = "subscription_id"
 )
 
 // Middleware provides HTTP middleware functions
@@ -173,4 +175,12 @@ func GetClaims(r *http.Request) *JWTClaims {
 		return claims
 	}
 	return nil
+}
+
+// GetSubscriptionID extracts the subscription ID from the request context
+func GetSubscriptionID(r *http.Request) string {
+	if subscriptionID, ok := r.Context().Value(SubscriptionIDKey).(string); ok {
+		return subscriptionID
+	}
+	return ""
 }

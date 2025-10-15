@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -471,8 +472,35 @@ func (h *Handlers) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 
 // DeleteSubscription handles DELETE /api/v1/subscriptions/{id}
 func (h *Handlers) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Task 104
-	h.writeError(w, "Not implemented yet - will be implemented in Task 104", http.StatusNotImplemented)
+	// Get authenticated client from context
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// Get subscription ID from context (set by handleSubscriptionByID)
+	subscriptionID := GetSubscriptionID(r)
+	if subscriptionID == "" {
+		h.writeError(w, "Subscription ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Delete subscription through MeshNode
+	ctx := r.Context()
+	err := h.meshNode.UnsubscribeByID(ctx, claims.ClientID, subscriptionID)
+	if err != nil {
+		// Check if it's a "not found" error (either no subscriptions for client or specific subscription not found)
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no subscriptions found") {
+			h.writeError(w, fmt.Sprintf("Subscription not found: %s", subscriptionID), http.StatusNotFound)
+			return
+		}
+		h.writeError(w, fmt.Sprintf("Failed to delete subscription: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return 204 No Content on successful deletion
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Admin endpoints

@@ -152,7 +152,10 @@ func (s *Server) handleSubscriptionByID(w http.ResponseWriter, r *http.Request) 
 
 	switch r.Method {
 	case http.MethodDelete:
-		s.handlers.DeleteSubscription(w, r)
+		// Add subscription ID to request context
+		ctx := context.WithValue(r.Context(), SubscriptionIDKey, subscriptionID)
+		requestWithID := r.WithContext(ctx)
+		s.handlers.DeleteSubscription(w, requestWithID)
 	default:
 		s.writeError(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
