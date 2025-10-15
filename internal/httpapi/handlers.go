@@ -350,8 +350,22 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 
 // ListSubscriptions handles GET /api/v1/subscriptions
 func (h *Handlers) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement in Task 104
-	h.writeError(w, "Not implemented yet - will be implemented in Task 104", http.StatusNotImplemented)
+	// Get client ID from context
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// Get client subscriptions from mesh node
+	subscriptions, err := h.meshNode.GetClientSubscriptions(r.Context(), claims.ClientID)
+	if err != nil {
+		h.writeError(w, "Failed to get subscriptions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Return subscriptions as JSON
+	h.writeJSON(w, subscriptions, http.StatusOK)
 }
 
 // CreateSubscription handles POST /api/v1/subscriptions
