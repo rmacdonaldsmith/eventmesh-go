@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
@@ -37,6 +38,10 @@ type GRPCMeshNode struct {
 
 	// Client management (simplified for MVP - no authentication)
 	clients map[string]meshnode.Client
+
+	// Subscription management
+	subscriptions   map[string]map[string]*meshnode.ClientSubscription // clientID -> subscriptionID -> subscription
+	subscriptionsMu sync.RWMutex                                       // Protect subscriptions map
 }
 
 // NewGRPCMeshNode creates a new gRPC-based mesh node with the given configuration.
@@ -78,13 +83,14 @@ func NewGRPCMeshNode(config *Config) (*GRPCMeshNode, error) {
 	}
 
 	node := &GRPCMeshNode{
-		config:       config,
-		eventLog:     eventLog,
-		routingTable: routingTable,
-		peerLink:     peerLink,
-		clients:      make(map[string]meshnode.Client),
-		started:      false,
-		closed:       false,
+		config:        config,
+		eventLog:      eventLog,
+		routingTable:  routingTable,
+		peerLink:      peerLink,
+		clients:       make(map[string]meshnode.Client),
+		subscriptions: make(map[string]map[string]*meshnode.ClientSubscription),
+		started:       false,
+		closed:        false,
 	}
 
 	return node, nil
@@ -287,6 +293,11 @@ func (n *GRPCMeshNode) Subscribe(ctx context.Context, client meshnode.Client, to
 
 	// Add to local client tracking
 	n.clients[client.ID()] = client
+
+	// Store subscription metadata for HTTP API
+	// Generate a simple subscription ID for this client/topic pair
+	subscriptionID := fmt.Sprintf("sub-%s-%d", client.ID(), time.Now().UnixNano())
+	n.addSubscriptionMetadata(client.ID(), subscriptionID, topic)
 
 	// Propagate subscription to peer nodes (REQ-MNODE-003)
 	// For MVP: Use special subscription events via existing PeerLink infrastructure
@@ -679,6 +690,111 @@ func (n *GRPCMeshNode) handleSubscriptionEvent(ctx context.Context, event eventl
 	// - Parse JSON to get action, clientID, topic, nodeID
 	// - Update peer subscription tracking
 	// - Use for intelligent routing instead of broadcasting to all peers
+}
+
+// Helper methods for subscription metadata management
+
+// addSubscriptionMetadata adds a subscription to the metadata store
+func (n *GRPCMeshNode) addSubscriptionMetadata(clientID, subscriptionID, topic string) {
+	n.subscriptionsMu.Lock()
+	defer n.subscriptionsMu.Unlock()
+
+	// Initialize client map if it doesn't exist
+	if n.subscriptions[clientID] == nil {
+		n.subscriptions[clientID] = make(map[string]*meshnode.ClientSubscription)
+	}
+
+	// Create and store subscription
+	subscription := &meshnode.ClientSubscription{
+		ID:        subscriptionID,
+		Topic:     topic,
+		ClientID:  clientID,
+		CreatedAt: time.Now(),
+	}
+
+	n.subscriptions[clientID][subscriptionID] = subscription
+}
+
+// GetClientSubscriptions returns all subscriptions for a specific client
+func (n *GRPCMeshNode) GetClientSubscriptions(ctx context.Context, clientID string) ([]meshnode.ClientSubscription, error) {
+	n.subscriptionsMu.RLock()
+	defer n.subscriptionsMu.RUnlock()
+
+	clientSubs := n.subscriptions[clientID]
+	if clientSubs == nil {
+		return []meshnode.ClientSubscription{}, nil
+	}
+
+	// Convert to slice with value copies (not pointers)
+	var result []meshnode.ClientSubscription
+	for _, sub := range clientSubs {
+		result = append(result, *sub)
+	}
+
+	return result, nil
+}
+
+// UnsubscribeByID removes a client's subscription by subscription ID
+func (n *GRPCMeshNode) UnsubscribeByID(ctx context.Context, clientID, subscriptionID string) error {
+	n.subscriptionsMu.RLock()
+	// Find the subscription first to get the topic
+	clientSubs := n.subscriptions[clientID]
+	if clientSubs == nil {
+		n.subscriptionsMu.RUnlock()
+		return fmt.Errorf("no subscriptions found for client %s", clientID)
+	}
+
+	subscription, exists := clientSubs[subscriptionID]
+	if !exists {
+		n.subscriptionsMu.RUnlock()
+		return fmt.Errorf("subscription %s not found for client %s", subscriptionID, clientID)
+	}
+
+	topic := subscription.Topic
+	n.subscriptionsMu.RUnlock()
+
+	// Get the client to call the regular Unsubscribe method
+	n.mu.RLock()
+	client := n.clients[clientID]
+	n.mu.RUnlock()
+
+	if client == nil {
+		return fmt.Errorf("client %s not found", clientID)
+	}
+
+	// Call the regular Unsubscribe method to handle routing table and peer propagation
+	err := n.Unsubscribe(ctx, client, topic)
+	if err != nil {
+		return fmt.Errorf("failed to unsubscribe: %w", err)
+	}
+
+	// Remove subscription metadata
+	return n.removeSubscriptionMetadata(clientID, subscriptionID)
+}
+
+// removeSubscriptionMetadata removes a subscription from the metadata store
+func (n *GRPCMeshNode) removeSubscriptionMetadata(clientID, subscriptionID string) error {
+	n.subscriptionsMu.Lock()
+	defer n.subscriptionsMu.Unlock()
+
+	clientSubs := n.subscriptions[clientID]
+	if clientSubs == nil {
+		return fmt.Errorf("no subscriptions found for client %s", clientID)
+	}
+
+	_, exists := clientSubs[subscriptionID]
+	if !exists {
+		return fmt.Errorf("subscription %s not found for client %s", subscriptionID, clientID)
+	}
+
+	delete(clientSubs, subscriptionID)
+
+	// Clean up empty client map
+	if len(clientSubs) == 0 {
+		delete(n.subscriptions, clientID)
+	}
+
+	return nil
 }
 
 // Verify that GRPCMeshNode implements the MeshNode interface at compile time

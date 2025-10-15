@@ -3,6 +3,7 @@ package meshnode
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
@@ -16,6 +17,21 @@ type Client interface {
 
 	// IsAuthenticated returns whether the client is properly authenticated
 	IsAuthenticated() bool
+}
+
+// ClientSubscription represents a client's subscription to a topic
+type ClientSubscription struct {
+	// ID is the unique identifier for this subscription
+	ID string
+
+	// Topic is the topic pattern the client is subscribed to
+	Topic string
+
+	// ClientID is the identifier of the subscribing client
+	ClientID string
+
+	// CreatedAt is when the subscription was created
+	CreatedAt time.Time
 }
 
 // MeshNode represents a single node in the event mesh.
@@ -46,6 +62,14 @@ type MeshNode interface {
 	// Unsubscribe removes a client's subscription to a topic pattern.
 	// Updates local routing table and notifies peer nodes.
 	Unsubscribe(ctx context.Context, client Client, topic string) error
+
+	// GetClientSubscriptions returns all subscriptions for a specific client.
+	// Returns subscription details including IDs, topics, and creation times.
+	GetClientSubscriptions(ctx context.Context, clientID string) ([]ClientSubscription, error)
+
+	// UnsubscribeByID removes a client's subscription by subscription ID.
+	// This is used by HTTP API for subscription management.
+	UnsubscribeByID(ctx context.Context, clientID, subscriptionID string) error
 
 	// AuthenticateClient validates and authenticates a connecting client.
 	// Implements REQ-MNODE-001: authentication of clients.

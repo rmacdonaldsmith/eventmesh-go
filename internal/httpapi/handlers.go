@@ -10,6 +10,7 @@ import (
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/meshnode"
 	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
+	meshnodepkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/meshnode"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
 
@@ -384,6 +385,7 @@ func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 	client := NewHTTPClient(claims)
 
 	// Subscribe to topic through MeshNode
+	// The MeshNode will automatically generate and store subscription metadata
 	ctx := r.Context()
 	err := h.meshNode.Subscribe(ctx, client, req.Topic)
 	if err != nil {
@@ -391,27 +393,79 @@ func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate unique subscription ID
-	subscriptionID := fmt.Sprintf("sub-%d", time.Now().UnixNano())
-
-	// Add subscription to client's local tracking
-	err = client.AddSubscription(subscriptionID, req.Topic)
+	// Get the created subscription from MeshNode
+	subscriptions, err := h.meshNode.GetClientSubscriptions(ctx, claims.ClientID)
 	if err != nil {
-		h.writeError(w, fmt.Sprintf("Failed to add subscription: %v", err), http.StatusInternalServerError)
+		h.writeError(w, fmt.Sprintf("Failed to retrieve subscription: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Find the most recently created subscription for this topic
+	var createdSubscription *meshnodepkg.ClientSubscription
+	for i := range subscriptions {
+		sub := &subscriptions[i]
+		if sub.Topic == req.Topic {
+			if createdSubscription == nil || sub.CreatedAt.After(createdSubscription.CreatedAt) {
+				createdSubscription = sub
+			}
+		}
+	}
+
+	if createdSubscription == nil {
+		h.writeError(w, "Failed to find created subscription", http.StatusInternalServerError)
 		return
 	}
 
 	// Create response
 	response := SubscriptionResponse{
-		ID:        subscriptionID,
-		Topic:     req.Topic,
-		ClientID:  claims.ClientID,
-		CreatedAt: time.Now(),
+		ID:        createdSubscription.ID,
+		Topic:     createdSubscription.Topic,
+		ClientID:  createdSubscription.ClientID,
+		CreatedAt: createdSubscription.CreatedAt,
 	}
 
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetSubscriptions handles GET /api/v1/subscriptions
+func (h *Handlers) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
+	// Get authenticated client from context
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// Get subscriptions from MeshNode
+	ctx := r.Context()
+	subscriptions, err := h.meshNode.GetClientSubscriptions(ctx, claims.ClientID)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to retrieve subscriptions: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert to response format
+	var responseSubscriptions []SubscriptionResponse
+	for _, subscription := range subscriptions {
+		responseSubscriptions = append(responseSubscriptions, SubscriptionResponse{
+			ID:        subscription.ID,
+			Topic:     subscription.Topic,
+			ClientID:  subscription.ClientID,
+			CreatedAt: subscription.CreatedAt,
+		})
+	}
+
+	// Create response
+	response := SubscriptionsListResponse{
+		Subscriptions: responseSubscriptions,
+	}
+
+	// Return success response
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }
 

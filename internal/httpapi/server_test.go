@@ -1048,3 +1048,151 @@ func TestCreateSubscription(t *testing.T) {
 		}
 	})
 }
+
+func TestGetSubscriptions(t *testing.T) {
+	// Create a test mesh node config
+	config := meshnode.NewConfig("test-node", "localhost:8080")
+
+	// Create mesh node
+	node, err := meshnode.NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Failed to create mesh node: %v", err)
+	}
+	defer node.Close()
+
+	// Start the mesh node
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Failed to start mesh node: %v", err)
+	}
+
+	// Create handlers
+	auth := NewJWTAuth("test-secret")
+	handlers := NewHandlers(node, auth)
+
+	// Generate test JWT token
+	token, _, err := auth.GenerateToken("test-client", false)
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+
+	t.Run("get_subscriptions_empty_list", func(t *testing.T) {
+		// Create GET request
+		req := httptest.NewRequest("GET", "/api/v1/subscriptions", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+
+		// Add claims to context (simulating middleware)
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Process request
+		w := httptest.NewRecorder()
+		handlers.GetSubscriptions(w, req)
+
+		// Verify response
+		if w.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+		}
+
+		var response SubscriptionsListResponse
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		// Should have empty list
+		if len(response.Subscriptions) != 0 {
+			t.Errorf("Expected empty subscriptions list, got %d items", len(response.Subscriptions))
+		}
+	})
+
+	t.Run("get_subscriptions_with_existing", func(t *testing.T) {
+		// Prepare claims for reuse
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+
+		// First create some subscriptions via POST
+		subscriptionReq := SubscriptionRequest{Topic: "test.events.1"}
+		reqBody, _ := json.Marshal(subscriptionReq)
+		req := httptest.NewRequest("POST", "/api/v1/subscriptions", strings.NewReader(string(reqBody)))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+
+		// Add claims to context (simulating middleware)
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		w := httptest.NewRecorder()
+		handlers.CreateSubscription(w, req)
+
+		// Create second subscription
+		subscriptionReq2 := SubscriptionRequest{Topic: "test.events.2"}
+		reqBody2, _ := json.Marshal(subscriptionReq2)
+		req2 := httptest.NewRequest("POST", "/api/v1/subscriptions", strings.NewReader(string(reqBody2)))
+		req2.Header.Set("Authorization", "Bearer "+token)
+		req2.Header.Set("Content-Type", "application/json")
+
+		// Add claims to context (simulating middleware)
+		ctx2 := context.WithValue(req2.Context(), ClaimsKey, claims)
+		req2 = req2.WithContext(ctx2)
+
+		w2 := httptest.NewRecorder()
+		handlers.CreateSubscription(w2, req2)
+
+		// Now GET subscriptions
+		getReq := httptest.NewRequest("GET", "/api/v1/subscriptions", nil)
+		getReq.Header.Set("Authorization", "Bearer "+token)
+		getReq.Header.Set("Content-Type", "application/json")
+
+		// Add claims to context (simulating middleware)
+		getCtx := context.WithValue(getReq.Context(), ClaimsKey, claims)
+		getReq = getReq.WithContext(getCtx)
+
+		// Process GET request
+		getW := httptest.NewRecorder()
+		handlers.GetSubscriptions(getW, getReq)
+
+		// Verify response
+		if getW.Code != http.StatusOK {
+			t.Errorf("Expected status 200, got %d. Body: %s", getW.Code, getW.Body.String())
+		}
+
+		var response SubscriptionsListResponse
+		if err := json.NewDecoder(getW.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+
+		// Should have 2 subscriptions
+		if len(response.Subscriptions) != 2 {
+			t.Errorf("Expected 2 subscriptions, got %d", len(response.Subscriptions))
+		}
+
+		// Verify subscription details
+		topics := make(map[string]bool)
+		for _, sub := range response.Subscriptions {
+			topics[sub.Topic] = true
+			if sub.ClientID != "test-client" {
+				t.Errorf("Expected clientId 'test-client', got '%s'", sub.ClientID)
+			}
+			if sub.ID == "" {
+				t.Error("Expected non-empty subscription ID")
+			}
+			if sub.CreatedAt.IsZero() {
+				t.Error("Expected non-zero CreatedAt timestamp")
+			}
+		}
+
+		if !topics["test.events.1"] {
+			t.Error("Missing topic 'test.events.1' in response")
+		}
+		if !topics["test.events.2"] {
+			t.Error("Missing topic 'test.events.2' in response")
+		}
+	})
+}

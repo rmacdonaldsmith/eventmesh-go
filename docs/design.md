@@ -58,7 +58,7 @@ The EventMesh provides HTTP API endpoints for event publishing and Server-Sent E
 
 **Key Architecture Decisions:**
 
-- **HTTPClient is Server-Side**: HTTPClient is NOT a client SDK, but rather a server-side component that represents a connected client within the MeshNode.
+- **HTTPClient is Server-Side**: HTTPClient is a server-side component that represents a connected client within the MeshNode.
 - **One HTTPClient per Connected Client**: Each authenticated HTTP client gets its own HTTPClient instance managed by the MeshNode.
 - **Local Subscription Tracking**: HTTPClient tracks its own subscriptions locally, separate from the mesh-wide RoutingTable.
 
@@ -411,6 +411,57 @@ Mesh Node B → Subscriber: Deliver Event
 6. Mesh Node B delivers the event to its subscriber.
 
 This sequence shows clear separation of responsibilities: nodes handle persistence and routing decisions; peer links only transmit events; and subscribers receive events once they are safely logged on their connected node.
+
+## HTTP API and Client Subscription Management
+
+### Architecture Overview
+
+The HTTP API provides RESTful endpoints for clients to interact with the EventMesh. The API layer consists of:
+
+- **HTTPClient**: Server-side component within each MeshNode that represents an authenticated client connection
+- **Handlers**: HTTP request handlers that coordinate between HTTP requests and MeshNode operations
+- **MeshNode**: Authoritative source for all client subscription state and event routing
+
+### Client Subscription Management
+
+**Design Decision**: Client subscriptions are managed entirely by the MeshNode, not the HTTP layer. This ensures:
+
+1. **Single Source of Truth**: MeshNode maintains all subscription state
+2. **Consistency**: All subscription operations go through the same MeshNode interface
+3. **Simplicity**: HTTP handlers are thin adapters, not stateful components
+4. **MVP Approach**: Client reconnection responsibility lies with the client
+
+### Subscription Lifecycle
+
+```
+1. Client → POST /api/v1/subscriptions → HTTPClient → MeshNode.Subscribe()
+2. MeshNode stores subscription state internally
+3. Client → GET /api/v1/subscriptions → HTTPClient → MeshNode.GetSubscriptions()
+4. Client → DELETE /api/v1/subscriptions/{id} → HTTPClient → MeshNode.Unsubscribe()
+```
+
+### State Management and Failures
+
+**MVP Approach**: If a MeshNode goes down, all client connections and subscription state are lost. Clients are responsible for:
+
+- Detecting connection loss
+- Reconnecting to the same or different MeshNode
+- Re-establishing their subscriptions
+
+**Future Enhancement**: More sophisticated state persistence and client reconnection logic can be added later either in:
+- MeshNode (cross-node subscription sync)
+- Client drivers (automatic reconnection and resubscription)
+
+### HTTPClient Component Role
+
+HTTPClient is **NOT** a client SDK component. It is a server-side component that:
+
+- Represents an authenticated client session within the MeshNode
+- Handles Server-Sent Events (SSE) streaming to clients
+- Acts as an adapter between HTTP requests and MeshNode operations
+- Has a lifecycle tied to the HTTP connection/session
+
+**Key Point**: HTTPClient instances are created per HTTP request and do not persist subscription state. All subscription persistence is handled by the MeshNode.
 
 ## Appendix B: Secure mTLS Between Mesh Nodes
 
