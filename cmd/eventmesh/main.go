@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rmacdonaldsmith/eventmesh-go/internal/httpapi"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/meshnode"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
 )
@@ -27,6 +28,9 @@ func main() {
 		listenAddr  = flag.String("listen", ":8080", "Listen address for client connections")
 		peerAddr    = flag.String("peer-listen", ":9090", "Listen address for peer connections")
 		connectPeer = flag.String("connect-peer", "", "Address of peer node to connect to (optional)")
+		enableHTTP  = flag.Bool("http", false, "Enable HTTP API server")
+		httpPort    = flag.String("http-port", "8081", "Port for HTTP API server")
+		httpSecret  = flag.String("http-secret", "", "JWT secret key for HTTP API (auto-generated if empty)")
 		showVersion = flag.Bool("version", false, "Show version and exit")
 		showHealth  = flag.Bool("health", false, "Show health status and exit")
 	)
@@ -44,6 +48,9 @@ func main() {
 	log.Printf("📋 Node ID: %s", *nodeID)
 	log.Printf("🔌 Client Listen: %s", *listenAddr)
 	log.Printf("🔗 Peer Listen: %s", *peerAddr)
+	if *enableHTTP {
+		log.Printf("🌐 HTTP API: http://localhost:%s", *httpPort)
+	}
 
 	// Create PeerLink configuration
 	peerLinkConfig := &peerlink.Config{
@@ -74,6 +81,17 @@ func main() {
 		}
 	}()
 
+	// Create HTTP API server if enabled
+	var httpServer *httpapi.Server
+	if *enableHTTP {
+		log.Printf("🔧 Creating HTTP API server...")
+		httpConfig := httpapi.Config{
+			Port:      *httpPort,
+			SecretKey: *httpSecret,
+		}
+		httpServer = httpapi.NewServer(node, httpConfig)
+	}
+
 	// Handle health check flag
 	if *showHealth {
 		showHealthStatus(node)
@@ -89,6 +107,16 @@ func main() {
 		log.Fatalf("❌ Failed to start mesh node: %v", err)
 	}
 
+	// Start HTTP API server if enabled
+	if httpServer != nil {
+		log.Printf("▶️  Starting HTTP API server on port %s...", *httpPort)
+		go func() {
+			if err := httpServer.Start(); err != nil {
+				log.Printf("❌ HTTP API server error: %v", err)
+			}
+		}()
+	}
+
 	// Connect to peer if specified
 	if *connectPeer != "" {
 		log.Printf("🤝 Connecting to peer: %s", *connectPeer)
@@ -100,7 +128,7 @@ func main() {
 	showStartupInfo(node)
 
 	// Set up graceful shutdown
-	setupGracefulShutdown(ctx, cancel, node)
+	setupGracefulShutdown(ctx, cancel, node, httpServer)
 
 	log.Printf("✅ %s node %s started successfully!", appName, *nodeID)
 	log.Printf("💡 Use Ctrl+C to shutdown gracefully")
@@ -120,7 +148,7 @@ func getDefaultNodeID() string {
 }
 
 // setupGracefulShutdown configures signal handling for graceful shutdown
-func setupGracefulShutdown(ctx context.Context, cancel context.CancelFunc, node *meshnode.GRPCMeshNode) {
+func setupGracefulShutdown(ctx context.Context, cancel context.CancelFunc, node *meshnode.GRPCMeshNode, httpServer *httpapi.Server) {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
@@ -132,7 +160,16 @@ func setupGracefulShutdown(ctx context.Context, cancel context.CancelFunc, node 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer shutdownCancel()
 
+		// Stop the HTTP server first (if running)
+		if httpServer != nil {
+			log.Printf("🛑 Stopping HTTP API server...")
+			if err := httpServer.Stop(shutdownCtx); err != nil {
+				log.Printf("⚠️  Error stopping HTTP server: %v", err)
+			}
+		}
+
 		// Stop the mesh node
+		log.Printf("🛑 Stopping mesh node...")
 		if err := node.Stop(shutdownCtx); err != nil {
 			log.Printf("⚠️  Error during graceful stop: %v", err)
 		}
