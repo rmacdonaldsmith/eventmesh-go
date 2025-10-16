@@ -1,48 +1,103 @@
-# Examples
+# EventMesh Examples
 
-This directory contains example code demonstrating how to use the EventMesh EventLog.
+This directory contains practical examples demonstrating how to use EventMesh for event-driven applications.
 
-## Basic Example
+## Quick Start - Simple Pub/Sub
 
-The `basic/` directory contains a comprehensive example showing:
-
-- Creating an in-memory event log
-- Appending events with topics and payloads
-- Reading events from specific offsets
-- Getting the current end offset
-- Replaying events using Go channels
-- Working with event headers
-
-To run the basic example:
+The fastest way to see EventMesh in action:
 
 ```bash
-cd examples/basic
-go run main.go
+cd examples/simple
+./start-server.sh     # Terminal 1 - starts server
+./subscriber.sh       # Terminal 2 - listens for events
+./publisher.sh        # Terminal 3 - sends events
 ```
 
-This will demonstrate all the core EventLog functionality with sample data.
+## Available Examples
 
-## Usage Patterns
+### [`simple/`](simple/) - Basic Pub/Sub Demo
+**Best starting point** - Shows core EventMesh functionality:
+- Start a server
+- Subscribe to topic patterns
+- Publish events
+- See real-time event streaming
 
-The examples demonstrate the typical usage patterns:
+### [`single-node/`](single-node/) - Complete Server Setup
+Comprehensive single-node deployment with:
+- Detailed server configuration
+- Step-by-step operational guide
+- Health monitoring examples
+- Production-ready startup scripts
 
-```go
-// Create event log
-eventLog := eventlog.NewInMemoryEventLog()
-defer eventLog.Close()
+### [`cli-usage/`](cli-usage/) - Advanced CLI Workflows
+Advanced CLI patterns and scripts:
+- Authentication and token management
+- Pattern-based subscriptions
+- Business workflow examples (order processing)
+- Multi-service demonstrations
 
-// Append events
-record := eventlog.NewRecord("topic", []byte("payload"))
-appended, err := eventLog.Append(ctx, record)
+### [`basic/`](basic/) - EventLog API Examples
+Low-level EventLog API usage (legacy):
+- Direct EventLog operations
+- Event persistence and replay
+- Header and metadata handling
 
-// Read events
-events, err := eventLog.ReadFrom(ctx, startOffset, maxCount)
+## What is EventMesh?
 
-// Stream events
-eventChan, errChan := eventLog.Replay(ctx, startOffset)
-for event := range eventChan {
-    // Process event
-}
+EventMesh is a distributed event streaming platform that provides:
+
+- **Event Streaming**: Real-time publish/subscribe messaging
+- **HTTP API**: RESTful interface for all operations
+- **CLI Tool**: Command-line interface for easy interaction
+- **JWT Authentication**: Secure client isolation
+- **Topic Patterns**: Flexible routing with wildcards
+- **Event Persistence**: Reliable message storage and replay
+
+## Common Use Cases
+
+- **Microservice Communication**: Decouple services with async messaging
+- **Event-Driven Architecture**: Build reactive applications
+- **Real-time Notifications**: Stream updates to clients
+- **Audit Trails**: Capture and replay business events
+- **Integration Hub**: Connect disparate systems
+
+## Architecture Overview
+
+```
+┌─────────────┐    HTTP API    ┌─────────────┐
+│  Publisher  │ ──────────────► │ EventMesh   │
+│   Client    │                │   Server    │
+└─────────────┘                └─────────────┘
+                                       │
+                               Event Stream (SSE)
+                                       ▼
+┌─────────────┐               ┌─────────────┐
+│ Subscriber  │ ◄───────────── │ Subscriber  │
+│  Client #1  │               │  Client #2  │
+└─────────────┘               └─────────────┘
 ```
 
-See the Go documentation in `pkg/eventlog/doc.go` for complete API details.
+## Getting Started
+
+1. **Build EventMesh**:
+   ```bash
+   make build
+   ```
+
+2. **Try the Simple Example**:
+   ```bash
+   cd examples/simple
+   ./start-server.sh
+   # In new terminals:
+   ./subscriber.sh
+   ./publisher.sh
+   ```
+
+3. **Explore More Examples**: Check other directories for advanced patterns
+
+## Need Help?
+
+- Start with `examples/simple/` for basic pub/sub
+- Check `examples/single-node/README.md` for operational guidance
+- See `examples/cli-usage/README.md` for advanced CLI patterns
+- Review the main project README for API documentation
