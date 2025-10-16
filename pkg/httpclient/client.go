@@ -240,7 +240,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, reqBody int
 	if err != nil {
 		return fmt.Errorf("request failed after %d attempts: %w", c.config.MaxRetries+1, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close() // Ignore close errors, request already processed
+	}()
 
 	// Read response body
 	responseBytes, err := io.ReadAll(resp.Body)

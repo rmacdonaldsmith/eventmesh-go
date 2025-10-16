@@ -26,7 +26,9 @@ If no payload is provided, an empty event will be published.`,
 
 	cmd.Flags().StringVar(&topic, "topic", "", "Topic to publish to (required)")
 	cmd.Flags().StringVar(&payload, "payload", "{}", "Event payload as JSON")
-	cmd.MarkFlagRequired("topic")
+	if err := cmd.MarkFlagRequired("topic"); err != nil {
+		panic(fmt.Sprintf("Failed to mark topic as required: %v", err))
+	}
 
 	return cmd
 }

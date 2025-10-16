@@ -37,7 +37,9 @@ and real-time event streaming.`,
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "Request timeout")
 
 	// Mark required flags
-	rootCmd.MarkPersistentFlagRequired("client-id")
+	if err := rootCmd.MarkPersistentFlagRequired("client-id"); err != nil {
+		panic(fmt.Sprintf("Failed to mark client-id as required: %v", err))
+	}
 
 	// Add subcommands
 	rootCmd.AddCommand(newAuthCommand())

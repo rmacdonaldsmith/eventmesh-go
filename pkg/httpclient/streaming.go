@@ -94,7 +94,7 @@ func (sc *StreamClient) Close() error {
 
 	// Close HTTP response if open
 	if sc.response != nil {
-		sc.response.Body.Close()
+		_ = sc.response.Body.Close() // Ignore close errors during cleanup
 	}
 
 	// Wait for streaming goroutine to finish
@@ -178,7 +178,7 @@ func (sc *StreamClient) connectAndStream(ctx context.Context, config StreamConfi
 
 	sc.response = resp
 	defer func() {
-		resp.Body.Close()
+		_ = resp.Body.Close() // Ignore close errors
 		sc.response = nil
 	}()
 

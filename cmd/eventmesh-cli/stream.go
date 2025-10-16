@@ -77,7 +77,11 @@ func runStream(topic string, bufferSize int, prettyFormat bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to start streaming: %w", err)
 	}
-	defer streamClient.Close()
+	defer func() {
+		if err := streamClient.Close(); err != nil {
+			fmt.Printf("Warning: failed to close stream client: %v\n", err)
+		}
+	}()
 
 	// Process events and errors
 	eventCount := 0

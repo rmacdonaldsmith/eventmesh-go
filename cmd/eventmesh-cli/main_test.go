@@ -26,7 +26,10 @@ func TestHTTPClientIntegration(t *testing.T) {
 				ClientID:  "test-client",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 
 		case "/api/v1/health":
 			response := httpclient.HealthResponse{
@@ -39,21 +42,29 @@ func TestHTTPClientIntegration(t *testing.T) {
 				Message:            "All systems operational",
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(response)
+			if err := json.NewEncoder(w).Encode(response); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 
 		case "/api/v1/events":
-			if r.Method == "POST" {
+			switch r.Method {
+			case "POST":
 				response := httpclient.PublishResponse{
 					EventID:   "event-123",
 					Offset:    456,
 					Timestamp: time.Now(),
 				}
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(response)
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 			}
 
 		case "/api/v1/subscriptions":
-			if r.Method == "POST" {
+			switch r.Method {
+			case "POST":
 				response := httpclient.SubscriptionResponse{
 					ID:        "sub-123",
 					Topic:     "test.topic",
@@ -61,8 +72,11 @@ func TestHTTPClientIntegration(t *testing.T) {
 					CreatedAt: time.Now(),
 				}
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(response)
-			} else if r.Method == "GET" {
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			case "GET":
 				subscriptions := []httpclient.SubscriptionResponse{
 					{
 						ID:        "sub-123",
@@ -72,7 +86,10 @@ func TestHTTPClientIntegration(t *testing.T) {
 					},
 				}
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(subscriptions)
+				if err := json.NewEncoder(w).Encode(subscriptions); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 			}
 
 		default:
@@ -205,7 +222,7 @@ func TestMainCommandHelp(t *testing.T) {
 
 	// Capture output
 	output := &bytes.Buffer{}
-	rootCmd.SetOutput(output)
+	rootCmd.SetOut(output)
 	rootCmd.SetArgs([]string{"--help"})
 
 	// Execute help command
@@ -229,7 +246,7 @@ func TestInvalidJSONPayload(t *testing.T) {
 
 	// Capture output
 	output := &bytes.Buffer{}
-	cmd.SetOutput(output)
+	cmd.SetOut(output)
 	cmd.SetArgs([]string{"--topic", "test.topic", "--payload", "invalid-json"})
 
 	// Initialize client first

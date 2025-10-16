@@ -21,7 +21,9 @@ in the topic for management purposes. To actually receive events, use the 'strea
 	}
 
 	cmd.Flags().StringVar(&topic, "topic", "", "Topic pattern to subscribe to (required)")
-	cmd.MarkFlagRequired("topic")
+	if err := cmd.MarkFlagRequired("topic"); err != nil {
+		panic(fmt.Sprintf("Failed to mark topic as required: %v", err))
+	}
 
 	return cmd
 }

@@ -82,7 +82,7 @@ func TestClient_Authenticate(t *testing.T) {
 				ClientID:  "test-client",
 				ExpiresAt: time.Now().Add(time.Hour),
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}))
 		defer server.Close()
 
@@ -105,7 +105,7 @@ func TestClient_Authenticate(t *testing.T) {
 		// Mock server that returns error
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(ErrorResponse{
+			_ = json.NewEncoder(w).Encode(ErrorResponse{
 				Error:   "Unauthorized",
 				Message: "Invalid client credentials",
 				Code:    401,
@@ -149,7 +149,7 @@ func TestClient_PublishEvent(t *testing.T) {
 				Timestamp: time.Now(),
 			}
 			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}))
 		defer server.Close()
 
@@ -206,7 +206,7 @@ func TestClient_CreateSubscription(t *testing.T) {
 				CreatedAt: time.Now(),
 			}
 			w.WriteHeader(http.StatusCreated)
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}))
 		defer server.Close()
 
@@ -250,7 +250,7 @@ func TestClient_ListSubscriptions(t *testing.T) {
 					CreatedAt: time.Now(),
 				},
 			}
-			json.NewEncoder(w).Encode(subscriptions)
+			_ = json.NewEncoder(w).Encode(subscriptions)
 		}))
 		defer server.Close()
 
@@ -313,7 +313,7 @@ func TestClient_GetHealth(t *testing.T) {
 				ConnectedPeers:      0,
 				Message:             "All systems healthy",
 			}
-			json.NewEncoder(w).Encode(response)
+			_ = json.NewEncoder(w).Encode(response)
 		}))
 		defer server.Close()
 

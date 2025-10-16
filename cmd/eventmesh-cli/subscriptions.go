@@ -44,7 +44,9 @@ func newSubscriptionsDeleteCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&subscriptionID, "id", "", "Subscription ID to delete (required)")
-	cmd.MarkFlagRequired("id")
+	if err := cmd.MarkFlagRequired("id"); err != nil {
+		panic(fmt.Sprintf("Failed to mark id as required: %v", err))
+	}
 
 	return cmd
 }
