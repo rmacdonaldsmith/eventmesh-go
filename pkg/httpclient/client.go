@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 )
 
 // Client provides HTTP client for EventMesh API
@@ -194,10 +193,14 @@ func (c *Client) AdminGetStats(ctx context.Context) (*AdminStatsResponse, error)
 	return &resp, nil
 }
 
-// doRequest performs an HTTP request with optional authentication
-func (c *Client) doRequest(ctx context.Context, method, path string, reqBody interface{}, respBody interface{}, requireAuth bool) error {
-	// Build full URL
-	fullURL := c.baseURL.ResolveReference(&url.URL{Path: path})
+// doRequestWithQuery performs an HTTP request with query parameters and optional authentication
+func (c *Client) doRequestWithQuery(ctx context.Context, method, path string, queryParams url.Values, reqBody interface{}, respBody interface{}, requireAuth bool) error {
+	// Build full URL with query parameters
+	u := &url.URL{Path: path}
+	if len(queryParams) > 0 {
+		u.RawQuery = queryParams.Encode()
+	}
+	fullURL := c.baseURL.ResolveReference(u)
 
 	// Prepare request body
 	var bodyReader io.Reader
@@ -223,52 +226,41 @@ func (c *Client) doRequest(ctx context.Context, method, path string, reqBody int
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
-	// Perform request with retries
-	var resp *http.Response
-	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
-		resp, err = c.httpClient.Do(req)
-		if err == nil {
-			break
-		}
-		if attempt < c.config.MaxRetries {
-			// Wait before retry (exponential backoff)
-			waitTime := time.Duration(attempt+1) * time.Second
-			time.Sleep(waitTime)
-		}
-	}
-
+	// Execute request
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed after %d attempts: %w", c.config.MaxRetries+1, err)
+		return fmt.Errorf("request failed: %w", err)
 	}
-	defer func() {
-		_ = resp.Body.Close() // Ignore close errors, request already processed
-	}()
+	defer resp.Body.Close()
 
 	// Read response body
-	responseBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
+		return fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	// Check for HTTP errors
+	// Check status code
 	if resp.StatusCode >= 400 {
-		// Try to parse as error response
 		var errResp ErrorResponse
-		if json.Unmarshal(responseBytes, &errResp) == nil {
-			return fmt.Errorf("API error (%d): %s - %s", resp.StatusCode, errResp.Error, errResp.Message)
+		if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+			return fmt.Errorf("API error (%d): %s", resp.StatusCode, string(bodyBytes))
 		}
-		return fmt.Errorf("HTTP error %d: %s", resp.StatusCode, string(responseBytes))
+		return fmt.Errorf("API error (%d): %s - %s", resp.StatusCode, resp.Status, errResp.Error)
 	}
 
-	// Parse response body if expected
-	if respBody != nil && len(responseBytes) > 0 {
-		err = json.Unmarshal(responseBytes, respBody)
-		if err != nil {
+	// Parse successful response
+	if respBody != nil {
+		if err := json.Unmarshal(bodyBytes, respBody); err != nil {
 			return fmt.Errorf("failed to parse response: %w", err)
 		}
 	}
 
 	return nil
+}
+
+// doRequest performs an HTTP request with optional authentication
+func (c *Client) doRequest(ctx context.Context, method, path string, reqBody interface{}, respBody interface{}, requireAuth bool) error {
+	return c.doRequestWithQuery(ctx, method, path, nil, reqBody, respBody, requireAuth)
 }
 
 // IsAuthenticated returns whether the client has a valid token
@@ -301,12 +293,9 @@ func (c *Client) ReadEvents(ctx context.Context, topic string, offset int64, lim
 	if limit > 0 {
 		queryParams.Set("limit", fmt.Sprintf("%d", limit))
 	}
-	if len(queryParams) > 0 {
-		path += "?" + queryParams.Encode()
-	}
 
 	var resp ReadEventsResponse
-	err := c.doRequest(ctx, "GET", path, nil, &resp, true)
+	err := c.doRequestWithQuery(ctx, "GET", path, queryParams, nil, &resp, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read events: %w", err)
 	}
