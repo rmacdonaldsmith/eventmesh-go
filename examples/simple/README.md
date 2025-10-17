@@ -76,3 +76,23 @@ EventMesh CLI provides several commands for working with events:
 - `eventmesh-cli admin` - Admin operations (stats, clients, etc.)
 
 Run any command with `--help` for detailed usage information.
+
+## Development Mode (No Authentication)
+
+For development and testing, EventMesh supports a no-authentication mode that bypasses JWT token requirements:
+
+### Start Server in No-Auth Mode
+```bash
+# Instead of ./start-server.sh, run:
+../../bin/eventmesh --http --no-auth
+```
+
+### Use CLI Without Authentication
+```bash
+# No need for auth/tokens - just add --no-auth flag:
+../../bin/eventmesh-cli --no-auth publish --topic test.events --payload '{"msg":"hello"}'
+../../bin/eventmesh-cli --no-auth topics info --topic test.events
+../../bin/eventmesh-cli --no-auth replay --topic test.events --offset 0
+```
+
+**⚠️ Security Note**: No-auth mode is **INSECURE** and should only be used for development/testing. Admin endpoints always require proper authentication even in no-auth mode.

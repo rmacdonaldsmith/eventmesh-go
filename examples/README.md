@@ -95,6 +95,23 @@ EventMesh is a distributed event streaming platform that provides:
 
 3. **Explore More Examples**: Check other directories for advanced patterns
 
+## Development Workflow
+
+For faster development and testing, EventMesh supports a no-authentication mode:
+
+### Quick Development Setup
+```bash
+# Start server without authentication (INSECURE - dev only)
+./bin/eventmesh --http --no-auth
+
+# Use CLI without tokens (in another terminal)
+./bin/eventmesh-cli --no-auth publish --topic test --payload '{"data":"value"}'
+./bin/eventmesh-cli --no-auth topics info --topic test
+./bin/eventmesh-cli --no-auth replay --topic test --offset 0
+```
+
+**⚠️ Important**: No-auth mode disables security and should **never** be used in production. Admin endpoints always require proper JWT authentication even in no-auth mode.
+
 ## Need Help?
 
 - Start with `examples/simple/` for basic pub/sub
