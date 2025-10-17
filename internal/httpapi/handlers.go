@@ -39,7 +39,7 @@ func NewHTTPClient(claims *JWTClaims) *HTTPClient {
 		clientID:        claims.ClientID,
 		isAuthenticated: true,
 		eventChan:       make(chan eventlogpkg.EventRecord, 100), // Buffered channel like TrustedClient
-		subscriptions:   make(map[string]*Subscription),         // Initialize subscriptions map
+		subscriptions:   make(map[string]*Subscription),          // Initialize subscriptions map
 	}
 }
 
@@ -235,7 +235,7 @@ func (h *Handlers) PublishEvent(w http.ResponseWriter, r *http.Request) {
 	// Create response
 	resp := PublishResponse{
 		EventID:   fmt.Sprintf("%s-%d", req.Topic, eventRecord.Offset()), // Topic + offset as ID
-		Offset:    eventRecord.Offset(), // This will be set by the EventLog
+		Offset:    eventRecord.Offset(),                                  // This will be set by the EventLog
 		Timestamp: time.Now(),
 	}
 
@@ -270,7 +270,7 @@ func (h *Handlers) ReadTopicEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Default values
 	var startOffset int64 = 0
-	var limit int = 100
+	limit := 100
 
 	// Parse offset if provided
 	if offsetStr != "" {
