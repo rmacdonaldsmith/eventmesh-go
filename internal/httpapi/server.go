@@ -24,6 +24,7 @@ type Server struct {
 type Config struct {
 	Port      string
 	SecretKey string
+	NoAuth    bool // Disable authentication for development (INSECURE)
 }
 
 // NewServer creates a new HTTP API server
@@ -36,7 +37,7 @@ func NewServer(meshNode *meshnode.GRPCMeshNode, config Config) *Server {
 
 	jwtAuth := NewJWTAuth(secretKey)
 	handlers := NewHandlers(meshNode, jwtAuth)
-	middleware := NewMiddleware(jwtAuth)
+	middleware := NewMiddleware(jwtAuth, config.NoAuth)
 
 	server := &Server{
 		meshNode:   meshNode,

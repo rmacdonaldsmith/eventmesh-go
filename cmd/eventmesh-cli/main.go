@@ -15,6 +15,7 @@ var (
 	clientID  string
 	token     string
 	timeout   time.Duration
+	noAuth    bool
 
 	// Global client instance
 	client *httpclient.Client
@@ -35,11 +36,10 @@ and real-time event streaming.`,
 	rootCmd.PersistentFlags().StringVar(&clientID, "client-id", "", "Client ID for authentication")
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "JWT token (if already authenticated)")
 	rootCmd.PersistentFlags().DurationVar(&timeout, "timeout", 30*time.Second, "Request timeout")
+	rootCmd.PersistentFlags().BoolVar(&noAuth, "no-auth", false, "Skip authentication (for development with --no-auth servers)")
 
-	// Mark required flags
-	if err := rootCmd.MarkPersistentFlagRequired("client-id"); err != nil {
-		panic(fmt.Sprintf("Failed to mark client-id as required: %v", err))
-	}
+	// Mark client-id as required only when not in no-auth mode
+	// This will be checked dynamically in initializeClient
 
 	// Add subcommands
 	rootCmd.AddCommand(newAuthCommand())
@@ -65,9 +65,20 @@ func initializeClient(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// In no-auth mode, client-id is not required
+	if !noAuth && clientID == "" {
+		return fmt.Errorf("client-id is required (unless using --no-auth)")
+	}
+
+	// Use a default client-id in no-auth mode
+	effectiveClientID := clientID
+	if noAuth && effectiveClientID == "" {
+		effectiveClientID = "dev-client"
+	}
+
 	config := httpclient.Config{
 		ServerURL: serverURL,
-		ClientID:  clientID,
+		ClientID:  effectiveClientID,
 		Timeout:   timeout,
 	}
 
@@ -77,9 +88,12 @@ func initializeClient(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create client: %w", err)
 	}
 
-	// Set token if provided
+	// Set token if provided, or set dummy token in no-auth mode
 	if token != "" {
 		client.SetToken(token)
+	} else if noAuth {
+		// Set dummy token to bypass client-side auth checks
+		client.SetToken("no-auth-mode")
 	}
 
 	return nil
@@ -90,6 +104,12 @@ func requireAuthentication() error {
 	if client == nil {
 		return fmt.Errorf("client not initialized")
 	}
+
+	// Skip authentication check in no-auth mode
+	if noAuth {
+		return nil
+	}
+
 	if !client.IsAuthenticated() {
 		return fmt.Errorf("not authenticated - run 'eventmesh-cli auth' first or provide --token")
 	}

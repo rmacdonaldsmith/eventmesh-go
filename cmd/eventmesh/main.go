@@ -31,6 +31,7 @@ func main() {
 		enableHTTP  = flag.Bool("http", false, "Enable HTTP API server")
 		httpPort    = flag.String("http-port", "8081", "Port for HTTP API server")
 		httpSecret  = flag.String("http-secret", "", "JWT secret key for HTTP API (auto-generated if empty)")
+		noAuth      = flag.Bool("no-auth", false, "Disable authentication for development (INSECURE - development only)")
 		showVersion = flag.Bool("version", false, "Show version and exit")
 		showHealth  = flag.Bool("health", false, "Show health status and exit")
 	)
@@ -85,9 +86,18 @@ func main() {
 	var httpServer *httpapi.Server
 	if *enableHTTP {
 		log.Printf("🔧 Creating HTTP API server...")
+
+		// Safety warning for no-auth mode
+		if *noAuth {
+			log.Printf("⚠️  WARNING: Running in NO-AUTH mode - authentication is DISABLED!")
+			log.Printf("⚠️  This is INSECURE and should ONLY be used for development/testing")
+			log.Printf("⚠️  Admin endpoints still require valid JWT tokens")
+		}
+
 		httpConfig := httpapi.Config{
 			Port:      *httpPort,
 			SecretKey: *httpSecret,
+			NoAuth:    *noAuth,
 		}
 		httpServer = httpapi.NewServer(node, httpConfig)
 	}

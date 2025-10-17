@@ -41,7 +41,7 @@ func TestPackageStructure(t *testing.T) {
 		t.Error("Expected NewJWTAuth to return non-nil")
 	}
 
-	middleware := NewMiddleware(auth)
+	middleware := NewMiddleware(auth, false)
 	if middleware == nil {
 		t.Error("Expected NewMiddleware to return non-nil")
 	}

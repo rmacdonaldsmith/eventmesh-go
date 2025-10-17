@@ -26,18 +26,35 @@ const (
 // Middleware provides HTTP middleware functions
 type Middleware struct {
 	jwtAuth *JWTAuth
+	noAuth  bool // Development mode: bypass authentication
 }
 
 // NewMiddleware creates a new middleware instance
-func NewMiddleware(jwtAuth *JWTAuth) *Middleware {
+func NewMiddleware(jwtAuth *JWTAuth, noAuth bool) *Middleware {
 	return &Middleware{
 		jwtAuth: jwtAuth,
+		noAuth:  noAuth,
 	}
 }
 
 // AuthRequired middleware requires valid JWT authentication
 func (m *Middleware) AuthRequired(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Development mode: bypass authentication
+		if m.noAuth {
+			// Set development context with default values
+			ctx := context.WithValue(r.Context(), ClientIDKey, "dev-client")
+			ctx = context.WithValue(ctx, IsAdminKey, false)
+			ctx = context.WithValue(ctx, ClaimsKey, &JWTClaims{
+				ClientID: "dev-client",
+				IsAdmin:  false,
+			})
+
+			next(w, r.WithContext(ctx))
+			return
+		}
+
+		// Normal authentication flow
 		token := m.extractToken(r)
 		if token == "" {
 			m.writeError(w, "Authorization header required", http.StatusUnauthorized)
@@ -60,16 +77,34 @@ func (m *Middleware) AuthRequired(next http.HandlerFunc) http.HandlerFunc {
 }
 
 // AdminRequired middleware requires admin privileges
+// Note: Admin endpoints are NEVER bypassed, even in no-auth mode
 func (m *Middleware) AdminRequired(next http.HandlerFunc) http.HandlerFunc {
-	return m.AuthRequired(func(w http.ResponseWriter, r *http.Request) {
-		isAdmin, ok := r.Context().Value(IsAdminKey).(bool)
-		if !ok || !isAdmin {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Admin endpoints always require proper JWT authentication
+		token := m.extractToken(r)
+		if token == "" {
+			m.writeError(w, "Authorization header required for admin access", http.StatusUnauthorized)
+			return
+		}
+
+		claims, err := m.jwtAuth.ValidateToken(token)
+		if err != nil {
+			m.writeError(w, "Invalid token for admin access: "+err.Error(), http.StatusUnauthorized)
+			return
+		}
+
+		if !claims.IsAdmin {
 			m.writeError(w, "Admin privileges required", http.StatusForbidden)
 			return
 		}
 
-		next(w, r)
-	})
+		// Add claims to request context
+		ctx := context.WithValue(r.Context(), ClientIDKey, claims.ClientID)
+		ctx = context.WithValue(ctx, IsAdminKey, claims.IsAdmin)
+		ctx = context.WithValue(ctx, ClaimsKey, claims)
+
+		next(w, r.WithContext(ctx))
+	}
 }
 
 // CORS middleware adds CORS headers for browser compatibility
