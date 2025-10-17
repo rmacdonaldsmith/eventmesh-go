@@ -94,6 +94,9 @@ func (s *Server) setupRoutes() http.Handler {
 	mux.Handle("/api/v1/subscriptions", withMiddleware(s.middleware.AuthRequired(s.handleSubscriptions)))
 	mux.Handle("/api/v1/subscriptions/", withMiddleware(s.middleware.AuthRequired(s.handleSubscriptionByID)))
 
+	// Topic endpoints (auth required)
+	mux.Handle("/api/v1/topics/", withMiddleware(s.middleware.AuthRequired(s.handleTopicEvents)))
+
 	// Admin endpoints (admin auth required)
 	mux.Handle("/api/v1/admin/clients", withMiddleware(s.middleware.AdminRequired(s.handlers.AdminListClients)))
 	mux.Handle("/api/v1/admin/subscriptions", withMiddleware(s.middleware.AdminRequired(s.handlers.AdminListSubscriptions)))
@@ -161,6 +164,44 @@ func (s *Server) handleSubscriptionByID(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+// handleTopicEvents handles topic-related operations
+func (s *Server) handleTopicEvents(w http.ResponseWriter, r *http.Request) {
+	// Parse topic from URL path: /api/v1/topics/{topic}/events
+	path := r.URL.Path
+	if !strings.HasPrefix(path, "/api/v1/topics/") {
+		s.writeError(w, "Invalid topic path", http.StatusNotFound)
+		return
+	}
+
+	// Extract topic and ensure it ends with /events
+	pathAfterTopics := strings.TrimPrefix(path, "/api/v1/topics/")
+	if pathAfterTopics == "" {
+		s.writeError(w, "Topic name required", http.StatusBadRequest)
+		return
+	}
+
+	if !strings.HasSuffix(pathAfterTopics, "/events") {
+		s.writeError(w, "Invalid path, expected /events", http.StatusNotFound)
+		return
+	}
+
+	topic := strings.TrimSuffix(pathAfterTopics, "/events")
+	if topic == "" {
+		s.writeError(w, "Topic name required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		// Add topic to request context
+		ctx := context.WithValue(r.Context(), TopicKey, topic)
+		requestWithTopic := r.WithContext(ctx)
+		s.handlers.ReadTopicEvents(w, requestWithTopic)
+	default:
+		s.writeError(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 // handleRoot provides API information
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -184,6 +225,9 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 				"list":   "GET /api/v1/subscriptions",
 				"create": "POST /api/v1/subscriptions",
 				"delete": "DELETE /api/v1/subscriptions/{id}",
+			},
+			"topics": map[string]string{
+				"readEvents": "GET /api/v1/topics/{topic}/events?offset={offset}&limit={limit}",
 			},
 			"admin": map[string]string{
 				"clients":       "GET /api/v1/admin/clients",

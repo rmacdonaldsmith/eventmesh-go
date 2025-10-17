@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -239,6 +240,107 @@ func (h *Handlers) PublishEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeJSON(w, resp, http.StatusCreated)
+}
+
+// ReadTopicEvents handles GET /api/v1/topics/{topic}/events
+func (h *Handlers) ReadTopicEvents(w http.ResponseWriter, r *http.Request) {
+	// Get authenticated client from context
+	claims := GetClaims(r)
+	if claims == nil {
+		h.writeError(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract topic from URL path (will be set by routing handler)
+	topic := GetTopicFromPath(r)
+	if topic == "" {
+		h.writeError(w, "Topic is required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate topic format
+	if err := h.validateTopic(topic); err != nil {
+		h.writeError(w, fmt.Sprintf("Invalid topic: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parse query parameters
+	offsetStr := r.URL.Query().Get("offset")
+	limitStr := r.URL.Query().Get("limit")
+
+	// Default values
+	var startOffset int64 = 0
+	var limit int = 100
+
+	// Parse offset if provided
+	if offsetStr != "" {
+		parsedOffset, err := strconv.ParseInt(offsetStr, 10, 64)
+		if err != nil {
+			h.writeError(w, "Invalid offset parameter", http.StatusBadRequest)
+			return
+		}
+		if parsedOffset < 0 {
+			h.writeError(w, "Offset must be non-negative", http.StatusBadRequest)
+			return
+		}
+		startOffset = parsedOffset
+	}
+
+	// Parse limit if provided
+	if limitStr != "" {
+		parsedLimit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			h.writeError(w, "Invalid limit parameter", http.StatusBadRequest)
+			return
+		}
+		if parsedLimit <= 0 || parsedLimit > 1000 {
+			h.writeError(w, "Limit must be between 1 and 1000", http.StatusBadRequest)
+			return
+		}
+		limit = parsedLimit
+	}
+
+	// Get EventLog from MeshNode and read events
+	ctx := r.Context()
+	eventLog := h.meshNode.GetEventLog()
+	events, err := eventLog.ReadFromTopic(ctx, topic, startOffset, limit)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to read events: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Convert EventRecords to EventStreamMessages
+	var eventMessages []EventStreamMessage
+	for _, event := range events {
+		// Parse payload as JSON if possible, otherwise use as string
+		var payload interface{}
+		if event.Payload() != nil {
+			err := json.Unmarshal(event.Payload(), &payload)
+			if err != nil {
+				// If not valid JSON, use as string
+				payload = string(event.Payload())
+			}
+		}
+
+		message := EventStreamMessage{
+			EventID:   fmt.Sprintf("%s-%d", event.Topic(), event.Offset()),
+			Topic:     event.Topic(),
+			Payload:   payload,
+			Timestamp: event.Timestamp(),
+			Offset:    event.Offset(),
+		}
+		eventMessages = append(eventMessages, message)
+	}
+
+	// Create response
+	response := ReadEventsResponse{
+		Events:      eventMessages,
+		Topic:       topic,
+		StartOffset: startOffset,
+		Count:       len(eventMessages),
+	}
+
+	h.writeJSON(w, response, http.StatusOK)
 }
 
 // StreamEvents handles GET /api/v1/events/stream

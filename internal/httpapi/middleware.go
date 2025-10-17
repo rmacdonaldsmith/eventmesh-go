@@ -19,6 +19,8 @@ const (
 	ClaimsKey ContextKey = "jwt_claims"
 	// SubscriptionIDKey is the context key for subscription ID from URL path
 	SubscriptionIDKey ContextKey = "subscription_id"
+	// TopicKey is the context key for topic name from URL path
+	TopicKey ContextKey = "topic"
 )
 
 // Middleware provides HTTP middleware functions
@@ -181,6 +183,14 @@ func GetClaims(r *http.Request) *JWTClaims {
 func GetSubscriptionID(r *http.Request) string {
 	if subscriptionID, ok := r.Context().Value(SubscriptionIDKey).(string); ok {
 		return subscriptionID
+	}
+	return ""
+}
+
+// GetTopicFromPath extracts the topic name from the request context
+func GetTopicFromPath(r *http.Request) string {
+	if topic, ok := r.Context().Value(TopicKey).(string); ok {
+		return topic
 	}
 	return ""
 }

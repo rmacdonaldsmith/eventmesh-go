@@ -3,10 +3,13 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
 // TestInputValidation tests request input validation
@@ -189,6 +192,136 @@ func TestPublishEvent(t *testing.T) {
 
 		if status := rr.Code; status != http.StatusCreated {
 			t.Errorf("Expected status %d for nil payload, got %d. Body: %s", http.StatusCreated, status, rr.Body.String())
+		}
+	})
+}
+
+// TestReadTopicEvents tests the GET /api/v1/topics/{topic}/events endpoint
+func TestReadTopicEvents(t *testing.T) {
+	// Use our shared test setup
+	setup := NewTestServerSetup(t)
+	defer setup.Close()
+
+	handlers := setup.Server.handlers
+	auth := setup.Auth
+
+	t.Run("successful_read_with_offset_and_limit", func(t *testing.T) {
+		// Generate test token
+		token := setup.GenerateTestToken(t, "test-reader", false)
+
+		// First, publish some test events to have data to read
+		client := NewHTTPClient(&JWTClaims{ClientID: "test-publisher", IsAdmin: false})
+		ctx := context.Background()
+
+		// Create test events
+		for i := 0; i < 5; i++ {
+			eventRecord := eventlogpkg.NewRecord("news.sports", []byte(fmt.Sprintf(`{"message": "Event %d"}`, i)))
+			err := setup.Node.PublishEvent(ctx, client, eventRecord)
+			if err != nil {
+				t.Fatalf("Failed to publish test event %d: %v", i, err)
+			}
+		}
+
+		// Create test request for reading events
+		req, err := http.NewRequest("GET", "/api/v1/topics/news.sports/events?offset=1&limit=3", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		// Add claims to context (simulating middleware)
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		ctx = context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Add topic to context (simulating routing)
+		ctx = context.WithValue(ctx, TopicKey, "news.sports")
+		req = req.WithContext(ctx)
+
+		// Execute request
+		rr := httptest.NewRecorder()
+		handlers.ReadTopicEvents(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("Expected status %d, got %d. Body: %s", http.StatusOK, status, rr.Body.String())
+		}
+
+		// Parse response
+		var response ReadEventsResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+			t.Errorf("Failed to parse response: %v", err)
+		}
+
+		// Verify response fields
+		if response.Topic != "news.sports" {
+			t.Errorf("Expected topic 'news.sports', got %s", response.Topic)
+		}
+		if response.StartOffset != 1 {
+			t.Errorf("Expected startOffset 1, got %d", response.StartOffset)
+		}
+		if len(response.Events) != 3 {
+			t.Errorf("Expected 3 events, got %d", len(response.Events))
+		}
+	})
+
+	t.Run("missing_authentication", func(t *testing.T) {
+		req, err := http.NewRequest("GET", "/api/v1/topics/news.sports/events", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rr := httptest.NewRecorder()
+		handlers.ReadTopicEvents(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("Expected status %d, got %d", http.StatusUnauthorized, status)
+		}
+	})
+
+	t.Run("invalid_topic", func(t *testing.T) {
+		token := setup.GenerateTestToken(t, "test-reader", false)
+
+		req, err := http.NewRequest("GET", "/api/v1/topics/invalid-topic!/events", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, _ := auth.ValidateToken(token)
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		ctx = context.WithValue(ctx, TopicKey, "invalid-topic!")
+		req = req.WithContext(ctx)
+
+		rr := httptest.NewRecorder()
+		handlers.ReadTopicEvents(rr, req)
+
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, status)
+		}
+	})
+
+	t.Run("invalid_offset_parameter", func(t *testing.T) {
+		token := setup.GenerateTestToken(t, "test-reader", false)
+
+		req, err := http.NewRequest("GET", "/api/v1/topics/news.sports/events?offset=invalid", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		claims, _ := auth.ValidateToken(token)
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		ctx = context.WithValue(ctx, TopicKey, "news.sports")
+		req = req.WithContext(ctx)
+
+		rr := httptest.NewRecorder()
+		handlers.ReadTopicEvents(rr, req)
+
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Errorf("Expected status %d, got %d", http.StatusBadRequest, status)
 		}
 	})
 }

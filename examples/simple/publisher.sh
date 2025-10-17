@@ -5,6 +5,8 @@
 set -e
 
 CLI="../../bin/eventmesh-cli"
+SERVER="http://localhost:8081"
+CLIENT_ID="publisher"
 
 echo "EventMesh Publisher"
 echo "=================="
@@ -15,23 +17,39 @@ if [ ! -f "$CLI" ]; then
     exit 1
 fi
 
-# Authenticate
+# Authenticate and capture token
 echo "Authenticating..."
-$CLI auth --server http://localhost:8081 --client-id publisher
+AUTH_OUTPUT=$($CLI auth --server "$SERVER" --client-id "$CLIENT_ID")
+echo "$AUTH_OUTPUT"
+
+# Extract token from output
+TOKEN=$(echo "$AUTH_OUTPUT" | grep "Token:" | awk '{print $2}')
+
+if [ -z "$TOKEN" ]; then
+    echo "Error: Failed to get authentication token"
+    exit 1
+fi
 
 # Publish some events
 echo ""
 echo "Publishing events..."
 
-$CLI publish --server http://localhost:8081 --client-id publisher \
+echo "Publishing to news.sports (subscriber should see this)..."
+$CLI publish --server "$SERVER" --client-id "$CLIENT_ID" --token "$TOKEN" \
     --topic "news.sports" \
     --payload '{"headline": "Local team wins championship!", "category": "sports"}'
 
-$CLI publish --server http://localhost:8081 --client-id publisher \
+sleep 1
+
+echo "Publishing to news.weather..."
+$CLI publish --server "$SERVER" --client-id "$CLIENT_ID" --token "$TOKEN" \
     --topic "news.weather" \
     --payload '{"forecast": "Sunny with high of 75F", "category": "weather"}'
 
-$CLI publish --server http://localhost:8081 --client-id publisher \
+sleep 1
+
+echo "Publishing to news.tech..."
+$CLI publish --server "$SERVER" --client-id "$CLIENT_ID" --token "$TOKEN" \
     --topic "news.tech" \
     --payload '{"headline": "New programming language released", "category": "tech"}'
 

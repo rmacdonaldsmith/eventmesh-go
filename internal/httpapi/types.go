@@ -107,3 +107,11 @@ type EventStreamMessage struct {
 	Timestamp time.Time   `json:"timestamp"`
 	Offset    int64       `json:"offset"`
 }
+
+// ReadEventsResponse represents a response for reading events from a topic
+type ReadEventsResponse struct {
+	Events      []EventStreamMessage `json:"events"`
+	Topic       string               `json:"topic"`
+	StartOffset int64                `json:"startOffset"`
+	Count       int                  `json:"count"`
+}

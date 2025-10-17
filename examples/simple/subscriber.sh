@@ -5,6 +5,8 @@
 set -e
 
 CLI="../../bin/eventmesh-cli"
+SERVER="http://localhost:8081"
+CLIENT_ID="subscriber"
 
 echo "EventMesh Subscriber"
 echo "==================="
@@ -15,18 +17,31 @@ if [ ! -f "$CLI" ]; then
     exit 1
 fi
 
-# Authenticate
+# Authenticate and capture token
 echo "Authenticating..."
-$CLI auth --server http://localhost:8081 --client-id subscriber
+AUTH_OUTPUT=$($CLI auth --server "$SERVER" --client-id "$CLIENT_ID")
+echo "$AUTH_OUTPUT"
 
-# Subscribe to news topics
+# Extract token from output
+TOKEN=$(echo "$AUTH_OUTPUT" | grep "Token:" | awk '{print $2}')
+
+if [ -z "$TOKEN" ]; then
+    echo "Error: Failed to get authentication token"
+    exit 1
+fi
+
+# Subscribe to news topics (using wildcard pattern)
 echo "Creating subscription to 'news.*' topics..."
-$CLI subscribe --server http://localhost:8081 --client-id subscriber --topic "news.*"
+$CLI subscribe --server "$SERVER" --client-id "$CLIENT_ID" --token "$TOKEN" --topic "news.*"
 
 echo ""
 echo "Streaming events (Press Ctrl+C to stop):"
 echo "Run ./publisher.sh in another terminal to see events here"
 echo ""
+echo "Note: Streaming from news.sports topic"
+echo "(Subscription covers news.* pattern, but streaming requires specific topics)"
+echo ""
 
-# Stream events
-$CLI stream --server http://localhost:8081 --client-id subscriber --topic "news.*"
+# Stream from one specific topic to avoid output conflicts
+# The subscription will still catch events from all news.* topics
+$CLI stream --server "$SERVER" --client-id "$CLIENT_ID" --token "$TOKEN" --topic "news.sports"
