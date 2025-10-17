@@ -1,6 +1,16 @@
 #!/bin/bash
 
 # EventMesh Replay Demo - demonstrates offset-based event reading
+#
+# PREREQUISITES:
+# 1. Run 'make build' from project root to build binaries
+# 2. Start EventMesh server: ./start-server.sh (in another terminal)
+# 3. Run this script: ./replay-demo.sh
+#
+# This script demonstrates:
+# - Publishing events to a topic
+# - Reading historical events from specific offsets
+# - Using the CLI replay and topics info commands
 
 set -e
 
@@ -10,20 +20,43 @@ CLIENT_ID="replay-demo"
 
 echo "EventMesh Replay Demo"
 echo "===================="
+echo ""
+echo "This demo shows offset-based event replay capabilities."
+echo "Prerequisites:"
+echo "  1. EventMesh binaries built (make build)"
+echo "  2. EventMesh server running (./start-server.sh)"
+echo ""
 
 # Check CLI exists
+echo "🔍 Checking for CLI binary..."
 if [ ! -f "$CLI" ]; then
-    echo "Error: Please run 'make build' from project root first"
+    echo "❌ Error: CLI binary not found at $CLI"
+    echo ""
+    echo "To fix this:"
+    echo "  1. Navigate to project root: cd ../.."
+    echo "  2. Build the project: make build"
+    echo "  3. Return here: cd examples/simple"
+    echo "  4. Run this script again: ./replay-demo.sh"
     exit 1
 fi
+echo "✅ CLI binary found"
 
 # Check server is running
-echo "Checking server..."
+echo "🔍 Checking server connection..."
 if ! $CLI health --server "$SERVER" --client-id health > /dev/null 2>&1; then
-    echo "Error: Server not running. Start it first with:"
-    echo "  ./start-server.sh"
+    echo "❌ Error: Cannot connect to EventMesh server at $SERVER"
+    echo ""
+    echo "To fix this:"
+    echo "  1. Open a new terminal"
+    echo "  2. Navigate to: cd examples/simple"
+    echo "  3. Start the server: ./start-server.sh"
+    echo "  4. Wait for 'HTTP server listening on :8081' message"
+    echo "  5. Return to this terminal and run: ./replay-demo.sh"
+    echo ""
+    echo "Server startup command: ./start-server.sh"
     exit 1
 fi
+echo "✅ Server is running and accessible"
 
 # Authenticate and capture token
 echo "Authenticating..."
