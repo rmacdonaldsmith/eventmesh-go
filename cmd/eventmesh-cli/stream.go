@@ -15,6 +15,7 @@ import (
 func newStreamCommand() *cobra.Command {
 	var (
 		topic        string
+		offset       int64
 		bufferSize   int
 		prettyFormat bool
 	)
@@ -24,20 +25,22 @@ func newStreamCommand() *cobra.Command {
 		Short: "Stream events from a topic in real-time",
 		Long: `Stream events from a topic in real-time using Server-Sent Events.
 This automatically subscribes to the topic and streams events as they are published.
+Optionally specify an offset to start streaming from historical events.
 Press Ctrl+C to stop streaming.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStream(topic, bufferSize, prettyFormat)
+			return runStream(topic, offset, bufferSize, prettyFormat)
 		},
 	}
 
 	cmd.Flags().StringVar(&topic, "topic", "", "Topic to stream from (optional - streams all events if not specified)")
+	cmd.Flags().Int64Var(&offset, "offset", -1, "Starting offset for streaming (-1 means real-time only, 0+ starts from historical events)")
 	cmd.Flags().IntVar(&bufferSize, "buffer-size", 100, "Event buffer size")
 	cmd.Flags().BoolVar(&prettyFormat, "pretty", false, "Pretty print JSON payloads")
 
 	return cmd
 }
 
-func runStream(topic string, bufferSize int, prettyFormat bool) error {
+func runStream(topic string, offset int64, bufferSize int, prettyFormat bool) error {
 	if err := requireAuthentication(); err != nil {
 		return err
 	}
@@ -63,11 +66,20 @@ func runStream(topic string, bufferSize int, prettyFormat bool) error {
 		MaxReconnectAttempts: 0, // Infinite retries
 	}
 
+	// Note about offset parameter
+	if offset >= 0 {
+		fmt.Printf("📝 Note: Offset-based streaming will first replay historical events from offset %d, then continue with real-time events\n", offset)
+		fmt.Printf("   (For batch historical event reading only, use 'eventmesh-cli replay' instead)\n\n")
+	}
+
 	fmt.Printf("🌊 Starting event stream from %s", serverURL)
 	if topic != "" {
 		fmt.Printf(" (topic: %s)", topic)
 	} else {
 		fmt.Printf(" (all topics)")
+	}
+	if offset >= 0 {
+		fmt.Printf(" from offset %d", offset)
 	}
 	fmt.Println("...")
 	fmt.Println("Press Ctrl+C to stop streaming")

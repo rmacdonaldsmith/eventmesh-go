@@ -47,6 +47,8 @@ and real-time event streaming.`,
 	rootCmd.AddCommand(newSubscribeCommand())
 	rootCmd.AddCommand(newSubscriptionsCommand())
 	rootCmd.AddCommand(newStreamCommand())
+	rootCmd.AddCommand(newReplayCommand())
+	rootCmd.AddCommand(newTopicsCommand())
 	rootCmd.AddCommand(newAdminCommand())
 	rootCmd.AddCommand(newHealthCommand())
 

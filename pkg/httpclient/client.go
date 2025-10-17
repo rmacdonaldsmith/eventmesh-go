@@ -285,3 +285,31 @@ func (c *Client) GetToken() string {
 func (c *Client) SetToken(token string) {
 	c.token = token
 }
+
+// ReadEvents reads events from a topic starting at a given offset
+func (c *Client) ReadEvents(ctx context.Context, topic string, offset int64, limit int) (*ReadEventsResponse, error) {
+	if c.token == "" {
+		return nil, fmt.Errorf("client not authenticated - call Authenticate() first")
+	}
+
+	// Build URL with query parameters
+	path := fmt.Sprintf("/api/v1/topics/%s/events", url.PathEscape(topic))
+	queryParams := url.Values{}
+	if offset >= 0 {
+		queryParams.Set("offset", fmt.Sprintf("%d", offset))
+	}
+	if limit > 0 {
+		queryParams.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if len(queryParams) > 0 {
+		path += "?" + queryParams.Encode()
+	}
+
+	var resp ReadEventsResponse
+	err := c.doRequest(ctx, "GET", path, nil, &resp, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read events: %w", err)
+	}
+
+	return &resp, nil
+}

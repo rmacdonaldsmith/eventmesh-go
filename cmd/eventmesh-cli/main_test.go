@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,7 +40,7 @@ func TestHTTPClientIntegration(t *testing.T) {
 				PeerLinkHealthy:     true,
 				ConnectedClients:    5,
 				ConnectedPeers:      3,
-				Message:            "All systems operational",
+				Message:             "All systems operational",
 			}
 			w.Header().Set("Content-Type", "application/json")
 			if err := json.NewEncoder(w).Encode(response); err != nil {
@@ -93,7 +94,38 @@ func TestHTTPClientIntegration(t *testing.T) {
 			}
 
 		default:
-			w.WriteHeader(http.StatusNotFound)
+			// Handle ReadEvents endpoint with pattern matching
+			if strings.Contains(r.URL.Path, "/api/v1/topics/") && strings.Contains(r.URL.Path, "/events") && r.Method == "GET" {
+				events := []httpclient.EventStreamMessage{
+					{
+						EventID:   "test.topic-0",
+						Topic:     "test.topic",
+						Payload:   map[string]string{"message": "Event 0"},
+						Timestamp: time.Now().Add(-10 * time.Minute),
+						Offset:    0,
+					},
+					{
+						EventID:   "test.topic-1",
+						Topic:     "test.topic",
+						Payload:   map[string]string{"message": "Event 1"},
+						Timestamp: time.Now().Add(-5 * time.Minute),
+						Offset:    1,
+					},
+				}
+				response := httpclient.ReadEventsResponse{
+					Events:      events,
+					Topic:       "test.topic",
+					StartOffset: 0,
+					Count:       len(events),
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
 		}
 	}))
 	defer server.Close()
@@ -153,6 +185,20 @@ func TestHTTPClientIntegration(t *testing.T) {
 		require.NoError(t, err)
 		require.Len(t, subscriptions, 1)
 		assert.Equal(t, "sub-123", subscriptions[0].ID)
+	})
+
+	t.Run("read events", func(t *testing.T) {
+		ctx := context.Background()
+		client.SetToken("test-token")
+
+		response, err := client.ReadEvents(ctx, "test.topic", 0, 10)
+		require.NoError(t, err)
+		assert.Equal(t, "test.topic", response.Topic)
+		assert.Equal(t, int64(0), response.StartOffset)
+		assert.Equal(t, 2, response.Count)
+		require.Len(t, response.Events, 2)
+		assert.Equal(t, "test.topic-0", response.Events[0].EventID)
+		assert.Equal(t, int64(0), response.Events[0].Offset)
 	})
 }
 
@@ -218,6 +264,8 @@ func TestMainCommandHelp(t *testing.T) {
 	rootCmd.AddCommand(newSubscribeCommand())
 	rootCmd.AddCommand(newSubscriptionsCommand())
 	rootCmd.AddCommand(newStreamCommand())
+	rootCmd.AddCommand(newReplayCommand())
+	rootCmd.AddCommand(newTopicsCommand())
 	rootCmd.AddCommand(newAdminCommand())
 
 	// Capture output
@@ -238,6 +286,8 @@ func TestMainCommandHelp(t *testing.T) {
 	assert.Contains(t, helpOutput, "subscribe")
 	assert.Contains(t, helpOutput, "subscriptions")
 	assert.Contains(t, helpOutput, "stream")
+	assert.Contains(t, helpOutput, "replay")
+	assert.Contains(t, helpOutput, "topics")
 	assert.Contains(t, helpOutput, "admin")
 }
 
