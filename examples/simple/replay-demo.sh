@@ -4,8 +4,8 @@
 #
 # PREREQUISITES:
 # 1. Run 'make build' from project root to build binaries
-# 2. Start EventMesh server: ./start-server.sh (in another terminal)
-# 3. Run this script: ./replay-demo.sh
+# 2. Start EventMesh server: examples/simple/start-server.sh (in another terminal)
+# 3. Run this script from anywhere: ./examples/simple/replay-demo.sh
 #
 # This script demonstrates:
 # - Publishing events to a topic
@@ -14,7 +14,11 @@
 
 set -e
 
-CLI="../../bin/eventmesh-cli"
+# Get script directory and calculate paths relative to it
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+CLI="$PROJECT_ROOT/bin/eventmesh-cli"
+SERVER_SCRIPT="$SCRIPT_DIR/start-server.sh"
 SERVER="http://localhost:8081"
 CLIENT_ID="replay-demo"
 
@@ -24,7 +28,7 @@ echo ""
 echo "This demo shows offset-based event replay capabilities."
 echo "Prerequisites:"
 echo "  1. EventMesh binaries built (make build)"
-echo "  2. EventMesh server running (./start-server.sh)"
+echo "  2. EventMesh server running ($SERVER_SCRIPT)"
 echo ""
 
 # Check CLI exists
@@ -33,10 +37,9 @@ if [ ! -f "$CLI" ]; then
     echo "❌ Error: CLI binary not found at $CLI"
     echo ""
     echo "To fix this:"
-    echo "  1. Navigate to project root: cd ../.."
+    echo "  1. Navigate to project root: cd $PROJECT_ROOT"
     echo "  2. Build the project: make build"
-    echo "  3. Return here: cd examples/simple"
-    echo "  4. Run this script again: ./replay-demo.sh"
+    echo "  3. Run this script again from anywhere"
     exit 1
 fi
 echo "✅ CLI binary found"
@@ -48,12 +51,11 @@ if ! $CLI health --server "$SERVER" --client-id health > /dev/null 2>&1; then
     echo ""
     echo "To fix this:"
     echo "  1. Open a new terminal"
-    echo "  2. Navigate to: cd examples/simple"
-    echo "  3. Start the server: ./start-server.sh"
-    echo "  4. Wait for 'HTTP server listening on :8081' message"
-    echo "  5. Return to this terminal and run: ./replay-demo.sh"
+    echo "  2. Start the server: $SERVER_SCRIPT"
+    echo "  3. Wait for 'HTTP server listening on :8081' message"
+    echo "  4. Return to this terminal and run this script again"
     echo ""
-    echo "Server startup command: ./start-server.sh"
+    echo "Server startup command: $SERVER_SCRIPT"
     exit 1
 fi
 echo "✅ Server is running and accessible"
