@@ -4,7 +4,10 @@
 
 set -e
 
-CLI="../../bin/eventmesh-cli"
+# Get script directory and calculate paths relative to it
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+CLI="$PROJECT_ROOT/bin/eventmesh-cli"
 SERVER="http://localhost:8081"
 CLIENT_ID="publisher"
 
@@ -13,7 +16,8 @@ echo "=================="
 
 # Check CLI exists
 if [ ! -f "$CLI" ]; then
-    echo "Error: Please run 'make build' from project root first"
+    echo "Error: CLI binary not found at $CLI"
+    echo "Please run 'make build' from project root: $PROJECT_ROOT"
     exit 1
 fi
 
