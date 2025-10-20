@@ -42,6 +42,40 @@ This demonstrates:
 - Replaying events from specific offsets (`replay`)
 - Comparing replay vs real-time streaming
 
+## Multi-Node Discovery - NEW!
+
+EventMesh nodes can now automatically discover each other to form a mesh network:
+
+### 6. Multi-Node Mesh Demo
+```bash
+./multi-node-demo.sh
+```
+
+This starts a 3-node mesh with automatic discovery:
+- **Node1** (seed): Acts as the discovery seed node
+- **Node2**: Automatically discovers and connects to Node1
+- **Node3**: Automatically discovers and connects to Node1
+
+**What you'll see:**
+```
+🔗 EventMesh Multi-Node Discovery Demo
+🌱 Starting Node1 (Seed Node) on ports 8091/8092/8093...
+🔍 Starting Node2 (discovers Node1) on ports 8094/8095/8096...
+🔍 Starting Node3 (discovers Node1) on ports 8097/8098/8099...
+🎉 SUCCESS: All 3 nodes are running!
+```
+
+### 7. Test Multi-Node Event Flow
+```bash
+./mesh-test.sh    # (run in another terminal while multi-node-demo.sh is running)
+```
+
+This demonstrates:
+- Events published to one node reach all other nodes
+- Cross-node event replay and consistency
+- Publishing from any node in the mesh
+- Automatic mesh formation through discovery
+
 ## What's Happening
 
 - **Server**: EventMesh server running on port 8081
@@ -76,6 +110,51 @@ EventMesh CLI provides several commands for working with events:
 - `eventmesh-cli admin` - Admin operations (stats, clients, etc.)
 
 Run any command with `--help` for detailed usage information.
+
+## Node Discovery Reference
+
+### Manual Multi-Node Setup
+
+You can also start nodes manually with discovery:
+
+```bash
+# Terminal 1: Start seed node
+../../bin/eventmesh --http --http-port 8091 --node-id node1 --peer-listen ":8093"
+
+# Terminal 2: Start node that discovers node1
+../../bin/eventmesh --http --http-port 8094 --node-id node2 --peer-listen ":8096" \
+  --seed-nodes "localhost:8093"
+
+# Terminal 3: Start another node that discovers node1
+../../bin/eventmesh --http --http-port 8097 --node-id node3 --peer-listen ":8099" \
+  --seed-nodes "localhost:8093"
+```
+
+### Discovery Process
+
+When a node starts with `--seed-nodes`:
+
+1. **Bootstrap Configuration**: Parses seed node addresses
+2. **Discovery Service**: Creates static discovery from seed list
+3. **Peer Connection**: Automatically connects to discovered peers
+4. **Mesh Formation**: Nodes can now exchange events
+
+**Discovery Logs:**
+```
+🌱 Bootstrap configuration: 1 seed nodes
+   Seed 1: localhost:8093
+🔍 Discovery found 1 peers
+   Connecting to peer: localhost:8093
+   ✅ Connected to peer: localhost:8093
+🌐 Discovery complete: 1/1 peers connected
+```
+
+### Key Benefits
+
+- **Zero Configuration**: Nodes find each other automatically
+- **Fault Tolerant**: Discovery continues even if some connections fail
+- **Scalable**: Add new nodes by pointing them to any existing seed
+- **Simple**: Just add `--seed-nodes="host:port,host2:port2"` to any node
 
 ## Development Mode (No Authentication)
 
