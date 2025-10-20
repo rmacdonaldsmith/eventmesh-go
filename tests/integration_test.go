@@ -207,7 +207,7 @@ func runIntegrationWorkflow(t *testing.T) error {
 	if err != nil {
 		t.Logf("Admin command failed (expected for non-admin user): %s", adminOutput)
 		// Admin commands require special privileges - this is expected to fail for regular users
-		if strings.Contains(adminOutput, "Admin privileges required") {
+		if strings.Contains(adminOutput, "403 Forbidden") || strings.Contains(adminOutput, "Forbidden") {
 			t.Log("✅ Admin privilege check working correctly")
 		} else {
 			return fmt.Errorf("unexpected admin command error: %v", err)
