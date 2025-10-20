@@ -25,6 +25,9 @@ func TestConfig_NewConfig(t *testing.T) {
 	if config.PeerLinkConfig != nil {
 		t.Errorf("Expected PeerLinkConfig to be nil, got %v", config.PeerLinkConfig)
 	}
+	if config.BootstrapConfig != nil {
+		t.Errorf("Expected BootstrapConfig to be nil, got %v", config.BootstrapConfig)
+	}
 }
 
 // TestConfig_Validate tests configuration validation
@@ -129,5 +132,41 @@ func TestConfig_ValidateWithPeerLinkConfig(t *testing.T) {
 	err = config.Validate()
 	if err == nil {
 		t.Error("Expected error for invalid PeerLink config, got nil")
+	}
+}
+
+// TestBootstrapConfig_Creation tests creating BootstrapConfig with seed nodes
+func TestBootstrapConfig_Creation(t *testing.T) {
+	// Test creating BootstrapConfig with seed nodes
+	seedNodes := []string{"node1:8080", "node2:8080"}
+	bootstrapConfig := NewBootstrapConfig(seedNodes)
+
+	if bootstrapConfig == nil {
+		t.Fatal("Expected BootstrapConfig to be created, got nil")
+	}
+	if len(bootstrapConfig.SeedNodes) != 2 {
+		t.Errorf("Expected 2 seed nodes, got %d", len(bootstrapConfig.SeedNodes))
+	}
+	if bootstrapConfig.SeedNodes[0] != "node1:8080" {
+		t.Errorf("Expected first seed node 'node1:8080', got '%s'", bootstrapConfig.SeedNodes[0])
+	}
+	if bootstrapConfig.SeedNodes[1] != "node2:8080" {
+		t.Errorf("Expected second seed node 'node2:8080', got '%s'", bootstrapConfig.SeedNodes[1])
+	}
+}
+
+// TestConfig_WithBootstrapConfig tests setting bootstrap configuration
+func TestConfig_WithBootstrapConfig(t *testing.T) {
+	config := NewConfig("node-1", "localhost:8080")
+	seedNodes := []string{"seed1:8080", "seed2:8080"}
+	bootstrapConfig := NewBootstrapConfig(seedNodes)
+
+	config = config.WithBootstrapConfig(bootstrapConfig)
+
+	if config.BootstrapConfig == nil {
+		t.Fatal("Expected BootstrapConfig to be set, got nil")
+	}
+	if len(config.BootstrapConfig.SeedNodes) != 2 {
+		t.Errorf("Expected 2 seed nodes, got %d", len(config.BootstrapConfig.SeedNodes))
 	}
 }

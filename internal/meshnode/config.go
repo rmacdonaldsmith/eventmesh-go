@@ -7,6 +7,13 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
 )
 
+// BootstrapConfig represents configuration for node discovery and bootstrapping
+type BootstrapConfig struct {
+	// SeedNodes is a list of seed node addresses to connect to on startup
+	// Format: ["host:port", "host2:port2", ...]
+	SeedNodes []string
+}
+
 var (
 	// ErrEmptyNodeID is returned when node ID is empty
 	ErrEmptyNodeID = errors.New("node ID cannot be empty")
@@ -31,6 +38,9 @@ type Config struct {
 
 	// PeerLink configuration - will be passed to PeerLink component
 	PeerLinkConfig *peerlink.Config
+
+	// Bootstrap configuration - contains discovery settings like seed nodes
+	BootstrapConfig *BootstrapConfig
 }
 
 // NewConfig creates a new MeshNode configuration with safe defaults
@@ -42,6 +52,7 @@ func NewConfig(nodeID, listenAddress string) *Config {
 		EventLogConfig:     nil,
 		RoutingTableConfig: nil,
 		PeerLinkConfig:     nil,
+		BootstrapConfig:    nil,
 	}
 }
 
@@ -80,4 +91,17 @@ func (c *Config) WithRoutingTableConfig(config interface{}) *Config {
 func (c *Config) WithPeerLinkConfig(config *peerlink.Config) *Config {
 	c.PeerLinkConfig = config
 	return c
+}
+
+// WithBootstrapConfig sets the Bootstrap configuration
+func (c *Config) WithBootstrapConfig(config *BootstrapConfig) *Config {
+	c.BootstrapConfig = config
+	return c
+}
+
+// NewBootstrapConfig creates a new BootstrapConfig with the specified seed nodes
+func NewBootstrapConfig(seedNodes []string) *BootstrapConfig {
+	return &BootstrapConfig{
+		SeedNodes: seedNodes,
+	}
 }
