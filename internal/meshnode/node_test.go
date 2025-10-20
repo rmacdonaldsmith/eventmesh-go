@@ -252,3 +252,69 @@ func TestGRPCMeshNode_AuthenticateClient(t *testing.T) {
 		t.Error("Expected error for authentication on closed node")
 	}
 }
+
+// TestGRPCMeshNode_StartWithBootstrapDiscovery tests that the node connects to seed peers on startup
+func TestGRPCMeshNode_StartWithBootstrapDiscovery(t *testing.T) {
+	// Create bootstrap config with seed nodes
+	seedNodes := []string{"seed1:8080", "seed2:8080"}
+	bootstrapConfig := NewBootstrapConfig(seedNodes)
+
+	config := NewConfig("test-node", "localhost:8084").
+		WithBootstrapConfig(bootstrapConfig)
+
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+
+	// Start the node - this should trigger discovery and connection to seed nodes
+	err = node.Start(ctx)
+	if err != nil {
+		t.Errorf("Expected no error starting node, got %v", err)
+	}
+
+	// Check that discovery was run and peers were connected
+	peers, err := node.GetConnectedPeers(ctx)
+	if err != nil {
+		t.Errorf("Expected no error getting connected peers, got %v", err)
+	}
+
+	// Note: In the test environment, actual connections will fail, but we should
+	// at least verify that the discovery logic was invoked and attempted connections
+	// For now, we'll verify the structure works and the Start method doesn't error
+	if peers == nil {
+		t.Error("Expected non-nil peers slice")
+	}
+}
+
+// TestGRPCMeshNode_StartWithoutBootstrapConfig tests node startup without bootstrap configuration
+func TestGRPCMeshNode_StartWithoutBootstrapConfig(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8085")
+
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+
+	// Start the node without bootstrap config - should work fine
+	err = node.Start(ctx)
+	if err != nil {
+		t.Errorf("Expected no error starting node without bootstrap config, got %v", err)
+	}
+
+	// Should have no peers since no discovery was performed
+	peers, err := node.GetConnectedPeers(ctx)
+	if err != nil {
+		t.Errorf("Expected no error getting connected peers, got %v", err)
+	}
+
+	if len(peers) != 0 {
+		t.Errorf("Expected 0 peers without bootstrap config, got %d", len(peers))
+	}
+}

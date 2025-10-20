@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rmacdonaldsmith/eventmesh-go/internal/discovery"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/routingtable"
@@ -113,6 +114,14 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 	// For MVP: PeerLink doesn't have explicit Start/Stop in interface
 	// The components manage their own lifecycle
 	// In future phases, we'll add explicit lifecycle management
+
+	// Run discovery if bootstrap configuration is provided
+	if n.config.BootstrapConfig != nil && len(n.config.BootstrapConfig.SeedNodes) > 0 {
+		if err := n.runDiscovery(ctx); err != nil {
+			// Log error but don't fail startup - discovery is best effort
+			fmt.Printf("⚠️ Discovery failed: %v\n", err)
+		}
+	}
 
 	// Start listening for incoming peer events (including subscription events)
 	// This implements REQ-MNODE-003: Handle incoming peer subscription notifications
@@ -794,6 +803,40 @@ func (n *GRPCMeshNode) removeSubscriptionMetadata(clientID, subscriptionID strin
 		delete(n.subscriptions, clientID)
 	}
 
+	return nil
+}
+
+// runDiscovery performs node discovery and connects to discovered peers
+func (n *GRPCMeshNode) runDiscovery(ctx context.Context) error {
+	// Create static discovery service from bootstrap config
+	discoveryService := discovery.NewStaticDiscovery(n.config.BootstrapConfig.SeedNodes)
+
+	// Find peer nodes
+	peers, err := discoveryService.FindPeers(ctx)
+	if err != nil {
+		return fmt.Errorf("discovery failed: %w", err)
+	}
+
+	fmt.Printf("🔍 Discovery found %d peers\n", len(peers))
+
+	// Connect to discovered peers
+	connectedCount := 0
+	for _, peer := range peers {
+		fmt.Printf("   Connecting to peer: %s\n", peer.Address())
+
+		// Attempt to connect to the peer
+		err := n.peerLink.Connect(ctx, peer)
+		if err != nil {
+			// Log error but continue with other peers
+			fmt.Printf("   ⚠️ Failed to connect to %s: %v\n", peer.Address(), err)
+			continue
+		}
+
+		connectedCount++
+		fmt.Printf("   ✅ Connected to peer: %s\n", peer.Address())
+	}
+
+	fmt.Printf("🌐 Discovery complete: %d/%d peers connected\n", connectedCount, len(peers))
 	return nil
 }
 
