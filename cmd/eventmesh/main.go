@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -34,6 +35,7 @@ func main() {
 		noAuth      = flag.Bool("no-auth", false, "Disable authentication for development (INSECURE - development only)")
 		showVersion = flag.Bool("version", false, "Show version and exit")
 		showHealth  = flag.Bool("health", false, "Show health status and exit")
+		seedNodes   = flag.String("seed-nodes", "", "Comma-separated list of seed node addresses (e.g., \"node1:8080,node2:8080\")")
 	)
 	flag.Parse()
 
@@ -60,9 +62,25 @@ func main() {
 	}
 	peerLinkConfig.SetDefaults()
 
+	// Parse seed nodes if provided
+	var bootstrapConfig *meshnode.BootstrapConfig
+	if *seedNodes != "" {
+		seedList := strings.Split(strings.TrimSpace(*seedNodes), ",")
+		// Clean up whitespace from each seed node address
+		for i, seed := range seedList {
+			seedList[i] = strings.TrimSpace(seed)
+		}
+		bootstrapConfig = meshnode.NewBootstrapConfig(seedList)
+		log.Printf("🌱 Bootstrap configuration: %d seed nodes", len(seedList))
+		for i, seed := range seedList {
+			log.Printf("   Seed %d: %s", i+1, seed)
+		}
+	}
+
 	// Create MeshNode configuration
 	config := meshnode.NewConfig(*nodeID, *listenAddr).
-		WithPeerLinkConfig(peerLinkConfig)
+		WithPeerLinkConfig(peerLinkConfig).
+		WithBootstrapConfig(bootstrapConfig)
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
