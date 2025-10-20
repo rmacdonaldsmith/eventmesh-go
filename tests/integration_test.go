@@ -61,6 +61,49 @@ func TestSingleNodeIntegration(t *testing.T) {
 	t.Log("✅ Single node integration test completed successfully")
 }
 
+// TestSingleNodeNoAuthIntegration tests the EventMesh workflow using no-auth mode
+func TestSingleNodeNoAuthIntegration(t *testing.T) {
+	// Skip in short mode since this is a long-running integration test
+	if testing.Short() {
+		t.Skip("Skipping no-auth integration test in short mode")
+	}
+
+	// Ensure binaries are built
+	if err := buildBinaries(); err != nil {
+		t.Fatalf("Failed to build binaries: %v", err)
+	}
+
+	// Start EventMesh server in no-auth mode
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	serverCmd, err := startEventMeshServerNoAuth(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start no-auth server: %v", err)
+	}
+	defer func() {
+		if serverCmd.Process != nil {
+			serverCmd.Process.Kill()
+			serverCmd.Wait()
+		}
+	}()
+
+	// Wait for server to be ready (use different port for no-auth test)
+	noAuthServerURL := "http://localhost:8086"
+	if err := waitForServerReady(noAuthServerURL, 30*time.Second); err != nil {
+		t.Fatalf("No-auth server failed to become ready: %v", err)
+	}
+
+	t.Log("✅ EventMesh no-auth server started and ready")
+
+	// Run the no-auth integration test workflow
+	if err := runNoAuthIntegrationWorkflow(t, noAuthServerURL); err != nil {
+		t.Fatalf("No-auth integration workflow failed: %v", err)
+	}
+
+	t.Log("✅ Single node no-auth integration test completed successfully")
+}
+
 // buildBinaries ensures both eventmesh and eventmesh-cli binaries are built
 func buildBinaries() error {
 	// Build EventMesh server
@@ -198,7 +241,34 @@ func runIntegrationWorkflow(t *testing.T) error {
 		return fmt.Errorf("event streaming test failed: %v", err)
 	}
 
-	// Step 7: Test admin commands (skip if no admin privileges)
+	// Step 7: Test offset-based event replay
+	t.Log("📖 Testing offset-based event replay...")
+	if err := testEventReplay(t, token); err != nil {
+		return fmt.Errorf("event replay test failed: %v", err)
+	}
+
+	// Step 8: Test topic info command
+	t.Log("ℹ️ Testing topic info...")
+	topicInfoOutput, err := runCLICommand("topics", "info",
+		"--server", testServerURL,
+		"--client-id", testClientID,
+		"--token", token,
+		"--topic", testTopic)
+	if err != nil {
+		return fmt.Errorf("topic info failed: %v", err)
+	}
+	if !strings.Contains(topicInfoOutput, testTopic) {
+		return fmt.Errorf("topic info output unexpected: %s", topicInfoOutput)
+	}
+	t.Log("✅ Topic info working correctly")
+
+	// Step 9: Test wildcard subscriptions
+	t.Log("🔍 Testing wildcard subscription...")
+	if err := testWildcardSubscription(t, token); err != nil {
+		return fmt.Errorf("wildcard subscription test failed: %v", err)
+	}
+
+	// Step 10: Test admin commands (skip if no admin privileges)
 	t.Log("🔧 Testing admin commands...")
 	adminOutput, err := runCLICommand("admin", "stats",
 		"--server", testServerURL,
@@ -219,7 +289,13 @@ func runIntegrationWorkflow(t *testing.T) error {
 		t.Log("✅ Admin command succeeded (unexpected but acceptable)")
 	}
 
-	// Step 8: Clean up - delete subscription
+	// Step 11: Test error handling scenarios
+	t.Log("❌ Testing error handling...")
+	if err := testErrorHandling(t, token); err != nil {
+		return fmt.Errorf("error handling test failed: %v", err)
+	}
+
+	// Step 12: Clean up - delete subscription
 	t.Log("🧹 Testing subscription deletion...")
 	deleteOutput, err := runCLICommand("subscriptions", "delete",
 		"--server", testServerURL,
@@ -324,4 +400,228 @@ func extractSubscriptionIDFromOutput(output string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("subscription ID not found in output: %s", output)
+}
+
+// testEventReplay tests offset-based event replay functionality
+func testEventReplay(t *testing.T, token string) error {
+	// First publish a couple more events to have some replay content
+	for i := 0; i < 3; i++ {
+		payload := fmt.Sprintf(`{"replay_test": "event_%d", "timestamp": "%s"}`, i, time.Now().Format(time.RFC3339))
+		_, err := runCLICommand("publish",
+			"--server", testServerURL,
+			"--client-id", testClientID,
+			"--token", token,
+			"--topic", testTopic,
+			"--payload", payload)
+		if err != nil {
+			return fmt.Errorf("failed to publish replay test event %d: %v", i, err)
+		}
+	}
+
+	// Test replay from offset 0
+	replayOutput, err := runCLICommand("replay",
+		"--server", testServerURL,
+		"--client-id", testClientID,
+		"--token", token,
+		"--topic", testTopic,
+		"--offset", "0",
+		"--limit", "5")
+	if err != nil {
+		return fmt.Errorf("replay from offset 0 failed: %v", err)
+	}
+
+	// Should contain multiple events
+	if !strings.Contains(replayOutput, "Event #") {
+		return fmt.Errorf("replay output doesn't contain events: %s", replayOutput)
+	}
+
+	// Test replay from middle offset
+	_, err = runCLICommand("replay",
+		"--server", testServerURL,
+		"--client-id", testClientID,
+		"--token", token,
+		"--topic", testTopic,
+		"--offset", "2",
+		"--limit", "3")
+	if err != nil {
+		return fmt.Errorf("replay from offset 2 failed: %v", err)
+	}
+
+	t.Log("✅ Event replay functionality working correctly")
+	return nil
+}
+
+// testWildcardSubscription tests wildcard topic subscription
+func testWildcardSubscription(t *testing.T, token string) error {
+	wildcardTopic := "test.*"
+	specificTopic := "test.wildcard.specific"
+
+	// Create wildcard subscription
+	subscribeOutput, err := runCLICommand("subscribe",
+		"--server", testServerURL,
+		"--client-id", testClientID,
+		"--token", token,
+		"--topic", wildcardTopic)
+	if err != nil {
+		return fmt.Errorf("wildcard subscription creation failed: %v", err)
+	}
+
+	wildcardSubID, err := extractSubscriptionIDFromOutput(subscribeOutput)
+	if err != nil {
+		return fmt.Errorf("failed to extract wildcard subscription ID: %v", err)
+	}
+
+	// Publish to a topic that should match the wildcard
+	_, err = runCLICommand("publish",
+		"--server", testServerURL,
+		"--client-id", testClientID,
+		"--token", token,
+		"--topic", specificTopic,
+		"--payload", `{"wildcard": "test", "matched": true}`)
+	if err != nil {
+		return fmt.Errorf("failed to publish to wildcard-matching topic: %v", err)
+	}
+
+	// Clean up the wildcard subscription
+	_, err = runCLICommand("subscriptions", "delete",
+		"--server", testServerURL,
+		"--client-id", testClientID,
+		"--token", token,
+		"--id", wildcardSubID)
+	if err != nil {
+		return fmt.Errorf("failed to delete wildcard subscription: %v", err)
+	}
+
+	t.Log("✅ Wildcard subscription functionality working correctly")
+	return nil
+}
+
+// testErrorHandling tests various error scenarios
+func testErrorHandling(t *testing.T, token string) error {
+	// Test with invalid token
+	_, err := runCLICommand("publish",
+		"--server", testServerURL,
+		"--client-id", testClientID,
+		"--token", "invalid-token",
+		"--topic", testTopic,
+		"--payload", `{"error": "test"}`)
+	if err == nil {
+		return fmt.Errorf("expected error with invalid token but got success")
+	}
+	t.Log("✅ Invalid token properly rejected")
+
+	// Test with malformed JSON payload
+	malformedOutput, err := runCLICommand("publish",
+		"--server", testServerURL,
+		"--client-id", testClientID,
+		"--token", token,
+		"--topic", testTopic,
+		"--payload", `{malformed json}`)
+	if err == nil {
+		return fmt.Errorf("expected error with malformed JSON but got success: %s", malformedOutput)
+	}
+	t.Log("✅ Malformed JSON properly rejected")
+
+	// Test with empty topic
+	emptyTopicOutput, err := runCLICommand("publish",
+		"--server", testServerURL,
+		"--client-id", testClientID,
+		"--token", token,
+		"--topic", "",
+		"--payload", `{"test": "empty topic"}`)
+	if err == nil {
+		return fmt.Errorf("expected error with empty topic but got success: %s", emptyTopicOutput)
+	}
+	t.Log("✅ Empty topic properly rejected")
+
+	return nil
+}
+
+// startEventMeshServerNoAuth starts the EventMesh server in no-auth mode
+func startEventMeshServerNoAuth(ctx context.Context) (*exec.Cmd, error) {
+	binaryPath := filepath.Join("..", "bin", "eventmesh")
+
+	cmd := exec.CommandContext(ctx, binaryPath,
+		"--http",
+		"--http-port", "8086", // Different port to avoid conflicts
+		"--no-auth",           // Enable no-auth mode
+		"--node-id", "integration-test-no-auth-node",
+		"--listen", ":8087",      // Different from HTTP port
+		"--peer-listen", ":8088") // Different peer port
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("failed to start no-auth server command: %v", err)
+	}
+
+	return cmd, nil
+}
+
+// runNoAuthIntegrationWorkflow executes CLI integration tests in no-auth mode
+func runNoAuthIntegrationWorkflow(t *testing.T, serverURL string) error {
+	noAuthTopic := "test.no-auth"
+	noAuthPayload := `{"no_auth": "test", "timestamp": "2024-01-01T00:00:00Z"}`
+
+	// Step 1: Test health check (no auth required)
+	t.Log("🔍 Testing health check (no-auth mode)...")
+	output, err := runCLICommand("--no-auth", "health", "--server", serverURL)
+	if err != nil {
+		return fmt.Errorf("no-auth health check failed: %v", err)
+	}
+	if !strings.Contains(output, "Server is healthy") {
+		return fmt.Errorf("no-auth health check output unexpected: %s", output)
+	}
+
+	// Step 2: Publish an event without authentication
+	t.Log("📤 Testing event publishing (no-auth mode)...")
+	publishOutput, err := runCLICommand("--no-auth", "publish",
+		"--server", serverURL,
+		"--topic", noAuthTopic,
+		"--payload", noAuthPayload)
+	if err != nil {
+		return fmt.Errorf("no-auth event publishing failed: %v", err)
+	}
+	if !strings.Contains(publishOutput, "Event published successfully") {
+		return fmt.Errorf("no-auth publish output unexpected: %s", publishOutput)
+	}
+
+	// Step 3: Test topic info without authentication
+	t.Log("ℹ️ Testing topic info (no-auth mode)...")
+	topicInfoOutput, err := runCLICommand("--no-auth", "topics", "info",
+		"--server", serverURL,
+		"--topic", noAuthTopic)
+	if err != nil {
+		return fmt.Errorf("no-auth topic info failed: %v", err)
+	}
+	if !strings.Contains(topicInfoOutput, noAuthTopic) {
+		return fmt.Errorf("no-auth topic info output unexpected: %s", topicInfoOutput)
+	}
+
+	// Step 4: Test event replay without authentication
+	t.Log("📖 Testing event replay (no-auth mode)...")
+	replayOutput, err := runCLICommand("--no-auth", "replay",
+		"--server", serverURL,
+		"--topic", noAuthTopic,
+		"--offset", "0",
+		"--limit", "5")
+	if err != nil {
+		return fmt.Errorf("no-auth replay failed: %v", err)
+	}
+	if !strings.Contains(replayOutput, "Event #") {
+		return fmt.Errorf("no-auth replay output doesn't contain events: %s", replayOutput)
+	}
+
+	// Step 5: Ensure admin commands still require authentication (should fail even in no-auth mode)
+	t.Log("🔧 Testing admin commands still require auth (no-auth mode)...")
+	adminOutput, err := runCLICommand("--no-auth", "admin", "stats", "--server", serverURL)
+	if err == nil {
+		return fmt.Errorf("admin command succeeded in no-auth mode but should have failed")
+	}
+	if !strings.Contains(adminOutput, "403 Forbidden") && !strings.Contains(adminOutput, "Forbidden") &&
+	   !strings.Contains(adminOutput, "401 Unauthorized") && !strings.Contains(adminOutput, "Unauthorized") {
+		return fmt.Errorf("admin command should be forbidden even in no-auth mode: %s", adminOutput)
+	}
+	t.Log("✅ Admin commands still properly protected in no-auth mode")
+
+	return nil
 }
