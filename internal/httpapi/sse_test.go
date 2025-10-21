@@ -80,121 +80,136 @@ func TestStreamEvents(t *testing.T) {
 		}
 	})
 
-	t.Run("topic_parameter_parsing", func(t *testing.T) {
-		// Create a valid JWT token
-		token, _, err := auth.GenerateToken("test-sse-client", false)
-		if err != nil {
-			t.Fatalf("Failed to generate token: %v", err)
-		}
-
-		// Test valid topic parameter
-		req, err := http.NewRequest("GET", "/api/v1/events/stream?topic=test.events", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-
-		// Add claims to context (simulating middleware)
-		claims, err := auth.ValidateToken(token)
-		if err != nil {
-			t.Fatalf("Failed to validate token: %v", err)
-		}
-		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
-		req = req.WithContext(ctx)
-
-		// Execute request
-		rr := httptest.NewRecorder()
-		handlers.StreamEvents(rr, req)
-
-		// Should succeed with valid topic
-		if status := rr.Code; status != http.StatusOK {
-			t.Errorf("Expected status %d for valid topic, got %d. Body: %s", http.StatusOK, status, rr.Body.String())
-		}
-
-		// Response should include confirmation of topic filter
-		body := rr.Body.String()
-		if !strings.Contains(body, "test.events") {
-			t.Errorf("Expected response to mention topic 'test.events', got: %s", body)
-		}
-	})
-
-	t.Run("invalid_topic_parameter", func(t *testing.T) {
-		// Create a valid JWT token
-		token, _, err := auth.GenerateToken("test-sse-client", false)
-		if err != nil {
-			t.Fatalf("Failed to generate token: %v", err)
-		}
-
-		// Test invalid topic parameter (empty)
-		req, err := http.NewRequest("GET", "/api/v1/events/stream?topic=", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-
-		// Add claims to context (simulating middleware)
-		claims, err := auth.ValidateToken(token)
-		if err != nil {
-			t.Fatalf("Failed to validate token: %v", err)
-		}
-		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
-		req = req.WithContext(ctx)
-
-		// Execute request
-		rr := httptest.NewRecorder()
-		handlers.StreamEvents(rr, req)
-
-		// Should fail with bad request for invalid topic
-		if status := rr.Code; status != http.StatusBadRequest {
-			t.Errorf("Expected status %d for invalid topic, got %d", http.StatusBadRequest, status)
-		}
-	})
 
 	t.Run("sse_message_formatting", func(t *testing.T) {
+		// This test verifies that SSE messages are properly formatted when events are delivered
+		// It uses the unified model: create subscription → start SSE → publish event → verify format
+
 		// Create a valid JWT token
 		token, _, err := auth.GenerateToken("test-sse-client", false)
 		if err != nil {
 			t.Fatalf("Failed to generate token: %v", err)
 		}
 
-		// Test SSE message formatting
-		req, err := http.NewRequest("GET", "/api/v1/events/stream?topic=test.events", nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		req.Header.Set("Authorization", "Bearer "+token)
-
-		// Add claims to context (simulating middleware)
+		// Add claims to context for all requests
 		claims, err := auth.ValidateToken(token)
 		if err != nil {
 			t.Fatalf("Failed to validate token: %v", err)
 		}
-		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+
+		// Step 1: Create subscription for formatting test
+		subReq := SubscriptionRequest{Topic: "format.test"}
+		subBody, err := json.Marshal(subReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req, err := http.NewRequest("POST", "/api/v1/subscriptions", strings.NewReader(string(subBody)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		ctx := context.WithValue(context.Background(), ClaimsKey, claims)
 		req = req.WithContext(ctx)
 
-		// Execute request
+		// Execute subscription request
 		rr := httptest.NewRecorder()
+		handlers.CreateSubscription(rr, req)
 
-		// For this test, we'll simulate sending an event message
-		// This will require extending the handler to send a test message
-		handlers.StreamEvents(rr, req)
-
-		// Should succeed
-		if status := rr.Code; status != http.StatusOK {
-			t.Errorf("Expected status %d, got %d", http.StatusOK, status)
+		// Verify subscription created
+		if status := rr.Code; status != http.StatusCreated {
+			t.Fatalf("Failed to create subscription: got status %d", status)
 		}
 
-		body := rr.Body.String()
+		// Step 2: Start SSE stream
+		sseReq, err := http.NewRequest("GET", "/api/v1/events/stream", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sseReq.Header.Set("Authorization", "Bearer "+token)
+		sseReq.Header.Set("Accept", "text/event-stream")
 
-		// Look for properly formatted SSE data message
-		// SSE format should be: "data: {json}\n\n"
-		if !strings.Contains(body, "data: {") {
-			t.Errorf("Expected SSE data message with JSON, got: %s", body)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		ctx = context.WithValue(ctx, ClaimsKey, claims)
+		sseReq = sseReq.WithContext(ctx)
+
+		recorder := NewStreamingRecorder()
+
+		go func() {
+			defer recorder.Close()
+			handlers.StreamEvents(recorder, sseReq)
+		}()
+
+		// Wait for connection
+		select {
+		case <-recorder.Data:
+			// Connection established
+		case <-time.After(1 * time.Second):
+			t.Error("Timeout waiting for SSE connection")
+			return
 		}
 
-		// Should contain EventStreamMessage structure
-		if !strings.Contains(body, "eventId") || !strings.Contains(body, "topic") {
-			t.Errorf("Expected EventStreamMessage with eventId and topic fields, got: %s", body)
+		// Step 3: Publish event with specific payload for format testing
+		publishReq := PublishRequest{
+			Topic:   "format.test",
+			Payload: map[string]interface{}{"testKey": "testValue", "number": 42},
+		}
+
+		publishReqBody, err := json.Marshal(publishReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		pubReq, err := http.NewRequest("POST", "/api/v1/events", strings.NewReader(string(publishReqBody)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pubReq.Header.Set("Content-Type", "application/json")
+		pubReq.Header.Set("Authorization", "Bearer "+token)
+
+		pubCtx := context.WithValue(context.Background(), ClaimsKey, claims)
+		pubReq = pubReq.WithContext(pubCtx)
+
+		pubRR := httptest.NewRecorder()
+		handlers.PublishEvent(pubRR, pubReq)
+
+		if status := pubRR.Code; status != http.StatusCreated {
+			t.Errorf("Failed to publish event: got status %d", status)
+		}
+
+		// Step 4: Verify SSE message formatting
+		timeout := time.After(2 * time.Second)
+		for {
+			select {
+			case data := <-recorder.Data:
+				// Look for properly formatted SSE data message
+				if strings.Contains(data, "data: {") {
+					// Verify JSON structure
+					if !strings.Contains(data, "eventId") {
+						t.Errorf("Expected eventId field in SSE message, got: %s", data)
+					}
+					if !strings.Contains(data, "format.test") {
+						t.Errorf("Expected topic field in SSE message, got: %s", data)
+					}
+					if !strings.Contains(data, "testKey") {
+						t.Errorf("Expected payload content in SSE message, got: %s", data)
+					}
+					if !strings.HasSuffix(data, "\n\n") {
+						t.Errorf("Expected SSE message to end with \\n\\n, got: %s", data)
+					}
+					// Test passes
+					return
+				}
+			case <-timeout:
+				t.Error("Timeout waiting for properly formatted SSE message")
+				return
+			case <-recorder.Done:
+				t.Error("Stream ended without receiving formatted message")
+				return
+			}
 		}
 	})
 
@@ -287,19 +302,44 @@ func TestStreamEvents(t *testing.T) {
 			t.Fatalf("Failed to generate token: %v", err)
 		}
 
-		// Start SSE client subscribing to "test.events" topic
-		sseReq, err := http.NewRequest("GET", "/api/v1/events/stream?topic=test.events", nil)
+		// Add claims to context for all requests
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+
+		// Step 1: Create subscription for test.events topic (required for unified model)
+		subReq := SubscriptionRequest{Topic: "test.events"}
+		subBody, err := json.Marshal(subReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req, err := http.NewRequest("POST", "/api/v1/subscriptions", strings.NewReader(string(subBody)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		ctx := context.WithValue(context.Background(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		// Execute subscription request
+		rr := httptest.NewRecorder()
+		handlers.CreateSubscription(rr, req)
+
+		// Verify subscription created
+		if status := rr.Code; status != http.StatusCreated {
+			t.Fatalf("Failed to create subscription: got status %d", status)
+		}
+
+		// Step 2: Start SSE stream (no topic parameter in unified model)
+		sseReq, err := http.NewRequest("GET", "/api/v1/events/stream", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		sseReq.Header.Set("Authorization", "Bearer "+token)
 		sseReq.Header.Set("Accept", "text/event-stream")
-
-		// Add claims to context for SSE request
-		claims, err := auth.ValidateToken(token)
-		if err != nil {
-			t.Fatalf("Failed to validate token: %v", err)
-		}
 
 		// Create a context that we can cancel
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -320,7 +360,7 @@ func TestStreamEvents(t *testing.T) {
 		// Wait for SSE connection to be established
 		select {
 		case data := <-recorder.Data:
-			if !strings.Contains(data, "SSE connection established for topic: test.events") {
+			if !strings.Contains(data, "SSE connection established") {
 				t.Errorf("Expected SSE connection message, got: %s", data)
 			}
 			t.Logf("✓ SSE connection established: %s", strings.TrimSpace(data))
@@ -329,7 +369,7 @@ func TestStreamEvents(t *testing.T) {
 			return
 		}
 
-		// Now publish an event to the same topic via the HTTP API
+		// Step 3: Publish an event to the subscribed topic via the HTTP API
 		publishReq := PublishRequest{
 			Topic:   "test.events",
 			Payload: map[string]interface{}{"message": "Hello SSE World", "timestamp": "2025-01-01T00:00:00Z"},
