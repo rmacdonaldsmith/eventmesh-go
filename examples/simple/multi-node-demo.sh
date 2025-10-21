@@ -9,11 +9,20 @@
 #
 # Prerequisites:
 # 1. Run 'make build' from project root to build binaries
-# 2. Run this script: ./multi-node-demo.sh
+# 2. Run this script: ./multi-node-demo.sh [--follow-logs]
 # 3. Watch the discovery logs as nodes find and connect to each other
 # 4. Use Ctrl+C to stop all nodes
+#
+# Options:
+#   --follow-logs    Show live logs from all nodes (can be noisy)
 
 set -e
+
+# Parse command line options
+FOLLOW_LOGS=false
+if [[ "${1:-}" == "--follow-logs" ]]; then
+    FOLLOW_LOGS=true
+fi
 
 # Get script directory and calculate paths relative to it
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,7 +53,14 @@ echo ""
 # Function to cleanup background processes
 cleanup() {
     echo ""
-    echo "🧹 Shutting down nodes..."
+    echo "🧹 Shutting down nodes and log tails..."
+
+    # Kill any tail processes first
+    for tail_pid in ${TAIL1_PID:-} ${TAIL2_PID:-} ${TAIL3_PID:-} ${TAIL_ALL_PID:-}; do
+        if [[ -n "$tail_pid" ]] && kill -0 "$tail_pid" 2>/dev/null; then
+            kill "$tail_pid" 2>/dev/null || true
+        fi
+    done
 
     # Kill all background processes in our process group
     if [[ -n "${PIDS:-}" ]]; then
@@ -97,9 +113,16 @@ echo "   Node1 PID: $NODE1_PID"
 echo "   HTTP API: http://localhost:8091"
 echo "   Logs: $LOG_DIR/node1.log"
 
-# Wait for Node1 to start
+# Show startup progress
 echo "   Waiting for Node1 to start..."
-sleep 3
+sleep 2
+
+# Show key startup messages from logs
+if [[ -f "$LOG_DIR/node1.log" ]]; then
+    echo "   📋 Startup status:"
+    # Show key startup lines
+    grep -E "(Starting EventMesh|WARNING.*NO-AUTH|Started successfully|HTTP API)" "$LOG_DIR/node1.log" 2>/dev/null | sed 's/^/      /' || true
+fi
 
 # Check if Node1 is running
 if ! kill -0 "$NODE1_PID" 2>/dev/null; then
@@ -216,6 +239,11 @@ if [ $RUNNING_NODES -eq 3 ]; then
     echo "     -d '{\"topic\":\"mesh.test\",\"payload\":{\"msg\":\"Hello mesh!\"}}'"
     echo ""
     echo "Press Ctrl+C to stop all nodes..."
+    echo ""
+    echo "💡 To follow live logs from all nodes, run in another terminal:"
+    echo "   tail -f $LOG_DIR/node*.log"
+    echo ""
+    echo "💡 Or restart with: ./examples/simple/multi-node-demo.sh --follow-logs"
 else
     echo "⚠️  WARNING: Only $RUNNING_NODES/3 nodes running"
     echo ""
@@ -226,6 +254,14 @@ else
 fi
 
 echo ""
+
+# If --follow-logs was specified, start tailing all logs
+if [ "$FOLLOW_LOGS" = true ]; then
+    echo "📋 Following logs from all nodes (use Ctrl+C to stop)..."
+    echo "======================================================="
+    tail -f "$LOG_DIR"/node*.log &
+    TAIL_ALL_PID=$!
+fi
 
 # Keep script running until interrupted
 while true; do
