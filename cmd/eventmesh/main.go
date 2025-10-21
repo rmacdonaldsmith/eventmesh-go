@@ -24,6 +24,8 @@ const (
 )
 
 func main() {
+	startTime := time.Now() // Track startup time
+
 	// Command-line flags
 	var (
 		nodeID      = flag.String("node-id", getDefaultNodeID(), "Unique node identifier")
@@ -70,15 +72,17 @@ func main() {
 
 	// Parse seed nodes if provided
 	var bootstrapConfig *meshnode.BootstrapConfig
+	var seedNodeCount int
 	if *seedNodes != "" {
 		seedList := strings.Split(strings.TrimSpace(*seedNodes), ",")
 		// Clean up whitespace from each seed node address
 		for i, seed := range seedList {
 			seedList[i] = strings.TrimSpace(seed)
 		}
+		seedNodeCount = len(seedList)
 		bootstrapConfig = meshnode.NewBootstrapConfig(seedList)
 		slog.Info("bootstrap configuration",
-			"seed_node_count", len(seedList),
+			"seed_node_count", seedNodeCount,
 			"seed_nodes", seedList)
 	}
 
@@ -171,10 +175,8 @@ func main() {
 	// Set up graceful shutdown
 	setupGracefulShutdown(ctx, cancel, node, httpServer)
 
-	slog.Info("node started successfully",
-		"app", appName,
-		"node_id", *nodeID,
-		"shutdown_instruction", "use Ctrl+C to shutdown gracefully")
+	// Log comprehensive node ready status
+	logNodeReady(startTime, node, httpServer, *nodeID, *logLevel, *noAuth, seedNodeCount)
 
 	// Wait for shutdown signal
 	<-ctx.Done()
@@ -324,4 +326,52 @@ func healthStatus(healthy bool) string {
 		return "✅ Healthy"
 	}
 	return "❌ Unhealthy"
+}
+
+// logNodeReady logs comprehensive node startup summary with all operational details
+func logNodeReady(startTime time.Time, node *meshnode.GRPCMeshNode, httpServer *httpapi.Server, nodeID, logLevel string, noAuth bool, seedNodes int) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Calculate startup duration
+	startupDuration := time.Since(startTime)
+
+	// Get peer information
+	peerLink := node.GetPeerLink()
+	peerListenAddress := ""
+	connectedPeers := []string{}
+	peersConnected := 0
+
+	if grpcPeerLink, ok := peerLink.(*peerlink.GRPCPeerLink); ok {
+		peerListenAddress = grpcPeerLink.GetListeningAddress()
+		if peerSummary, err := grpcPeerLink.GetConnectedPeerSummary(ctx); err == nil {
+			connectedPeers = peerSummary
+			peersConnected = len(peerSummary)
+		}
+	}
+
+	// Get HTTP server address
+	httpAddress := ""
+	if httpServer != nil {
+		httpAddress = httpServer.GetListeningAddress()
+	}
+
+	// Determine auth mode
+	authMode := "enabled"
+	if noAuth {
+		authMode = "disabled"
+	}
+
+	// Log comprehensive node ready status
+	slog.Info("node ready",
+		"node_id", nodeID,
+		"version", appVersion,
+		"startup_duration_ms", startupDuration.Milliseconds(),
+		"peer_listen_address", peerListenAddress,
+		"http_address", httpAddress,
+		"connected_peers", connectedPeers,
+		"peers_connected", peersConnected,
+		"auth_mode", authMode,
+		"seed_nodes", seedNodes,
+		"log_level", logLevel)
 }

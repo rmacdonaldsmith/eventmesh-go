@@ -119,11 +119,18 @@ func (g *GRPCPeerLink) Start(ctx context.Context) error {
 	g.grpcServer = grpcServer
 	g.started = true
 
+	// Log the actual listening address
+	slog.Info("peer server listening",
+		"address", listener.Addr().String(),
+		"node_id", g.config.NodeID)
+
 	// Start serving in a goroutine
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
 			// Log error but don't panic - server shutdown is normal
-			// TODO: Add proper logging when we have a logger
+			slog.Debug("peer server stopped",
+				"node_id", g.config.NodeID,
+				"error", err)
 		}
 	}()
 
@@ -700,6 +707,33 @@ func (g *GRPCPeerLink) GetDropsCount(peerID string) int64 {
 		return metrics.dropsCount
 	}
 	return 0
+}
+
+// GetListeningAddress returns the actual address this PeerLink is listening on
+// Returns empty string if not started or no listener
+func (g *GRPCPeerLink) GetListeningAddress() string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	if g.listener != nil {
+		return g.listener.Addr().String()
+	}
+	return ""
+}
+
+// GetConnectedPeerSummary returns a formatted list of connected peers for logging
+// Returns slice of strings in format "node-id@address"
+func (g *GRPCPeerLink) GetConnectedPeerSummary(ctx context.Context) ([]string, error) {
+	peers, err := g.GetConnectedPeers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	summary := make([]string, len(peers))
+	for i, peer := range peers {
+		summary[i] = peer.ID() + "@" + peer.Address()
+	}
+	return summary, nil
 }
 
 // PeerMetrics represents metrics for a single peer

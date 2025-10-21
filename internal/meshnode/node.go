@@ -116,9 +116,12 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 		"node_id", n.config.NodeID,
 		"listen_address", n.config.ListenAddress)
 
-	// For MVP: PeerLink doesn't have explicit Start/Stop in interface
-	// The components manage their own lifecycle
-	// In future phases, we'll add explicit lifecycle management
+	// Start PeerLink to listen for incoming peer connections
+	if grpcPeerLink, ok := n.peerLink.(*peerlink.GRPCPeerLink); ok {
+		if err := grpcPeerLink.Start(ctx); err != nil {
+			return fmt.Errorf("failed to start PeerLink: %w", err)
+		}
+	}
 
 	// Run discovery if bootstrap configuration is provided
 	if n.config.BootstrapConfig != nil && len(n.config.BootstrapConfig.SeedNodes) > 0 {

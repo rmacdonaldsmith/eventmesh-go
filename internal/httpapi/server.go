@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -17,6 +19,7 @@ type Server struct {
 	handlers   *Handlers
 	middleware *Middleware
 	server     *http.Server
+	listener   net.Listener
 	secretKey  string
 }
 
@@ -64,12 +67,35 @@ func NewServer(meshNode *meshnode.GRPCMeshNode, config Config) *Server {
 
 // Start starts the HTTP server
 func (s *Server) Start() error {
-	return s.server.ListenAndServe()
+	// Create listener
+	listener, err := net.Listen("tcp", s.server.Addr)
+	if err != nil {
+		return err
+	}
+
+	// Store listener for address access
+	s.listener = listener
+
+	// Log actual listening address
+	slog.Info("HTTP server listening",
+		"address", listener.Addr().String())
+
+	// Start serving
+	return s.server.Serve(listener)
 }
 
 // Stop gracefully stops the HTTP server
 func (s *Server) Stop(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
+}
+
+// GetListeningAddress returns the actual address this HTTP server is listening on
+// Returns empty string if not started or no listener
+func (s *Server) GetListeningAddress() string {
+	if s.listener != nil {
+		return s.listener.Addr().String()
+	}
+	return ""
 }
 
 // setupRoutes configures all HTTP routes
