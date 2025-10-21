@@ -3,6 +3,7 @@ package peerlink
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -298,8 +299,16 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 
 	// Check if already connected
 	if _, exists := g.outboundConns[peerID]; exists {
+		slog.Debug("peer connection already exists",
+			"peer_id", peerID,
+			"peer_address", peer.Address())
 		return nil // Already connected
 	}
+
+	slog.Info("connecting to peer",
+		"peer_id", peerID,
+		"peer_address", peer.Address(),
+		"local_node_id", g.config.NodeID)
 
 	// Add to connected peers map
 	g.connectedPeers[peerID] = peer
@@ -310,6 +319,10 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 	// Establish outbound gRPC connection
 	conn, err := grpc.NewClient(peer.Address(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
+		slog.Error("failed to establish gRPC connection to peer",
+			"peer_id", peerID,
+			"peer_address", peer.Address(),
+			"error", err)
 		return err
 	}
 
@@ -323,6 +336,11 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 	// Start goroutine to consume from send queue and stream events
 	go g.runOutboundConnection(connCtx, peerID, conn)
 
+	slog.Info("peer connected successfully",
+		"peer_id", peerID,
+		"peer_address", peer.Address(),
+		"local_node_id", g.config.NodeID)
+
 	return nil
 }
 
@@ -332,6 +350,9 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 	defer func() {
 		// Clean up connection on exit
 		conn.Close()
+		slog.Info("peer connection closed",
+			"peer_id", peerID,
+			"local_node_id", g.config.NodeID)
 	}()
 
 	// Create gRPC client
@@ -340,7 +361,10 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 	// Establish EventStream
 	stream, err := client.EventStream(ctx)
 	if err != nil {
-		// TODO: Add proper error handling/reconnection logic
+		slog.Error("failed to establish event stream with peer",
+			"peer_id", peerID,
+			"local_node_id", g.config.NodeID,
+			"error", err)
 		return
 	}
 	defer stream.CloseSend()
@@ -356,16 +380,26 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 	}
 
 	if err := stream.Send(handshake); err != nil {
-		// TODO: Add proper error handling
+		slog.Error("failed to send handshake to peer",
+			"peer_id", peerID,
+			"local_node_id", g.config.NodeID,
+			"error", err)
 		return
 	}
 
 	// Receive handshake response
 	_, err = stream.Recv()
 	if err != nil {
-		// TODO: Add proper error handling
+		slog.Error("failed to receive handshake response from peer",
+			"peer_id", peerID,
+			"local_node_id", g.config.NodeID,
+			"error", err)
 		return
 	}
+
+	slog.Debug("peer handshake completed",
+		"peer_id", peerID,
+		"local_node_id", g.config.NodeID)
 
 	// Get the send queue for this peer
 	g.mu.RLock()

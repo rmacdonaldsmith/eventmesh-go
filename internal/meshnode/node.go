@@ -3,6 +3,7 @@ package meshnode
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -111,6 +112,10 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 		return nil // Already started, idempotent
 	}
 
+	slog.Info("starting mesh node",
+		"node_id", n.config.NodeID,
+		"listen_address", n.config.ListenAddress)
+
 	// For MVP: PeerLink doesn't have explicit Start/Stop in interface
 	// The components manage their own lifecycle
 	// In future phases, we'll add explicit lifecycle management
@@ -118,8 +123,9 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 	// Run discovery if bootstrap configuration is provided
 	if n.config.BootstrapConfig != nil && len(n.config.BootstrapConfig.SeedNodes) > 0 {
 		if err := n.runDiscovery(ctx); err != nil {
-			// Log error but don't fail startup - discovery is best effort
-			fmt.Printf("⚠️ Discovery failed: %v\n", err)
+			slog.Warn("discovery failed",
+				"node_id", n.config.NodeID,
+				"error", err)
 		}
 	}
 
@@ -128,6 +134,9 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 	go n.handleIncomingPeerEvents(ctx)
 
 	n.started = true
+	slog.Info("mesh node ready",
+		"node_id", n.config.NodeID,
+		"listen_address", n.config.ListenAddress)
 	return nil
 }
 
@@ -308,13 +317,26 @@ func (n *GRPCMeshNode) Subscribe(ctx context.Context, client meshnode.Client, to
 	subscriptionID := fmt.Sprintf("sub-%s-%d", client.ID(), time.Now().UnixNano())
 	n.addSubscriptionMetadata(client.ID(), subscriptionID, topic)
 
+	slog.Info("subscription created",
+		"client_id", client.ID(),
+		"topic", topic,
+		"subscription_id", subscriptionID,
+		"node_id", n.config.NodeID)
+
 	// Propagate subscription to peer nodes (REQ-MNODE-003)
 	// For MVP: Use special subscription events via existing PeerLink infrastructure
 	err = n.propagateSubscriptionChange(ctx, "subscribe", client.ID(), topic)
 	if err != nil {
-		// Log error but don't fail the local subscription
-		// In production, we'd use structured logging
-		_ = err // Failed to propagate, but local subscription succeeded
+		slog.Warn("failed to propagate subscription to peers",
+			"client_id", client.ID(),
+			"topic", topic,
+			"subscription_id", subscriptionID,
+			"error", err)
+	} else {
+		slog.Debug("subscription propagated to peers",
+			"client_id", client.ID(),
+			"topic", topic,
+			"subscription_id", subscriptionID)
 	}
 
 	return nil
@@ -354,6 +376,11 @@ func (n *GRPCMeshNode) Unsubscribe(ctx context.Context, client meshnode.Client, 
 		return fmt.Errorf("failed to remove local subscription: %w", err)
 	}
 
+	slog.Info("subscription removed",
+		"client_id", client.ID(),
+		"topic", topic,
+		"node_id", n.config.NodeID)
+
 	// Remove from local client tracking if this was the last subscription
 	// For MVP: Keep client in tracking (simple approach)
 	// In production, we'd track subscription counts and remove if zero
@@ -362,9 +389,14 @@ func (n *GRPCMeshNode) Unsubscribe(ctx context.Context, client meshnode.Client, 
 	// For MVP: Use special subscription events via existing PeerLink infrastructure
 	err = n.propagateSubscriptionChange(ctx, "unsubscribe", client.ID(), topic)
 	if err != nil {
-		// Log error but don't fail the local unsubscription
-		// In production, we'd use structured logging
-		_ = err // Failed to propagate, but local unsubscription succeeded
+		slog.Warn("failed to propagate unsubscription to peers",
+			"client_id", client.ID(),
+			"topic", topic,
+			"error", err)
+	} else {
+		slog.Debug("unsubscription propagated to peers",
+			"client_id", client.ID(),
+			"topic", topic)
 	}
 
 	return nil
@@ -808,8 +840,13 @@ func (n *GRPCMeshNode) removeSubscriptionMetadata(clientID, subscriptionID strin
 
 // runDiscovery performs node discovery and connects to discovered peers
 func (n *GRPCMeshNode) runDiscovery(ctx context.Context) error {
+	seedNodes := n.config.BootstrapConfig.SeedNodes
+	slog.Info("starting peer discovery",
+		"node_id", n.config.NodeID,
+		"seed_nodes", len(seedNodes))
+
 	// Create static discovery service from bootstrap config
-	discoveryService := discovery.NewStaticDiscovery(n.config.BootstrapConfig.SeedNodes)
+	discoveryService := discovery.NewStaticDiscovery(seedNodes)
 
 	// Find peer nodes
 	peers, err := discoveryService.FindPeers(ctx)
@@ -817,26 +854,36 @@ func (n *GRPCMeshNode) runDiscovery(ctx context.Context) error {
 		return fmt.Errorf("discovery failed: %w", err)
 	}
 
-	fmt.Printf("🔍 Discovery found %d peers\n", len(peers))
+	slog.Info("peers discovered",
+		"node_id", n.config.NodeID,
+		"peers_found", len(peers))
 
 	// Connect to discovered peers
 	connectedCount := 0
 	for _, peer := range peers {
-		fmt.Printf("   Connecting to peer: %s\n", peer.Address())
+		slog.Debug("attempting peer connection",
+			"node_id", n.config.NodeID,
+			"peer_address", peer.Address(),
+			"peer_id", peer.ID())
 
 		// Attempt to connect to the peer
 		err := n.peerLink.Connect(ctx, peer)
 		if err != nil {
-			// Log error but continue with other peers
-			fmt.Printf("   ⚠️ Failed to connect to %s: %v\n", peer.Address(), err)
+			slog.Warn("failed to connect to discovered peer",
+				"node_id", n.config.NodeID,
+				"peer_address", peer.Address(),
+				"peer_id", peer.ID(),
+				"error", err)
 			continue
 		}
 
 		connectedCount++
-		fmt.Printf("   ✅ Connected to peer: %s\n", peer.Address())
 	}
 
-	fmt.Printf("🌐 Discovery complete: %d/%d peers connected\n", connectedCount, len(peers))
+	slog.Info("discovery complete",
+		"node_id", n.config.NodeID,
+		"peers_found", len(peers),
+		"peers_connected", connectedCount)
 	return nil
 }
 

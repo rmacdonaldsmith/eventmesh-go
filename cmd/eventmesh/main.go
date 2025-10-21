@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -35,6 +36,7 @@ func main() {
 		showVersion = flag.Bool("version", false, "Show version and exit")
 		showHealth  = flag.Bool("health", false, "Show health status and exit")
 		seedNodes   = flag.String("seed-nodes", "", "Comma-separated list of seed node addresses (e.g., \"node1:8080,node2:8080\")")
+		logLevel    = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	)
 	flag.Parse()
 
@@ -44,15 +46,20 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Configure logging
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-	log.Printf("🚀 Starting %s v%s", appName, appVersion)
-	log.Printf("📋 Node ID: %s", *nodeID)
-	log.Printf("🔌 Client Listen: %s", *listenAddr)
-	log.Printf("🔗 Peer Listen: %s", *peerAddr)
-	if *enableHTTP {
-		log.Printf("🌐 HTTP API: http://localhost:%s", *httpPort)
-	}
+	// Configure structured logging
+	setupLogging(*logLevel)
+
+	slog.Info("starting EventMesh",
+		"app", appName,
+		"version", appVersion,
+		"node_id", *nodeID,
+		"log_level", *logLevel)
+	slog.Info("server configuration",
+		"client_listen", *listenAddr,
+		"peer_listen", *peerAddr,
+		"http_enabled", *enableHTTP,
+		"http_port", *httpPort,
+		"no_auth", *noAuth)
 
 	// Create PeerLink configuration
 	peerLinkConfig := &peerlink.Config{
@@ -70,10 +77,9 @@ func main() {
 			seedList[i] = strings.TrimSpace(seed)
 		}
 		bootstrapConfig = meshnode.NewBootstrapConfig(seedList)
-		log.Printf("🌱 Bootstrap configuration: %d seed nodes", len(seedList))
-		for i, seed := range seedList {
-			log.Printf("   Seed %d: %s", i+1, seed)
-		}
+		slog.Info("bootstrap configuration",
+			"seed_node_count", len(seedList),
+			"seed_nodes", seedList)
 	}
 
 	// Create MeshNode configuration
@@ -87,7 +93,7 @@ func main() {
 	}
 
 	// Create mesh node
-	log.Printf("🔧 Creating mesh node...")
+	slog.Debug("creating mesh node", "node_id", *nodeID)
 	node, err := meshnode.NewGRPCMeshNode(config)
 	if err != nil {
 		log.Fatalf("❌ Failed to create mesh node: %v", err)
@@ -102,20 +108,21 @@ func main() {
 	// Create HTTP API server if enabled
 	var httpServer *httpapi.Server
 	if *enableHTTP {
-		log.Printf("🔧 Creating HTTP API server...")
+		slog.Debug("creating HTTP API server", "http_port", *httpPort)
 
 		// Safety warning for no-auth mode
 		if *noAuth {
-			log.Printf("⚠️  WARNING: Running in NO-AUTH mode - authentication is DISABLED!")
-			log.Printf("⚠️  This is INSECURE and should ONLY be used for development/testing")
-			log.Printf("⚠️  Admin endpoints still require valid JWT tokens")
+			slog.Warn("running in NO-AUTH mode - authentication is DISABLED",
+				"security_warning", "INSECURE - development/testing only",
+				"admin_endpoints_note", "admin endpoints still require valid JWT tokens")
 		}
 
 		// Get JWT secret from environment variable
 		jwtSecret := os.Getenv("EVENTMESH_JWT_SECRET")
 		if jwtSecret == "" {
 			jwtSecret = "eventmesh-mvp-secret-key-change-in-production"
-			log.Printf("⚠️  WARNING: Using default JWT secret - set EVENTMESH_JWT_SECRET environment variable for production")
+			slog.Warn("using default JWT secret",
+				"security_warning", "set EVENTMESH_JWT_SECRET environment variable for production")
 		}
 
 		httpConfig := httpapi.Config{
@@ -136,14 +143,14 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	log.Printf("▶️  Starting mesh node...")
+	slog.Debug("starting mesh node", "node_id", *nodeID)
 	if err := node.Start(ctx); err != nil {
 		log.Fatalf("❌ Failed to start mesh node: %v", err)
 	}
 
 	// Start HTTP API server if enabled
 	if httpServer != nil {
-		log.Printf("▶️  Starting HTTP API server on port %s...", *httpPort)
+		slog.Debug("starting HTTP API server", "port", *httpPort)
 		go func() {
 			if err := httpServer.Start(); err != nil {
 				log.Printf("❌ HTTP API server error: %v", err)
@@ -164,12 +171,51 @@ func main() {
 	// Set up graceful shutdown
 	setupGracefulShutdown(ctx, cancel, node, httpServer)
 
-	log.Printf("✅ %s node %s started successfully!", appName, *nodeID)
-	log.Printf("💡 Use Ctrl+C to shutdown gracefully")
+	slog.Info("node started successfully",
+		"app", appName,
+		"node_id", *nodeID,
+		"shutdown_instruction", "use Ctrl+C to shutdown gracefully")
 
 	// Wait for shutdown signal
 	<-ctx.Done()
-	log.Printf("👋 %s node %s stopped", appName, *nodeID)
+	slog.Info("node stopped",
+		"app", appName,
+		"node_id", *nodeID)
+}
+
+// setupLogging configures the global slog logger with the specified level
+func setupLogging(levelStr string) {
+	var level slog.Level
+
+	switch strings.ToLower(levelStr) {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		// Default to INFO for unknown levels
+		level = slog.LevelInfo
+		fmt.Fprintf(os.Stderr, "Warning: unknown log level '%s', using 'info'\n", levelStr)
+	}
+
+	// Create structured text handler for human-readable output
+	opts := &slog.HandlerOptions{
+		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Simplify time format for better readability
+			if a.Key == slog.TimeKey {
+				return slog.String("time", a.Value.Time().Format("15:04:05.000"))
+			}
+			return a
+		},
+	}
+
+	handler := slog.NewTextHandler(os.Stdout, opts)
+	slog.SetDefault(slog.New(handler))
 }
 
 // getDefaultNodeID generates a default node ID based on hostname
@@ -188,7 +234,9 @@ func setupGracefulShutdown(ctx context.Context, cancel context.CancelFunc, node 
 
 	go func() {
 		sig := <-sigChan
-		log.Printf("🛑 Received signal %v, shutting down gracefully...", sig)
+		slog.Info("received shutdown signal",
+			"signal", sig,
+			"action", "shutting down gracefully")
 
 		// Create shutdown timeout context
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -196,16 +244,16 @@ func setupGracefulShutdown(ctx context.Context, cancel context.CancelFunc, node 
 
 		// Stop the HTTP server first (if running)
 		if httpServer != nil {
-			log.Printf("🛑 Stopping HTTP API server...")
+			slog.Info("stopping HTTP API server")
 			if err := httpServer.Stop(shutdownCtx); err != nil {
-				log.Printf("⚠️  Error stopping HTTP server: %v", err)
+				slog.Error("error stopping HTTP server", "error", err)
 			}
 		}
 
 		// Stop the mesh node
-		log.Printf("🛑 Stopping mesh node...")
+		slog.Info("stopping mesh node")
 		if err := node.Stop(shutdownCtx); err != nil {
-			log.Printf("⚠️  Error during graceful stop: %v", err)
+			slog.Error("error during graceful stop", "error", err)
 		}
 
 		// Cancel main context to exit
