@@ -44,10 +44,12 @@ if [ ! -f "$EVENTMESH" ]; then
     exit 1
 fi
 
-# Create temporary directory for logs
-LOG_DIR="/tmp/eventmesh-demo-$$"
+# Create static log directory for easy tailing
+LOG_DIR="/tmp/eventmesh-demo"
+rm -rf "$LOG_DIR"
 mkdir -p "$LOG_DIR"
 echo "📁 Logs will be written to: $LOG_DIR"
+echo "💡 Pro tip: Run 'tail -f $LOG_DIR/node*.log' in another terminal for live logs"
 echo ""
 
 # Function to cleanup background processes
@@ -87,10 +89,12 @@ cleanup() {
 
     echo "✅ All nodes stopped"
     echo ""
-    echo "💡 Log files are available in: $LOG_DIR"
+    echo "💡 Log files are available in: /tmp/eventmesh-demo"
     echo "   - node1.log (seed node)"
     echo "   - node2.log (discovers node1)"
     echo "   - node3.log (discovers node1)"
+    echo ""
+    echo "💡 Pro tip: Keep 'tail -f /tmp/eventmesh-demo/node*.log' running for next demo run!"
 }
 
 # Set trap to cleanup on exit
@@ -221,10 +225,10 @@ if [ $RUNNING_NODES -eq 3 ]; then
     echo "Check the logs to see discovery in action:"
     echo ""
     echo "Node2 discovering Node1:"
-    echo "  grep -A5 -B5 'Discovery found' $LOG_DIR/node2.log"
+    echo "  grep -A5 -B5 'Discovery found' /tmp/eventmesh-demo/node2.log"
     echo ""
     echo "Node3 discovering Node1:"
-    echo "  grep -A5 -B5 'Discovery found' $LOG_DIR/node3.log"
+    echo "  grep -A5 -B5 'Discovery found' /tmp/eventmesh-demo/node3.log"
     echo ""
     echo "Testing the Mesh:"
     echo "=================="
@@ -241,7 +245,7 @@ if [ $RUNNING_NODES -eq 3 ]; then
     echo "Press Ctrl+C to stop all nodes..."
     echo ""
     echo "💡 To follow live logs from all nodes, run in another terminal:"
-    echo "   tail -f $LOG_DIR/node*.log"
+    echo "   tail -f /tmp/eventmesh-demo/node*.log"
     echo ""
     echo "💡 Or restart with: ./examples/simple/multi-node-demo.sh --follow-logs"
 else
@@ -249,7 +253,7 @@ else
     echo ""
     echo "Check logs for errors:"
     for i in 1 2 3; do
-        echo "  tail $LOG_DIR/node$i.log"
+        echo "  tail /tmp/eventmesh-demo/node$i.log"
     done
 fi
 
