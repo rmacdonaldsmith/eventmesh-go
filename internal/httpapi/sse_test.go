@@ -394,4 +394,174 @@ func TestStreamEvents(t *testing.T) {
 			t.Error("Published event was not delivered to SSE client")
 		}
 	})
+
+	// NEW TEST: Unified SSE behavior (this should FAIL initially)
+	t.Run("unified_sse_streams_all_subscriptions", func(t *testing.T) {
+		// Create a valid JWT token
+		token, _, err := auth.GenerateToken("unified-test-client", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		// Add claims to context for all requests
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+
+		// Step 1: Create multiple subscriptions for the client
+		topics := []string{"orders.created", "users.registered", "payments.processed"}
+
+		for _, topic := range topics {
+			// Create subscription request
+			subReq := SubscriptionRequest{Topic: topic}
+			subBody, err := json.Marshal(subReq)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req, err := http.NewRequest("POST", "/api/v1/subscriptions", strings.NewReader(string(subBody)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+			ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+			req = req.WithContext(ctx)
+
+			// Execute subscription request
+			rr := httptest.NewRecorder()
+			handlers.CreateSubscription(rr, req)
+
+			// Verify subscription created
+			if status := rr.Code; status != http.StatusCreated {
+				t.Fatalf("Failed to create subscription for topic %s: got status %d", topic, status)
+			}
+		}
+
+		// Step 2: Start SSE stream WITHOUT topic parameter (unified behavior)
+		sseReq, err := http.NewRequest("GET", "/api/v1/events/stream", nil) // NO topic param!
+		if err != nil {
+			t.Fatal(err)
+		}
+		sseReq.Header.Set("Authorization", "Bearer "+token)
+		sseReq.Header.Set("Accept", "text/event-stream")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		ctx = context.WithValue(ctx, ClaimsKey, claims)
+		sseReq = sseReq.WithContext(ctx)
+
+		// Use streaming recorder
+		recorder := NewStreamingRecorder()
+
+		// Start SSE streaming in a goroutine
+		go func() {
+			defer recorder.Close()
+			handlers.StreamEvents(recorder, sseReq)
+		}()
+
+		// Wait for SSE connection to be established
+		select {
+		case data := <-recorder.Data:
+			// Should establish connection for ALL topics, not just one
+			if !strings.Contains(data, "SSE connection established") {
+				t.Errorf("Expected SSE connection message, got: %s", data)
+			}
+			t.Logf("✓ SSE connection established: %s", strings.TrimSpace(data))
+		case <-time.After(1 * time.Second):
+			t.Error("Timeout waiting for SSE connection message")
+			return
+		}
+
+		// Step 3: Publish events to different topics that client is subscribed to
+		testEvents := []struct {
+			topic   string
+			payload map[string]interface{}
+		}{
+			{"orders.created", map[string]interface{}{"orderId": 123, "amount": 99.99}},
+			{"users.registered", map[string]interface{}{"userId": 456, "email": "test@example.com"}},
+			{"payments.processed", map[string]interface{}{"paymentId": 789, "status": "completed"}},
+		}
+
+		// Publish all test events
+		for _, event := range testEvents {
+			publishReq := PublishRequest{
+				Topic:   event.topic,
+				Payload: event.payload,
+			}
+
+			publishReqBody, err := json.Marshal(publishReq)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			pubReq, err := http.NewRequest("POST", "/api/v1/events", strings.NewReader(string(publishReqBody)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pubReq.Header.Set("Content-Type", "application/json")
+			pubReq.Header.Set("Authorization", "Bearer "+token)
+
+			pubCtx := context.WithValue(context.Background(), ClaimsKey, claims)
+			pubReq = pubReq.WithContext(pubCtx)
+
+			// Execute publish request
+			pubRR := httptest.NewRecorder()
+			handlers.PublishEvent(pubRR, pubReq)
+
+			// Verify publish succeeded
+			if status := pubRR.Code; status != http.StatusCreated {
+				t.Errorf("Failed to publish event to %s: got status %d", event.topic, status)
+			}
+		}
+
+		// Step 4: Verify SSE client receives ALL published events (from all subscriptions)
+		eventsReceived := make(map[string]bool)
+		expectedEvents := map[string]bool{
+			"orders.created":     false,
+			"users.registered":   false,
+			"payments.processed": false,
+		}
+
+		timeout := time.After(3 * time.Second)
+
+		for len(eventsReceived) < len(expectedEvents) {
+			select {
+			case data := <-recorder.Data:
+				// Look for published events in SSE format
+				if strings.Contains(data, "data: {") {
+					// Check which topic this event belongs to
+					for topic := range expectedEvents {
+						if strings.Contains(data, topic) && !eventsReceived[topic] {
+							eventsReceived[topic] = true
+							t.Logf("✅ Received event for topic %s: %s", topic, strings.TrimSpace(data))
+							break
+						}
+					}
+				}
+			case <-timeout:
+				// List missing events
+				var missing []string
+				for topic := range expectedEvents {
+					if !eventsReceived[topic] {
+						missing = append(missing, topic)
+					}
+				}
+				t.Errorf("Timeout: SSE client should receive events from ALL subscriptions, missing: %v", missing)
+				t.Error("This test expects unified SSE behavior where client gets events from all subscriptions")
+				return
+			case <-recorder.Done:
+				return
+			}
+		}
+
+		// Verify we got all events
+		if len(eventsReceived) != len(expectedEvents) {
+			t.Errorf("Expected events from %d topics, got %d", len(expectedEvents), len(eventsReceived))
+		}
+
+		cancel()
+	})
 }

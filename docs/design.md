@@ -472,6 +472,45 @@ HTTPClient is **NOT** a client SDK component. It is a server-side component that
 - `GetClientSubscriptions(clientID)` - Returns all subscriptions for a client with metadata
 - `UnsubscribeByID(clientID, subscriptionID)` - Removes specific subscription by ID
 - Thread-safe subscription metadata storage alongside routing table operations
+
+### Unified Subscription Architecture
+
+**Design Decision**: EventMesh implements a unified ephemeral subscription model that eliminates dual subscription mechanisms.
+
+#### Previous Architecture (Dual Model)
+- **SSE Subscriptions**: `GET /api/v1/events/stream?topic=pattern` created temporary subscriptions
+- **Persistent Subscriptions**: `POST /api/v1/subscriptions` stored subscriptions in MeshNode
+- **Problem**: Confusing dual APIs with different behaviors and inconsistent persistence
+
+#### Current Architecture (Unified Ephemeral Model)
+- **Single Subscription API**: Only `POST/GET/DELETE /api/v1/subscriptions` for subscription management
+- **Unified SSE Streaming**: `GET /api/v1/events/stream` streams ALL active client subscriptions (no topic parameter)
+- **Ephemeral by Design**: All subscriptions exist only during client connection lifetime
+- **Stateless Nodes**: No cross-node subscription state management or persistence
+
+#### Architectural Rationale
+
+**Ephemeral vs Persistent Trade-offs:**
+
+| Approach | Benefits | Challenges |
+|----------|----------|------------|
+| **Ephemeral (Chosen)** | Simple stateless nodes, clear failure semantics, horizontal scaling, no distributed state sync | Client reconnection responsibility |
+| **Persistent** | Survives node restarts | Complex cross-node state management, zombie subscription cleanup, distributed consistency |
+
+**Client Responsibilities:**
+1. **Detect disconnection** from node failures or network issues
+2. **Reconnect** to same or different node in the mesh
+3. **Re-establish subscriptions** using subscription management API
+4. **Resume from hint** (future: `?since=eventId` parameter for replay)
+
+**Benefits:**
+- ✅ Stateless, horizontally scalable nodes
+- ✅ No distributed subscription state complexity
+- ✅ Clear failure and recovery patterns
+- ✅ Industry-standard ephemeral connection model (WebSocket/SSE pattern)
+- ✅ Foundation for client-controlled resume strategies
+
+This design aligns with distributed systems best practices: push intelligence to the client edge rather than complicating server core state management.
 - Automatic subscription ID generation during Subscribe() calls
 
 **HTTP Handler Implementation:**
