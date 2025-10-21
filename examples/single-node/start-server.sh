@@ -7,7 +7,7 @@ set -e
 
 # Configuration
 HTTP_PORT=${HTTP_PORT:-8081}
-HTTP_SECRET=${HTTP_SECRET:-"eventmesh-demo-secret-key"}
+EVENTMESH_JWT_SECRET=${EVENTMESH_JWT_SECRET:-"eventmesh-demo-secret-key"}
 NODE_ID=${NODE_ID:-"single-node-demo"}
 LISTEN_PORT=${LISTEN_PORT:-8082}
 PEER_LISTEN_PORT=${PEER_LISTEN_PORT:-8083}
@@ -61,7 +61,7 @@ echo ""
 
 # Start the server
 echo -e "${BLUE}Server starting with command:${NC}"
-echo "$EVENTMESH_BIN --http --http-port $HTTP_PORT --http-secret \"$HTTP_SECRET\" --node-id \"$NODE_ID\" --listen \":$LISTEN_PORT\" --peer-listen \":$PEER_LISTEN_PORT\" --log-level $LOG_LEVEL"
+echo "EVENTMESH_JWT_SECRET=\"$EVENTMESH_JWT_SECRET\" $EVENTMESH_BIN --http --http-port $HTTP_PORT --node-id \"$NODE_ID\" --listen \":$LISTEN_PORT\" --peer-listen \":$PEER_LISTEN_PORT\" --log-level $LOG_LEVEL"
 echo ""
 
 # Show next steps
@@ -81,11 +81,11 @@ echo ""
 echo -e "${BLUE}Server Output:${NC}"
 echo "----------------------------------------"
 
-# Execute the server
+# Execute the server (export the environment variable for the process)
+export EVENTMESH_JWT_SECRET
 exec "$EVENTMESH_BIN" \
     --http \
     --http-port "$HTTP_PORT" \
-    --http-secret "$HTTP_SECRET" \
     --node-id "$NODE_ID" \
     --listen ":$LISTEN_PORT" \
     --peer-listen ":$PEER_LISTEN_PORT" \

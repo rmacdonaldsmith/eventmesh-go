@@ -82,10 +82,9 @@ trap cleanup EXIT INT TERM
 
 # Start Node1 (Seed Node)
 echo "🌱 Starting Node1 (Seed Node) on ports 8091/8092/8093..."
-$EVENTMESH \
+EVENTMESH_JWT_SECRET="demo-secret-1" $EVENTMESH \
     --http \
     --http-port 8091 \
-    --http-secret "demo-secret-1" \
     --node-id "demo-node-1" \
     --listen ":8092" \
     --peer-listen ":8093" \
@@ -128,10 +127,9 @@ echo ""
 
 # Start Node2 (Discovers Node1)
 echo "🔍 Starting Node2 (discovers Node1) on ports 8094/8095/8096..."
-$EVENTMESH \
+EVENTMESH_JWT_SECRET="demo-secret-2" $EVENTMESH \
     --http \
     --http-port 8094 \
-    --http-secret "demo-secret-2" \
     --node-id "demo-node-2" \
     --listen ":8095" \
     --peer-listen ":8096" \
@@ -152,10 +150,9 @@ sleep 3
 # Start Node3 (Also discovers Node1)
 echo ""
 echo "🔍 Starting Node3 (discovers Node1) on ports 8097/8098/8099..."
-$EVENTMESH \
+EVENTMESH_JWT_SECRET="demo-secret-3" $EVENTMESH \
     --http \
     --http-port 8097 \
-    --http-secret "demo-secret-3" \
     --node-id "demo-node-3" \
     --listen ":8098" \
     --peer-listen ":8099" \

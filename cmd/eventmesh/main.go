@@ -31,7 +31,6 @@ func main() {
 		connectPeer = flag.String("connect-peer", "", "Address of peer node to connect to (optional)")
 		enableHTTP  = flag.Bool("http", false, "Enable HTTP API server")
 		httpPort    = flag.String("http-port", "8081", "Port for HTTP API server")
-		httpSecret  = flag.String("http-secret", "", "JWT secret key for HTTP API (auto-generated if empty)")
 		noAuth      = flag.Bool("no-auth", false, "Disable authentication for development (INSECURE - development only)")
 		showVersion = flag.Bool("version", false, "Show version and exit")
 		showHealth  = flag.Bool("health", false, "Show health status and exit")
@@ -112,9 +111,16 @@ func main() {
 			log.Printf("⚠️  Admin endpoints still require valid JWT tokens")
 		}
 
+		// Get JWT secret from environment variable
+		jwtSecret := os.Getenv("EVENTMESH_JWT_SECRET")
+		if jwtSecret == "" {
+			jwtSecret = "eventmesh-mvp-secret-key-change-in-production"
+			log.Printf("⚠️  WARNING: Using default JWT secret - set EVENTMESH_JWT_SECRET environment variable for production")
+		}
+
 		httpConfig := httpapi.Config{
 			Port:      *httpPort,
-			SecretKey: *httpSecret,
+			SecretKey: jwtSecret,
 			NoAuth:    *noAuth,
 		}
 		httpServer = httpapi.NewServer(node, httpConfig)

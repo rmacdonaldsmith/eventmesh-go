@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -130,10 +131,14 @@ func startEventMeshServer(ctx context.Context) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, binaryPath,
 		"--http",
 		"--http-port", testServerPort,
-		"--http-secret", "integration-test-secret",
 		"--node-id", "integration-test-node",
 		"--listen", ":8084", // Different from HTTP port
 		"--peer-listen", ":8085")
+
+	// Set JWT secret via environment variable
+	cmd.Env = append(cmd.Env, "EVENTMESH_JWT_SECRET=integration-test-secret")
+	// Inherit other environment variables
+	cmd.Env = append(cmd.Env, os.Environ()...)
 
 	// Start the command
 	if err := cmd.Start(); err != nil {

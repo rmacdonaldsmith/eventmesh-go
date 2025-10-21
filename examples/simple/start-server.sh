@@ -25,11 +25,13 @@ if [ ! -f "$EVENTMESH" ]; then
     exit 1
 fi
 
+# Set JWT secret via environment variable for security
+export EVENTMESH_JWT_SECRET="simple-demo"
+
 # Start server
 $EVENTMESH \
     --http \
     --http-port 8081 \
-    --http-secret "simple-demo" \
     --node-id "simple-node" \
     --listen ":8082" \
     --peer-listen ":8083"
