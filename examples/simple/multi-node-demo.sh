@@ -88,6 +88,7 @@ EVENTMESH_JWT_SECRET="demo-secret-1" $EVENTMESH \
     --node-id "demo-node-1" \
     --listen ":8092" \
     --peer-listen ":8093" \
+    --no-auth \
     > "$LOG_DIR/node1.log" 2>&1 &
 NODE1_PID=$!
 PIDS="$NODE1_PID"
@@ -134,6 +135,7 @@ EVENTMESH_JWT_SECRET="demo-secret-2" $EVENTMESH \
     --listen ":8095" \
     --peer-listen ":8096" \
     --seed-nodes "localhost:8093" \
+    --no-auth \
     > "$LOG_DIR/node2.log" 2>&1 &
 NODE2_PID=$!
 PIDS="$PIDS $NODE2_PID"
@@ -157,6 +159,7 @@ EVENTMESH_JWT_SECRET="demo-secret-3" $EVENTMESH \
     --listen ":8098" \
     --peer-listen ":8099" \
     --seed-nodes "localhost:8093" \
+    --no-auth \
     > "$LOG_DIR/node3.log" 2>&1 &
 NODE3_PID=$!
 PIDS="$PIDS $NODE3_PID"

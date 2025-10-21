@@ -34,4 +34,5 @@ $EVENTMESH \
     --http-port 8081 \
     --node-id "simple-node" \
     --listen ":8082" \
-    --peer-listen ":8083"
+    --peer-listen ":8083" \
+    --no-auth

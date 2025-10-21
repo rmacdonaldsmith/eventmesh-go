@@ -89,4 +89,5 @@ exec "$EVENTMESH_BIN" \
     --node-id "$NODE_ID" \
     --listen ":$LISTEN_PORT" \
     --peer-listen ":$PEER_LISTEN_PORT" \
-    --log-level "$LOG_LEVEL"
+    --log-level "$LOG_LEVEL" \
+    --no-auth
