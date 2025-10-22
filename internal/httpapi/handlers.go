@@ -669,15 +669,21 @@ func (h *Handlers) AdminGetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For events published, we don't have direct tracking yet
-	// TODO: Implement proper event counting in EventLog
-	eventsPublished := 0
+	// Get EventLog for statistics
+	eventLog := h.meshNode.GetEventLog()
+
+	// Get event statistics from EventLog
+	eventStats, err := eventLog.GetStatistics(ctx)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Failed to get event statistics: %v", err), http.StatusInternalServerError)
+		return
+	}
 
 	response := AdminStatsResponse{
 		ConnectedClients:   health.ConnectedClients,
 		TotalSubscriptions: subscriberCount,
 		TotalTopics:        topicCount,
-		EventsPublished:    eventsPublished,
+		EventsPublished:    int(eventStats.TotalEvents),
 	}
 
 	h.writeJSON(w, response, http.StatusOK)

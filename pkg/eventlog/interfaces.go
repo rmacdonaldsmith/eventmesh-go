@@ -46,4 +46,14 @@ type EventLog interface {
 
 	// Compact performs log compaction or cleanup (future use).
 	Compact(ctx context.Context) error
+
+	// GetStatistics returns overall statistics about the event log.
+	GetStatistics(ctx context.Context) (EventLogStatistics, error)
+}
+
+// EventLogStatistics provides aggregate statistics about the event log
+type EventLogStatistics struct {
+	TotalEvents int64            // Total number of events across all topics
+	TopicCounts map[string]int64 // Number of events per topic
+	TopicCount  int              // Number of distinct topics
 }

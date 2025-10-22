@@ -225,6 +225,32 @@ func (log *InMemoryEventLog) Compact(ctx context.Context) error {
 	return nil
 }
 
+// GetStatistics returns overall statistics about the event log
+func (log *InMemoryEventLog) GetStatistics(ctx context.Context) (eventlog.EventLogStatistics, error) {
+	log.mu.RLock()
+	defer log.mu.RUnlock()
+
+	if log.closed {
+		return eventlog.EventLogStatistics{}, errors.New("event log is closed")
+	}
+
+	stats := eventlog.EventLogStatistics{
+		TopicCounts: make(map[string]int64),
+		TopicCount:  len(log.eventsByTopic),
+	}
+
+	// Calculate events per topic and total
+	var totalEvents int64
+	for topic, events := range log.eventsByTopic {
+		eventCount := int64(len(events))
+		stats.TopicCounts[topic] = eventCount
+		totalEvents += eventCount
+	}
+
+	stats.TotalEvents = totalEvents
+	return stats, nil
+}
+
 // Close closes the event log and clears all topics and events.
 // This is equivalent to the C# Dispose method.
 func (log *InMemoryEventLog) Close() error {
