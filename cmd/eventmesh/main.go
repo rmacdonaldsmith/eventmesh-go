@@ -362,16 +362,42 @@ func logNodeReady(startTime time.Time, node *meshnode.GRPCMeshNode, httpServer *
 		authMode = "disabled"
 	}
 
-	// Log comprehensive node ready status
-	slog.Info("node ready",
-		"node_id", nodeID,
-		"version", appVersion,
-		"startup_duration_ms", startupDuration.Milliseconds(),
-		"peer_listen_address", peerListenAddress,
-		"http_address", httpAddress,
-		"connected_peers", connectedPeers,
-		"peers_connected", peersConnected,
-		"auth_mode", authMode,
-		"seed_nodes", seedNodes,
-		"log_level", logLevel)
+	// Log comprehensive node ready status in pretty format using structured logging
+	slog.Info("🚀 Node Ready Summary:")
+	slog.Info("   Node ID: " + nodeID)
+	slog.Info("   Version: " + appVersion)
+	slog.Info(fmt.Sprintf("   Startup Time: %dms", startupDuration.Milliseconds()))
+	slog.Info("   Peer Listen: " + formatAddress(peerListenAddress))
+	if httpAddress != "" {
+		slog.Info("   HTTP API: " + formatAddress(httpAddress))
+	}
+	if peersConnected > 0 {
+		slog.Info(fmt.Sprintf("   Connected Peers (%d):", peersConnected))
+		for _, peer := range connectedPeers {
+			slog.Info("     • " + peer)
+		}
+	} else {
+		slog.Info("   Connected Peers: 0")
+	}
+	slog.Info("   Auth Mode: " + authMode)
+	if seedNodes > 0 {
+		slog.Info(fmt.Sprintf("   Seed Nodes: %d", seedNodes))
+	}
+	slog.Info("   Log Level: " + logLevel)
+}
+
+// formatAddress converts IPv6 addresses to more readable format
+func formatAddress(addr string) string {
+	if addr == "" {
+		return ""
+	}
+
+	// Convert [::]:8080 to localhost:8080 for readability
+	if strings.HasPrefix(addr, "[::]:") {
+		port := strings.TrimPrefix(addr, "[::]:")
+		return fmt.Sprintf("localhost:%s", port)
+	}
+
+	// Return as-is for other formats (IPv4, etc.)
+	return addr
 }

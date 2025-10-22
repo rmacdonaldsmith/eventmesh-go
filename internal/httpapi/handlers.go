@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -174,6 +175,13 @@ func (h *Handlers) PublishEvent(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, fmt.Sprintf("Failed to publish event: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	// Log successful event publication
+	slog.Info("event published",
+		"client_id", client.ID(),
+		"topic", req.Topic,
+		"event_offset", eventRecord.Offset(),
+		"payload_size", len(payload))
 
 	// Create response
 	resp := PublishResponse{

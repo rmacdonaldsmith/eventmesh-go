@@ -3,8 +3,10 @@ package peerlink
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,7 +123,7 @@ func (g *GRPCPeerLink) Start(ctx context.Context) error {
 
 	// Log the actual listening address
 	slog.Info("peer server listening",
-		"address", listener.Addr().String(),
+		"address", formatAddress(listener.Addr().String()),
 		"node_id", g.config.NodeID)
 
 	// Start serving in a goroutine
@@ -766,4 +768,20 @@ func (g *GRPCPeerLink) GetAllPeerMetrics() []PeerMetrics {
 		})
 	}
 	return result
+}
+
+// formatAddress converts IPv6 addresses to more readable format
+func formatAddress(addr string) string {
+	if addr == "" {
+		return ""
+	}
+
+	// Convert [::]:8080 to localhost:8080 for readability
+	if strings.HasPrefix(addr, "[::]:") {
+		port := strings.TrimPrefix(addr, "[::]:")
+		return fmt.Sprintf("localhost:%s", port)
+	}
+
+	// Return as-is for other formats (IPv4, etc.)
+	return addr
 }

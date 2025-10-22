@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -78,7 +79,7 @@ func (s *Server) Start() error {
 
 	// Log actual listening address
 	slog.Info("HTTP server listening",
-		"address", listener.Addr().String())
+		"address", formatAddress(listener.Addr().String()))
 
 	// Start serving
 	return s.server.Serve(listener)
@@ -293,4 +294,20 @@ func (s *Server) writeJSON(w http.ResponseWriter, data interface{}, statusCode i
 		// Fallback error handling
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 	}
+}
+
+// formatAddress converts IPv6 addresses to more readable format
+func formatAddress(addr string) string {
+	if addr == "" {
+		return ""
+	}
+
+	// Convert [::]:8080 to localhost:8080 for readability
+	if strings.HasPrefix(addr, "[::]:") {
+		port := strings.TrimPrefix(addr, "[::]:")
+		return fmt.Sprintf("localhost:%s", port)
+	}
+
+	// Return as-is for other formats (IPv4, etc.)
+	return addr
 }
