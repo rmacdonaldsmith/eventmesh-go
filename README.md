@@ -1,93 +1,192 @@
-# CLAUDE.md
+# EventMesh
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+A distributed event streaming platform for real-time messaging between applications.
 
-## Project Overview
+## What is EventMesh?
 
-This is a Go implementation of an event mesh system for secure, distributed event routing. This project was ported from a C#/.NET implementation and follows the same architecture and design principles. See `design.md` for complete architecture and design details.
+EventMesh is a Go-based event streaming system that enables secure, scalable communication across distributed applications. It provides real-time event publishing and subscription through HTTP APIs with automatic multi-node discovery and mesh networking.
 
-## Development Workflow
+**Key Features:**
+- HTTP REST API with Server-Sent Events streaming
+- Multi-node mesh with automatic peer discovery
+- JWT authentication and client isolation
+- Event persistence with offset-based replay
+- Pattern-based topic subscriptions (`news.*`, `orders.#`)
+- Command-line interface for all operations
+
+## Quick Start
+
+**Prerequisites:** Go 1.25.1+
+
+**Build:**
+```bash
+make build
+```
+
+**Try the Multi-Node Demo:**
+```bash
+cd examples/multi-node
+./start-server.sh     # Terminal 1
+./subscriber.sh       # Terminal 2
+./publisher.sh        # Terminal 3
+```
+
+This starts an EventMesh server, subscribes to `news.*` events, and publishes sample events.
+
+## Architecture
+
+EventMesh consists of:
+
+- **EventMesh Server**: Core event routing and storage engine
+- **HTTP API**: RESTful interface with Server-Sent Events for real-time streaming
+- **CLI Tool**: Command-line interface for publishing, subscribing, and administration
+- **Multi-Node Mesh**: Automatic peer discovery and cross-node event distribution
+
+```
+┌─────────────┐    HTTP API    ┌─────────────┐    Peer Network    ┌─────────────┐
+│  Publisher  │──────────────→ │ EventMesh   │←──────────────────→│ EventMesh   │
+│   Client    │                │   Node 1    │                    │   Node 2    │
+└─────────────┘                └─────────────┘                    └─────────────┘
+                                       │                                  │
+                               Event Stream (SSE)                Event Stream (SSE)
+                                       ↓                                  ↓
+┌─────────────┐               ┌─────────────┐                    ┌─────────────┐
+│ Subscriber  │←──────────────│ Subscriber  │                    │ Subscriber  │
+│  Client #1  │               │  Client #2  │                    │  Client #3  │
+└─────────────┘               └─────────────┘                    └─────────────┘
+```
+
+## Features
+
+- **Event Streaming**: Real-time publish/subscribe messaging
+- **Multi-Node Mesh**: Automatic discovery and cross-node event routing
+- **Event Persistence**: All events stored with offset-based replay capability
+- **Topic Patterns**: Flexible routing with wildcard subscriptions
+- **JWT Authentication**: Secure client isolation and access control
+- **HTTP API**: RESTful endpoints for all operations
+- **CLI Interface**: Full command-line tool for operational tasks
+- **Development Mode**: No-auth mode for testing and development
+
+## Getting Started
 
 ### Build Commands
-- **Build all packages**: `go build ./...` (from project root)
-- **Run tests**: `go test ./...` (from project root)
-- **Run specific test package**: `go test ./tests` or `go test ./internal/eventlog`
-- **Run tests with verbose output**: `go test ./tests -v`
-- **Format code**: `go fmt ./...`
-- **Lint code**: `go vet ./...`
-- **Clean module cache**: `go clean -modcache`
 
-### Project Structure (Go Packages)
+```bash
+make            # Full build: format, vet, test, build
+make build      # Build server binary only
+make test       # Run tests with coverage
+make clean      # Clean build artifacts
+make run        # Build and start development server
+```
 
+### Server Usage
+
+```bash
+# Basic server
+./bin/eventmesh --http --http-port 8081
+
+# Development mode (no authentication)
+./bin/eventmesh --http --no-auth
+
+# Multi-node with discovery
+./bin/eventmesh --http --node-id node1 --peer-listen :9090
+./bin/eventmesh --http --node-id node2 --peer-listen :9091 --seed-nodes "localhost:9090"
+```
+
+### CLI Usage
+
+```bash
+# Authenticate (production)
+./bin/eventmesh-cli auth --client-id my-client
+
+# Development mode (no auth required)
+./bin/eventmesh-cli --no-auth publish --topic test.events --payload '{"msg":"hello"}'
+./bin/eventmesh-cli --no-auth stream --topic "test.*"
+./bin/eventmesh-cli --no-auth topics info --topic test.events
+```
+
+## Examples & Demos
+
+### Multi-Node Examples (`examples/multi-node/`)
+Best starting point - demonstrates core functionality:
+- Server startup and basic pub/sub
+- Multi-node mesh with automatic discovery
+- Event replay and historical queries
+- Cross-node event delivery testing
+
+### Single-Node Setup (`examples/single-node/`)
+Production-ready deployment patterns:
+- Comprehensive server configuration
+- Health monitoring and operational guides
+- Authentication setup
+
+### CLI Usage Patterns (`examples/cli-usage/`)
+Advanced command-line workflows:
+- Authentication and token management
+- Business workflow examples
+- Multi-service integration patterns
+
+## API Reference
+
+### HTTP Endpoints
+
+**Events:**
+- `POST /api/v1/events` - Publish event
+- `GET /api/v1/events/stream?topic=pattern` - Subscribe via Server-Sent Events
+
+**Topics:**
+- `GET /api/v1/topics/{topic}/info` - Topic metadata and offsets
+- `GET /api/v1/topics/{topic}/replay?offset=N` - Replay from offset
+
+**Admin:**
+- `GET /api/v1/health` - Server health check
+- `GET /api/v1/admin/clients` - Connected clients
+- `GET /api/v1/admin/subscriptions` - Active subscriptions
+
+**Authentication:**
+- `POST /api/v1/auth/login` - Client authentication
+
+### CLI Commands
+
+- `eventmesh-cli auth` - Authentication management
+- `eventmesh-cli publish` - Publish events
+- `eventmesh-cli stream` - Real-time event streaming
+- `eventmesh-cli replay` - Historical event replay
+- `eventmesh-cli topics` - Topic inspection and management
+- `eventmesh-cli health` - Server health checks
+- `eventmesh-cli admin` - Administrative operations
+
+## Development
+
+**Requirements:**
+- Go 1.25.1 or later
+- No external dependencies for core functionality
+
+**Project Structure:**
 ```
 eventmesh-go/
-├── go.mod                           # Go module definition
-├── go.sum                          # Go module checksums (auto-generated)
-├── design.md            # System design document
-├── pkg/                           # Public API packages
-│   └── eventlog/
-│       ├── interfaces.go           # EventRecord + EventLog interfaces
-│       ├── doc.go                  # Package documentation with examples
-│       └── interfaces_test.go      # Basic interface compilation tests
-├── internal/                      # Private implementation packages
-│   └── eventlog/
-│       ├── record.go              # Record struct (implements EventRecord)
-│       ├── memory.go              # InMemoryEventLog implementation
-│       └── memory_test.go         # Basic implementation tests
-├── tests/                         # Integration/comprehensive tests
-│   └── eventlog_test.go          # Full test suite (24 tests)
-├── cmd/                          # Future executable entry points
-│   └── eventmesh/
-│       └── main.go               # (Future) main executable
-└── CLAUDE.md                     # This file
+├── cmd/eventmesh/          # Server binary
+├── pkg/                    # Public interfaces
+├── internal/               # Private implementations
+├── examples/               # Working examples and demos
+├── tests/                  # Integration tests
+├── bin/                    # Built binaries
+└── proto/                  # gRPC protocol definitions
 ```
 
-### Package Dependencies
-- **pkg/eventlog**: No dependencies (pure interfaces)
-- **internal/eventlog**: pkg/eventlog (implementations of public interfaces)
-- **tests**: pkg/eventlog + internal/eventlog (comprehensive testing)
-- **cmd**: pkg/eventlog + internal/eventlog (future executables)
+**Testing:**
+```bash
+make test                   # Run all tests
+make test-coverage          # Generate HTML coverage report
+go test ./tests -v          # Integration tests only
+```
 
-**Benefits of this Structure:**
-- **Clean API Separation**: Public interfaces in `pkg/`, implementations in `internal/`
-- **No Circular Dependencies**: Unidirectional dependency flow
-- **Interface-Based Design**: Easy testing and mocking via interfaces
-- **Go Conventions**: Follows standard Go project layout
+## License
 
-## Key References
+MIT License - see LICENSE file for details.
 
-- **Design Document**: `design.md` - Complete system design, architecture, and requirements
-- **License**: MIT License (see LICENSE file)
-- **Original C# Implementation**: Available in separate repository for reference
+## Documentation
 
-## Development Guidelines
-
-### Test-Driven Development (TDD)
-This project follows strict TDD practices (ported from C# implementation):
-- **Comprehensive Test Coverage**: 24 tests covering all functionality and edge cases
-- **Red-Green-Refactor cycle**: All code was developed test-first
-- **Error Handling**: All error conditions are tested with explicit Go error types
-- **Concurrency Testing**: Thread safety validated with goroutines and sync primitives
-- **Interface Testing**: Both public interfaces and private implementations are tested
-
-### Go Best Practices
-- **Explicit Error Handling**: All methods return explicit errors instead of exceptions
-- **Context Cancellation**: Use `context.Context` for cancellation and timeouts
-- **Channel-Based Async**: Use Go channels instead of async/await patterns
-- **Thread Safety**: Use `sync.RWMutex` for concurrent access protection
-- **Interface Compliance**: Compile-time interface verification with `var _ Interface = (*Type)(nil)`
-- **Defensive Copying**: Return copies of slices/maps to prevent mutation
-
-### Go Idioms Applied
-- **Constructor Functions**: `NewRecord()`, `NewInMemoryEventLog()` instead of constructors
-- **Method Receivers**: Interface methods implemented on struct types
-- **Channel Patterns**: `Replay()` returns `(<-chan EventRecord, <-chan error)` for streaming
-- **Resource Management**: `io.Closer` interface instead of IDisposable
-- **Error Types**: Predefined error variables (`ErrNegativeOffset`, etc.)
-
-### Technical Architecture
-- Follow the requirements defined in `design.md`
-- Current implementation: In-memory storage (future: RocksDB)
-- Future communication: gRPC/mTLS (as per design document)
-- Event Log Requirements: REQ-LOG-001 through REQ-LOG-004 implemented
-- Security: mTLS and client authentication (future implementation)
+- `docs/design.md` - System design and architecture
+- `examples/` - Working demonstrations
+- `CLAUDE.md` - Development guidelines
