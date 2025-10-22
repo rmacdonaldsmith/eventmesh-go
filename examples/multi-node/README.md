@@ -42,9 +42,9 @@ This demonstrates:
 - Replaying events from specific offsets (`replay`)
 - Comparing replay vs real-time streaming
 
-## Multi-Node Discovery - NEW!
+## Multi-Node Discovery
 
-EventMesh nodes can now automatically discover each other to form a mesh network:
+EventMesh nodes can automatically discover each other to form a mesh network:
 
 ### 6. Multi-Node Mesh Demo
 ```bash
@@ -78,9 +78,12 @@ This demonstrates:
 
 ## What's Happening
 
-- **Server**: EventMesh server running on port 8081
+- **Multi-Node Setup**: 3 EventMesh nodes running on ports 8091, 8094, 8097
+- **Node1 (Seed)**: Discovery seed node on port 8091
+- **Node2 & Node3**: Auto-discover and connect to Node1
 - **Publisher**: Sends events to topics like `news.sports` and `news.weather`
 - **Subscriber**: Listens to `news.*` pattern and receives all news events in real-time
+- **Cross-Node Events**: Events published to any node are delivered to all connected nodes
 - **Replay**: Read historical events from any point in time using offset-based queries
 
 ## Files
@@ -90,6 +93,8 @@ This demonstrates:
 - `subscriber.sh` - Simple script that subscribes and streams events
 - `demo.sh` - Runs publisher and subscriber together
 - `replay-demo.sh` - Demonstrates offset-based event replay features
+- `multi-node-demo.sh` - Starts a 3-node mesh for discovery testing
+- `mesh-test.sh` - Tests cross-node event delivery in multi-node mesh
 
 ## CLI Commands Reference
 
@@ -141,12 +146,24 @@ When a node starts with `--seed-nodes`:
 
 **Discovery Logs:**
 ```
-🌱 Bootstrap configuration: 1 seed nodes
-   Seed 1: localhost:8093
-🔍 Discovery found 1 peers
-   Connecting to peer: localhost:8093
-   ✅ Connected to peer: localhost:8093
-🌐 Discovery complete: 1/1 peers connected
+time=22:32:50.853 level=INFO msg="starting peer discovery" node_id=demo-node-2 seed_nodes=1
+time=22:32:50.853 level=INFO msg="peers discovered" node_id=demo-node-2 peers_found=1
+time=22:32:50.853 level=INFO msg="connecting to peer" peer_id=localhost:8093 peer_address=localhost:8093 local_node_id=demo-node-2
+time=22:32:50.853 level=INFO msg="peer connected successfully" peer_id=localhost:8093 peer_address=localhost:8093 local_node_id=demo-node-2
+time=22:32:50.853 level=INFO msg="discovery complete" node_id=demo-node-2 peers_found=1 peers_connected=1
+```
+
+**Enhanced Startup Summary:**
+```
+time=22:32:53.876 level=INFO msg="🚀 Node Ready Summary:"
+time=22:32:53.876 level=INFO msg="   Node ID: demo-node-3"
+time=22:32:53.876 level=INFO msg="   Version: 0.1.0"
+time=22:32:53.876 level=INFO msg="   Startup Time: 2ms"
+time=22:32:53.876 level=INFO msg="   Peer Listen: localhost:8099"
+time=22:32:53.876 level=INFO msg="   HTTP API: localhost:8097"
+time=22:32:53.876 level=INFO msg="   Connected Peers (1):"
+time=22:32:53.876 level=INFO msg="     • localhost:8093@localhost:8093"
+time=22:32:53.876 level=INFO msg="   Auth Mode: disabled"
 ```
 
 ### Key Benefits
@@ -155,6 +172,36 @@ When a node starts with `--seed-nodes`:
 - **Fault Tolerant**: Discovery continues even if some connections fail
 - **Scalable**: Add new nodes by pointing them to any existing seed
 - **Simple**: Just add `--seed-nodes="host:port,host2:port2"` to any node
+
+## Enhanced Logging & Observability
+
+EventMesh now includes comprehensive structured logging for better operational visibility:
+
+### Log Levels
+- `--log-level debug` - Detailed debug information (used in demos)
+- `--log-level info` - Standard operational information (default)
+- `--log-level warn` - Warning messages only
+- `--log-level error` - Error messages only
+
+### Key Logging Features
+
+**Structured Logging**: All logs use structured key-value format for easy parsing:
+```bash
+time=22:32:50.853 level=INFO msg="peer connected successfully" peer_id=localhost:8093 local_node_id=demo-node-2
+```
+
+**Pretty-Printed Startup Summary**: Each node logs a comprehensive startup summary showing:
+- Node ID, version, and startup time
+- Actual listening addresses (not just configured ones)
+- Connected peer information
+- Authentication mode and configuration
+
+**Event Publication Logging**: Track events as they flow through the mesh:
+```bash
+time=22:33:28.470 level=INFO msg="event published" client_id=dev-client topic=news.sports event_offset=0 payload_size=64
+```
+
+**Static Log Files**: Demo scripts write to `/tmp/eventmesh-demo/nodeX.log` for consistent log monitoring
 
 ## Development Mode (No Authentication)
 

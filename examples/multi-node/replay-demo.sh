@@ -4,9 +4,9 @@
 #
 # PREREQUISITES:
 # 1. Run 'make build' from project root to build binaries
-# 2. Start EventMesh server: examples/simple/start-server.sh (in another terminal)
+# 2. Start EventMesh server: ./start-server.sh (in another terminal)
 #    OR for easier testing: ../../bin/eventmesh --http --no-auth
-# 3. Run this script from anywhere: ./examples/simple/replay-demo.sh
+# 3. Run this script from anywhere: ./replay-demo.sh
 #
 # This script demonstrates:
 # - Publishing events to a topic

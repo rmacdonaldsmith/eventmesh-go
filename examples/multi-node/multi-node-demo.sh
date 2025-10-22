@@ -238,7 +238,7 @@ if [ $RUNNING_NODES -eq 3 ]; then
     echo "You can now test the mesh by running (in separate terminals):"
     echo ""
     echo "# Test Node1 -> Node2 communication:"
-    echo "./examples/simple/publisher.sh   # (uses Node1 at port 8091)"
+    echo "./publisher.sh   # (uses Node1 at port 8091)"
     echo ""
     echo "# Test cross-node event delivery:"
     echo "curl -X POST http://localhost:8091/api/v1/events \\"
@@ -250,7 +250,7 @@ if [ $RUNNING_NODES -eq 3 ]; then
     echo "💡 To follow live logs from all nodes, run in another terminal:"
     echo "   tail -f /tmp/eventmesh-demo/node*.log"
     echo ""
-    echo "💡 Or restart with: ./examples/simple/multi-node-demo.sh --follow-logs"
+    echo "💡 Or restart with: ./multi-node-demo.sh --follow-logs"
 else
     echo "⚠️  WARNING: Only $RUNNING_NODES/3 nodes running"
     echo ""
