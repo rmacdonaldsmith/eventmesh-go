@@ -451,7 +451,16 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 
 			// Send over gRPC stream
 			if err := stream.Send(peerMsg); err != nil {
-				// TODO: Add proper error handling/reconnection
+				// Log the stream error for debugging
+				slog.Error("failed to send event to peer",
+					"peer_id", peerID,
+					"local_node_id", g.config.NodeID,
+					"topic", queuedMsg.event.Topic(),
+					"event_offset", queuedMsg.event.Offset(),
+					"error", err)
+
+				// Stream is broken, exit this connection goroutine
+				// The Connect method should be called again to re-establish connection
 				return
 			}
 		}
