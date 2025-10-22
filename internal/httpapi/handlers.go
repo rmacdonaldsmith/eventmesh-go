@@ -604,26 +604,30 @@ func (h *Handlers) AdminListSubscriptions(w http.ResponseWriter, r *http.Request
 
 	ctx := r.Context()
 
-	// Get all subscriptions from the routing table
-	routingTable := h.meshNode.GetRoutingTable()
-	subscriptions, err := routingTable.GetAllSubscriptions(ctx)
+	// Get all connected clients from the MeshNode
+	clients, err := h.meshNode.GetConnectedClients(ctx)
 	if err != nil {
-		h.writeError(w, fmt.Sprintf("Failed to get subscriptions: %v", err), http.StatusInternalServerError)
+		h.writeError(w, fmt.Sprintf("Failed to get connected clients: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Filter for local client subscriptions only and convert to admin format
+	// Get all client subscriptions with actual creation times
 	var adminSubscriptions []AdminSubscriptionInfo
-	for _, subscription := range subscriptions {
-		// Only include local client subscriptions (not peer node subscriptions)
-		if subscription.Subscriber.Type() == routingtable.LocalClient {
-			// For admin view, we'll use subscriber ID as both subscription ID and client ID
-			// In a full implementation, we might want to track actual subscription IDs
+	for _, client := range clients {
+		// Get subscriptions for this client
+		subscriptions, err := h.meshNode.GetClientSubscriptions(ctx, client.ID())
+		if err != nil {
+			// Log error but continue with other clients
+			continue
+		}
+
+		// Convert to admin format using actual creation times
+		for _, subscription := range subscriptions {
 			adminSub := AdminSubscriptionInfo{
-				ID:        fmt.Sprintf("%s-%s", subscription.Subscriber.ID(), subscription.Topic),
+				ID:        subscription.ID,
 				Topic:     subscription.Topic,
-				ClientID:  subscription.Subscriber.ID(),
-				CreatedAt: time.Now(), // TODO: Track actual creation time
+				ClientID:  subscription.ClientID,
+				CreatedAt: subscription.CreatedAt,
 			}
 			adminSubscriptions = append(adminSubscriptions, adminSub)
 		}
