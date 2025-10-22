@@ -2,12 +2,12 @@
 
 This directory contains practical examples demonstrating how to use EventMesh for event-driven applications.
 
-## Quick Start - Simple Pub/Sub
+## Quick Start - Multi-Node Pub/Sub
 
 The fastest way to see EventMesh in action:
 
 ```bash
-cd examples/simple
+cd examples/multi-node
 ./start-server.sh     # Terminal 1 - starts server
 ./subscriber.sh       # Terminal 2 - listens for events
 ./publisher.sh        # Terminal 3 - sends events
@@ -15,12 +15,13 @@ cd examples/simple
 
 ## Available Examples
 
-### [`simple/`](simple/) - Basic Pub/Sub Demo
+### [`multi-node/`](multi-node/) - Multi-Node Mesh Demo
 **Best starting point** - Shows core EventMesh functionality:
 - Start a server
 - Subscribe to topic patterns
 - Publish events
 - See real-time event streaming
+- Multi-node mesh discovery
 
 ### [`single-node/`](single-node/) - Complete Server Setup
 Comprehensive single-node deployment with:
@@ -78,9 +79,9 @@ EventMesh is a distributed event streaming platform that provides:
    make build
    ```
 
-2. **Try the Simple Example**:
+2. **Try the Multi-Node Example**:
    ```bash
-   cd examples/simple
+   cd examples/multi-node
    ./start-server.sh
    # In new terminals:
    ./subscriber.sh
@@ -108,7 +109,7 @@ For faster development and testing, EventMesh supports a no-authentication mode:
 
 ## Need Help?
 
-- Start with `examples/simple/` for basic pub/sub
+- Start with `examples/multi-node/` for basic pub/sub and mesh demos
 - Check `examples/single-node/README.md` for operational guidance
 - See `examples/cli-usage/README.md` for advanced CLI patterns
 - Review the main project README for API documentation

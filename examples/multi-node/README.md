@@ -1,6 +1,6 @@
-# Simple EventMesh Examples
+# Multi-Node EventMesh Examples
 
-Basic examples showing how to run EventMesh server and connect clients for publish/subscribe.
+Examples showing EventMesh server operations, multi-node mesh discovery, and client publish/subscribe patterns.
 
 ## Quick Start
 
