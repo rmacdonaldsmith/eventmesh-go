@@ -36,12 +36,6 @@ Advanced CLI patterns and scripts:
 - Business workflow examples (order processing)
 - Multi-service demonstrations
 
-### [`basic/`](basic/) - EventLog API Examples
-Low-level EventLog API usage (legacy):
-- Direct EventLog operations
-- Event persistence and replay
-- Header and metadata handling
-
 ## What is EventMesh?
 
 EventMesh is a distributed event streaming platform that provides:
