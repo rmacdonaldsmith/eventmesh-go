@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 )
@@ -231,7 +232,12 @@ func (c *Client) doRequestWithQuery(ctx context.Context, method, path string, qu
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			// Log error but don't fail the request since response was already processed
+			slog.Warn("failed to close response body", "error", err)
+		}
+	}()
 
 	// Read response body
 	bodyBytes, err := io.ReadAll(resp.Body)

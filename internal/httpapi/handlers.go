@@ -738,14 +738,6 @@ func (h *Handlers) writeJSON(w http.ResponseWriter, data interface{}, statusCode
 	}
 }
 
-// parsePathParam extracts a path parameter (simple implementation)
-// TODO: Consider using a proper router like gorilla/mux for production
-func (h *Handlers) parsePathParam(path, prefix string) string {
-	if len(path) <= len(prefix) {
-		return ""
-	}
-	return path[len(prefix):]
-}
 
 // validateJSON validates that the request has valid JSON content-type
 func (h *Handlers) validateJSON(r *http.Request) error {
@@ -778,8 +770,8 @@ func (h *Handlers) validateTopic(topic string) error {
 	}
 	// Basic topic format validation (letters, numbers, dots, hyphens, underscores)
 	for _, char := range topic {
-		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || char == '.' || char == '-' || char == '_') {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
+			(char < '0' || char > '9') && char != '.' && char != '-' && char != '_' {
 			return fmt.Errorf("topic contains invalid characters (allowed: letters, numbers, ., -, _)")
 		}
 	}
@@ -804,7 +796,7 @@ func (h *Handlers) writeSSEMessage(w http.ResponseWriter, message EventStreamMes
 	}
 
 	// Write in SSE format: "data: {json}\n\n"
-	_, err = w.Write([]byte(fmt.Sprintf("data: %s\n\n", string(jsonData))))
+	_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonData))
 	return err
 }
 

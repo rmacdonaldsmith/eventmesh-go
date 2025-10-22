@@ -65,9 +65,7 @@ func (j *JWTAuth) ValidateToken(tokenString string) (*JWTClaims, error) {
 	}
 
 	// Remove "Bearer " prefix if present
-	if strings.HasPrefix(tokenString, "Bearer ") {
-		tokenString = strings.TrimPrefix(tokenString, "Bearer ")
-	}
+	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
 
 	// Parse and validate token
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {

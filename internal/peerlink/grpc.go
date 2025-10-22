@@ -358,7 +358,9 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string, conn *grpc.ClientConn) {
 	defer func() {
 		// Clean up connection on exit
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			slog.Warn("failed to close peer connection", "error", err, "peer_id", peerID)
+		}
 		slog.Info("peer connection closed",
 			"peer_id", peerID,
 			"local_node_id", g.config.NodeID)
@@ -376,7 +378,11 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 			"error", err)
 		return
 	}
-	defer stream.CloseSend()
+	defer func() {
+		if err := stream.CloseSend(); err != nil {
+			slog.Warn("failed to close send stream", "error", err)
+		}
+	}()
 
 	// Send handshake
 	handshake := &peerlinkv1.PeerMessage{
