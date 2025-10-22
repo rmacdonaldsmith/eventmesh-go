@@ -17,6 +17,9 @@ type Client interface {
 
 	// IsAuthenticated returns whether the client is properly authenticated
 	IsAuthenticated() bool
+
+	// ConnectedAt returns when this client connected
+	ConnectedAt() time.Time
 }
 
 // ClientSubscription represents a client's subscription to a topic

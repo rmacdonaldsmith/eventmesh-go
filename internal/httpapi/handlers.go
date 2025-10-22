@@ -19,6 +19,7 @@ import (
 type HTTPClient struct {
 	clientID        string
 	isAuthenticated bool
+	connectedAt     time.Time                     // When this client connected
 	eventChan       chan eventlogpkg.EventRecord // Channel for receiving events (for SSE streaming)
 }
 
@@ -27,6 +28,7 @@ func NewHTTPClient(claims *JWTClaims) *HTTPClient {
 	return &HTTPClient{
 		clientID:        claims.ClientID,
 		isAuthenticated: true,
+		connectedAt:     time.Now(),
 		eventChan:       make(chan eventlogpkg.EventRecord, 100), // Buffered channel like TrustedClient
 	}
 }
@@ -39,6 +41,11 @@ func (c *HTTPClient) ID() string {
 // IsAuthenticated returns whether the client is properly authenticated
 func (c *HTTPClient) IsAuthenticated() bool {
 	return c.isAuthenticated
+}
+
+// ConnectedAt returns when this client connected
+func (c *HTTPClient) ConnectedAt() time.Time {
+	return c.connectedAt
 }
 
 // Type returns the subscriber type for routing table integration
@@ -568,7 +575,7 @@ func (h *Handlers) AdminListClients(w http.ResponseWriter, r *http.Request) {
 		clientInfo := ClientInfo{
 			ID:            client.ID(),
 			Authenticated: client.IsAuthenticated(),
-			ConnectedAt:   time.Now(), // TODO: Track actual connection time
+			ConnectedAt:   client.ConnectedAt(),
 			Subscriptions: topics,
 		}
 		clientInfos = append(clientInfos, clientInfo)

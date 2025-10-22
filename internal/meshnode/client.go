@@ -1,6 +1,8 @@
 package meshnode
 
 import (
+	"time"
+
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/meshnode"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
@@ -13,6 +15,7 @@ import (
 // For local event delivery, it maintains a channel where events are sent.
 type TrustedClient struct {
 	id          string
+	connectedAt time.Time                 // When this client connected
 	eventChan   chan eventlog.EventRecord // Channel for receiving events
 	eventBuffer []eventlog.EventRecord    // Buffer for testing (synchronous delivery)
 }
@@ -22,6 +25,7 @@ type TrustedClient struct {
 func NewTrustedClient(id string) *TrustedClient {
 	return &TrustedClient{
 		id:          id,
+		connectedAt: time.Now(),
 		eventChan:   make(chan eventlog.EventRecord, 100), // Buffered channel
 		eventBuffer: make([]eventlog.EventRecord, 0),
 	}
@@ -36,6 +40,11 @@ func (c *TrustedClient) ID() string {
 // FOR MVP: Always returns true (no authentication required)
 func (c *TrustedClient) IsAuthenticated() bool {
 	return true
+}
+
+// ConnectedAt returns when this client connected
+func (c *TrustedClient) ConnectedAt() time.Time {
+	return c.connectedAt
 }
 
 // Type returns the subscriber type for routing table integration
