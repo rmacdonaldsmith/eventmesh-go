@@ -54,8 +54,13 @@ func (c *HTTPClient) DeliverEvent(event eventlogpkg.EventRecord) {
 	case c.eventChan <- event:
 		// Event delivered successfully
 	default:
-		// Channel is full, skip (in production, we'd handle this better)
-		// TODO: Add logging or metrics for dropped events
+		// Channel is full, log the dropped event for observability
+		slog.Warn("event dropped due to full channel",
+			"client_id", c.ID(),
+			"topic", event.Topic(),
+			"event_offset", event.Offset(),
+			"channel_capacity", cap(c.eventChan),
+			"reason", "client_slow_consumer")
 	}
 }
 
