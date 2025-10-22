@@ -732,8 +732,9 @@ func (h *Handlers) writeJSON(w http.ResponseWriter, data interface{}, statusCode
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	if err := json.NewEncoder(w).Encode(data); err != nil {
-		// Fallback error handling
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		// Can't use http.Error here as headers are already written
+		// Just log the error since we've already committed to the response
+		slog.Error("failed to encode JSON response", "error", err)
 	}
 }
 
