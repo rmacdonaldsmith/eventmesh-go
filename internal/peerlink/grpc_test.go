@@ -1037,36 +1037,172 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 	// Small delay to allow gRPC connection to establish
 	time.Sleep(100 * time.Millisecond)
 
+	// Test both regular events and subscription events
 	testEvent := eventlog.NewRecord("test-topic", []byte("hello from sender"))
+	subscriptionEvent := eventlog.NewRecord("__mesh.subscription.subscribe",
+		[]byte(`{"action":"subscribe","clientID":"test-client","topic":"test.topic","nodeID":"sender-node"}`))
 
-	// Send event from sender to receiver
+	// Send regular event first
 	err = sender.SendEvent(ctx, "receiver-node", testEvent)
 	if err != nil {
-		t.Fatalf("Failed to send event: %v", err)
+		t.Fatalf("Failed to send regular event: %v", err)
 	}
 
-	// Try to receive the event on receiver side
-	// This should work once we implement ReceiveEvents properly
-	select {
-	case receivedEvent := <-eventChan:
-		// Success! Event flowed through the system
-		if receivedEvent.Topic() != "test-topic" {
-			t.Errorf("Expected topic 'test-topic', got '%s'", receivedEvent.Topic())
-		}
-		if string(receivedEvent.Payload()) != "hello from sender" {
-			t.Errorf("Expected payload 'hello from sender', got '%s'", string(receivedEvent.Payload()))
-		}
-		t.Logf("✅ Bidirectional event flow working: %s -> %s",
-			receivedEvent.Topic(), string(receivedEvent.Payload()))
-
-	case err := <-errChan:
-		// Currently expected to fail with "not implemented"
-		if !strings.Contains(err.Error(), "not implemented") {
-			t.Errorf("Expected 'not implemented' error, got: %v", err)
-		}
-		t.Logf("Expected failure - ReceiveEvents not yet implemented: %v", err)
-
-	case <-time.After(2 * time.Second):
-		t.Fatal("Timeout waiting for event - ReceiveEvents not working yet")
+	// Send subscription event
+	err = sender.SendEvent(ctx, "receiver-node", subscriptionEvent)
+	if err != nil {
+		t.Fatalf("Failed to send subscription event: %v", err)
 	}
+
+	// Try to receive both events on receiver side
+	eventsReceived := 0
+	expectedEvents := 2
+
+	for eventsReceived < expectedEvents {
+		select {
+		case receivedEvent := <-eventChan:
+			eventsReceived++
+			t.Logf("✅ Received event %d/%d: %s -> %s",
+				eventsReceived, expectedEvents, receivedEvent.Topic(), string(receivedEvent.Payload()))
+
+			// Verify the specific events
+			if receivedEvent.Topic() == "test-topic" {
+				if string(receivedEvent.Payload()) != "hello from sender" {
+					t.Errorf("Expected regular event payload 'hello from sender', got '%s'", string(receivedEvent.Payload()))
+				}
+			} else if receivedEvent.Topic() == "__mesh.subscription.subscribe" {
+				if !strings.Contains(string(receivedEvent.Payload()), "test-client") {
+					t.Errorf("Expected subscription event to contain 'test-client', got '%s'", string(receivedEvent.Payload()))
+				}
+			} else {
+				t.Errorf("Unexpected event topic: %s", receivedEvent.Topic())
+			}
+
+		case err := <-errChan:
+			t.Fatalf("Unexpected error receiving events: %v", err)
+
+		case <-time.After(3 * time.Second):
+			t.Fatalf("Timeout waiting for events - received %d/%d", eventsReceived, expectedEvents)
+		}
+	}
+
+	t.Logf("✅ Bidirectional event flow working: received %d events including subscription gossip", eventsReceived)
+}
+
+// TestGRPCPeerLink_SimultaneousBidirectionalConnections tests the exact scenario
+// that happens in MeshNode integration: both nodes connect to each other simultaneously
+func TestGRPCPeerLink_SimultaneousBidirectionalConnections(t *testing.T) {
+	// Create two PeerLinks that will connect to each other simultaneously
+	nodeAConfig := &Config{
+		NodeID:        "node-A",
+		ListenAddress: "localhost:0",
+	}
+	nodeA, err := NewGRPCPeerLink(nodeAConfig)
+	if err != nil {
+		t.Fatalf("Failed to create node A: %v", err)
+	}
+	defer nodeA.Close()
+
+	nodeBConfig := &Config{
+		NodeID:        "node-B",
+		ListenAddress: "localhost:0",
+	}
+	nodeB, err := NewGRPCPeerLink(nodeBConfig)
+	if err != nil {
+		t.Fatalf("Failed to create node B: %v", err)
+	}
+	defer nodeB.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Start both servers
+	err = nodeA.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start node A: %v", err)
+	}
+	defer nodeA.Stop(ctx)
+
+	err = nodeB.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start node B: %v", err)
+	}
+	defer nodeB.Stop(ctx)
+
+	// Set up receivers for both nodes BEFORE establishing connections (like MeshNode does)
+	nodeAEventChan, nodeAErrChan := nodeA.ReceiveEvents(ctx)
+	nodeBEventChan, nodeBErrChan := nodeB.ReceiveEvents(ctx)
+
+	// Simultaneously connect both nodes to each other (like MeshNode integration)
+	peerA := &simplePeerNode{
+		id:      "node-A",
+		address: nodeA.GetListeningAddress(),
+		healthy: true,
+	}
+	peerB := &simplePeerNode{
+		id:      "node-B",
+		address: nodeB.GetListeningAddress(),
+		healthy: true,
+	}
+
+	// Connect A to B AND B to A simultaneously (this is the problem scenario)
+	err = nodeA.Connect(ctx, peerB)
+	if err != nil {
+		t.Fatalf("Failed to connect A to B: %v", err)
+	}
+
+	err = nodeB.Connect(ctx, peerA)
+	if err != nil {
+		t.Fatalf("Failed to connect B to A: %v", err)
+	}
+
+	// Small delay to allow connections to establish
+	time.Sleep(100 * time.Millisecond)
+
+	// Test: Send event from A to B
+	testEvent := eventlog.NewRecord("test-topic", []byte("hello from A to B"))
+	err = nodeA.SendEvent(ctx, "node-B", testEvent)
+	if err != nil {
+		t.Fatalf("Failed to send event from A to B: %v", err)
+	}
+
+	// Test: Send event from B to A
+	responseEvent := eventlog.NewRecord("response-topic", []byte("hello from B to A"))
+	err = nodeB.SendEvent(ctx, "node-A", responseEvent)
+	if err != nil {
+		t.Fatalf("Failed to send event from B to A: %v", err)
+	}
+
+	// Verify: Both nodes should receive their respective events
+	eventsReceived := 0
+	expectedEvents := 2
+	timeout := time.After(3 * time.Second)
+
+	for eventsReceived < expectedEvents {
+		select {
+		case receivedEvent := <-nodeBEventChan:
+			eventsReceived++
+			t.Logf("✅ Node B received: %s -> %s", receivedEvent.Topic(), string(receivedEvent.Payload()))
+			if receivedEvent.Topic() != "test-topic" {
+				t.Errorf("Expected test-topic, got %s", receivedEvent.Topic())
+			}
+
+		case receivedEvent := <-nodeAEventChan:
+			eventsReceived++
+			t.Logf("✅ Node A received: %s -> %s", receivedEvent.Topic(), string(receivedEvent.Payload()))
+			if receivedEvent.Topic() != "response-topic" {
+				t.Errorf("Expected response-topic, got %s", receivedEvent.Topic())
+			}
+
+		case err := <-nodeAErrChan:
+			t.Fatalf("Node A error: %v", err)
+		case err := <-nodeBErrChan:
+			t.Fatalf("Node B error: %v", err)
+
+		case <-timeout:
+			t.Fatalf("Timeout: received %d/%d events - bidirectional connections not working", eventsReceived, expectedEvents)
+		}
+	}
+
+	t.Logf("✅ Simultaneous bidirectional connections working: %d/%d events received", eventsReceived, expectedEvents)
 }

@@ -334,11 +334,6 @@ func (n *GRPCMeshNode) Subscribe(ctx context.Context, client meshnode.Client, to
 
 	// Propagate subscription to peer nodes (REQ-MNODE-003)
 	// For MVP: Use special subscription events via existing PeerLink infrastructure
-	slog.Info("propagating subscription to peers",
-		"client_id", client.ID(),
-		"topic", topic,
-		"subscription_id", subscriptionID,
-		"node_id", n.config.NodeID)
 	err = n.propagateSubscriptionChange(ctx, "subscribe", client.ID(), topic)
 	if err != nil {
 		slog.Warn("failed to propagate subscription to peers",
@@ -610,12 +605,6 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 		return fmt.Errorf("failed to get connected peers: %w", err)
 	}
 
-	slog.Info("propagating subscription change to peers",
-		"action", action,
-		"client_id", clientID,
-		"topic", topic,
-		"connected_peers", len(connectedPeers),
-		"node_id", n.config.NodeID)
 
 	if len(connectedPeers) == 0 {
 		// No peers to notify, not an error
@@ -675,8 +664,9 @@ func (n *GRPCMeshNode) handleIncomingPeerEvents(ctx context.Context) {
 			}
 			if err != nil {
 				// Log error but continue processing
-				// In production, we'd use structured logging
-				_ = err // Error receiving events from peers
+				slog.Error("error receiving events from peers",
+					"node_id", n.config.NodeID,
+					"error", err)
 			}
 		}
 	}
@@ -688,10 +678,6 @@ func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event eventlogp
 
 	// Check if this is a subscription event
 	if n.isSubscriptionEvent(topic) {
-		slog.Info("received subscription event from peer",
-			"topic", topic,
-			"payload", string(event.Payload()),
-			"node_id", n.config.NodeID)
 		n.handleSubscriptionEvent(ctx, event)
 		return
 	}

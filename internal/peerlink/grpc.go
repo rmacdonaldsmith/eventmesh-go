@@ -51,6 +51,16 @@ func (r *receivedEventRecord) Headers() map[string]string { return r.headers }
 func (r *receivedEventRecord) Offset() int64              { return r.offset }
 func (r *receivedEventRecord) Timestamp() time.Time       { return r.timestamp }
 
+// inboundPeerNode represents a peer that connected to us (inbound connection)
+type inboundPeerNode struct {
+	id      string
+	address string
+}
+
+func (p *inboundPeerNode) ID() string      { return p.id }
+func (p *inboundPeerNode) Address() string { return p.address }
+func (p *inboundPeerNode) IsHealthy() bool { return true } // Assume healthy if connected
+
 // GRPCPeerLink implements the PeerLink interface using gRPC for peer-to-peer communication
 type GRPCPeerLink struct {
 	peerlinkv1.UnimplementedPeerLinkServer
@@ -196,7 +206,19 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 	// Register this peer as connected (create send queue if needed)
 	g.mu.Lock()
 	g.registerPeer(peerID)
+
+	// Add to connected peers map (inbound connection)
+	// Create a simple peer node representation for the connected peer
+	inboundPeer := &inboundPeerNode{
+		id:      peerID,
+		address: "inbound-connection", // We don't have the actual address for inbound connections
+	}
+	g.connectedPeers[peerID] = inboundPeer
+
 	sendQueue := g.sendQueues[peerID]
+	slog.Debug("EventStream registered peer for bidirectional communication",
+		"peer_id", peerID,
+		"local_node_id", g.config.NodeID)
 	g.mu.Unlock()
 
 	// Send handshake response
@@ -249,6 +271,8 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 					g.distributeEvent(receivedEvent)
 				}
 				g.mu.Unlock()
+			} else {
+				slog.Debug("EventStream received non-event message", "node_id", g.config.NodeID)
 			}
 		}
 	}()
@@ -287,8 +311,10 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 
 			// Send over gRPC stream
 			if err := stream.Send(peerMsg); err != nil {
-				// Failed to send - put message back in queue if possible
-				// For MVP, just return the error
+				slog.Error("EventStream failed to send message",
+					"topic", queuedMsg.event.Topic(),
+					"peer_id", peerID,
+					"error", err)
 				return err
 			}
 		}
@@ -312,6 +338,16 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 			"peer_id", peerID,
 			"peer_address", peer.Address())
 		return nil // Already connected
+	}
+
+	// Connection deduplication: only allow connection if our node ID is lexicographically smaller
+	// This ensures exactly one bidirectional connection between any two nodes
+	if g.config.NodeID >= peerID {
+		slog.Debug("skipping connection due to node ID ordering",
+			"local_node_id", g.config.NodeID,
+			"peer_id", peerID,
+			"reason", "local_node_id >= peer_id")
+		return nil // Let the other node initiate the connection
 	}
 
 	slog.Info("connecting to peer",
@@ -479,12 +515,53 @@ func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID strin
 	sendQueue := g.sendQueues[peerID]
 	g.mu.RUnlock()
 
+	// Start goroutine for receiving messages from peer (bidirectional communication)
+	recvDone := make(chan error, 1)
+	go func() {
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				recvDone <- err
+				return
+			}
+
+			// Handle received event messages
+			if eventMsg := msg.GetEvent(); eventMsg != nil {
+				// Convert protobuf Event to EventRecord and distribute to subscribers
+				g.mu.Lock()
+				if !g.closed {
+					receivedEvent := &receivedEventRecord{
+						topic:     eventMsg.Topic,
+						payload:   eventMsg.Payload,
+						headers:   eventMsg.Headers,
+						offset:    eventMsg.Offset,
+						timestamp: time.Now(),
+					}
+					g.distributeEvent(receivedEvent)
+				}
+				g.mu.Unlock()
+			} else {
+				slog.Debug("runOutboundConnection received non-event message",
+					"peer_id", peerID,
+					"local_node_id", g.config.NodeID)
+			}
+		}
+	}()
+
 	// Main loop: consume from queue and stream events
 	for {
 		select {
 		case <-ctx.Done():
 			// Connection cancelled
 			return false // Don't retry
+
+		case err := <-recvDone:
+			// Receive goroutine finished (error or stream closed)
+			slog.Warn("runOutboundConnection receive goroutine finished",
+				"peer_id", peerID,
+				"local_node_id", g.config.NodeID,
+				"error", err)
+			return true // Retry connection
 
 		case queuedMsg, ok := <-sendQueue:
 			if !ok {
