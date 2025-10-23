@@ -568,8 +568,17 @@ func TestSubscriptionGossipEndToEnd(t *testing.T) {
 
 	// Deliver to local subscribers on Node B (simulate mesh forwarding)
 	for _, localSubscriber := range localSubscribers {
-		if eventReceiver, ok := localSubscriber.(interface{ DeliverEvent(*eventlog.Event) }); ok {
-			eventReceiver.DeliverEvent(publishedEvent)
+		// Use error-returning interface to match our updated implementations
+		type eventDeliverer interface {
+			DeliverEvent(*eventlog.Event) error
+		}
+		if ed, ok := localSubscriber.(eventDeliverer); ok {
+			err := ed.DeliverEvent(publishedEvent)
+			if err != nil {
+				t.Errorf("Failed to deliver event to subscriber: %v", err)
+			}
+		} else {
+			t.Errorf("Subscriber does not implement error-returning DeliverEvent interface")
 		}
 	}
 
@@ -778,8 +787,17 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 	}
 
 	for _, localSubscriber := range localSubscribersOnSubscriberNode {
-		if eventReceiver, ok := localSubscriber.(interface{ DeliverEvent(*eventlog.Event) }); ok {
-			eventReceiver.DeliverEvent(publishedEvent)
+		// Use error-returning interface to match our updated implementations
+		type eventDeliverer interface {
+			DeliverEvent(*eventlog.Event) error
+		}
+		if ed, ok := localSubscriber.(eventDeliverer); ok {
+			err := ed.DeliverEvent(publishedEvent)
+			if err != nil {
+				t.Errorf("Failed to deliver event to subscriber: %v", err)
+			}
+		} else {
+			t.Errorf("Subscriber does not implement error-returning DeliverEvent interface")
 		}
 	}
 
