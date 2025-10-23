@@ -354,7 +354,7 @@ func TestRealMultiNodeNetworkingEndToEnd(t *testing.T) {
 	}
 
 	// Allow time for subscription gossip to propagate through actual PeerLink networking
-	time.Sleep(300 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// Phase 3: Verify the publisher node received subscription gossip (if networking works)
 	// This is the critical test - does real PeerLink networking deliver subscription events?

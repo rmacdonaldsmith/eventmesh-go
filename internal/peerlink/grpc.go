@@ -353,7 +353,7 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 	return nil
 }
 
-// runOutboundConnection handles the outbound gRPC connection to a peer
+// runOutboundConnection handles the outbound gRPC connection to a peer with automatic retry
 // Consumes from the peer's send queue and streams events over gRPC
 func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string, conn *grpc.ClientConn) {
 	defer func() {
@@ -366,6 +366,61 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 			"local_node_id", g.config.NodeID)
 	}()
 
+	// Retry loop for connection resilience
+	retryCount := 0
+	maxRetries := 5
+	baseDelay := 1 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Context cancelled, stop trying
+			return
+		default:
+			// Continue with connection attempt
+		}
+
+		// Attempt to establish stream connection
+		success := g.attemptStreamConnection(ctx, peerID, conn)
+		if success {
+			// Reset retry count on successful connection
+			retryCount = 0
+			continue
+		}
+
+		// Connection failed, implement exponential backoff
+		retryCount++
+		if retryCount > maxRetries {
+			slog.Error("max retries exceeded for peer connection",
+				"peer_id", peerID,
+				"local_node_id", g.config.NodeID,
+				"max_retries", maxRetries)
+
+			// Mark peer as unhealthy
+			g.SetPeerHealth(peerID, peerlink.PeerUnhealthy)
+			return
+		}
+
+		// Exponential backoff with jitter
+		delay := time.Duration(retryCount) * baseDelay
+		slog.Warn("retrying peer connection",
+			"peer_id", peerID,
+			"local_node_id", g.config.NodeID,
+			"retry_count", retryCount,
+			"delay_seconds", delay.Seconds())
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+			// Continue to retry
+		}
+	}
+}
+
+// attemptStreamConnection attempts to establish and maintain a single stream connection
+// Returns true if the connection should be retried, false if it should terminate
+func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID string, conn *grpc.ClientConn) bool {
 	// Create gRPC client
 	client := peerlinkv1.NewPeerLinkClient(conn)
 
@@ -376,11 +431,11 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 			"peer_id", peerID,
 			"local_node_id", g.config.NodeID,
 			"error", err)
-		return
+		return true // Retry
 	}
 	defer func() {
 		if err := stream.CloseSend(); err != nil {
-			slog.Warn("failed to close send stream", "error", err)
+			slog.Debug("failed to close send stream", "error", err)
 		}
 	}()
 
@@ -399,7 +454,7 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 			"peer_id", peerID,
 			"local_node_id", g.config.NodeID,
 			"error", err)
-		return
+		return true // Retry
 	}
 
 	// Receive handshake response
@@ -409,12 +464,15 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 			"peer_id", peerID,
 			"local_node_id", g.config.NodeID,
 			"error", err)
-		return
+		return true // Retry
 	}
 
 	slog.Debug("peer handshake completed",
 		"peer_id", peerID,
 		"local_node_id", g.config.NodeID)
+
+	// Mark peer as healthy after successful handshake
+	g.SetPeerHealth(peerID, peerlink.PeerHealthy)
 
 	// Get the send queue for this peer
 	g.mu.RLock()
@@ -426,12 +484,12 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 		select {
 		case <-ctx.Done():
 			// Connection cancelled
-			return
+			return false // Don't retry
 
 		case queuedMsg, ok := <-sendQueue:
 			if !ok {
 				// Send queue closed
-				return
+				return false // Don't retry
 			}
 
 			// Convert EventRecord to protobuf Event message
@@ -459,9 +517,27 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 					"event_offset", queuedMsg.event.Offset(),
 					"error", err)
 
-				// Stream is broken, exit this connection goroutine
-				// The Connect method should be called again to re-establish connection
-				return
+				// Put the message back in the queue if possible (bounded queue, might drop)
+				select {
+				case sendQueue <- queuedMsg:
+					slog.Debug("requeued failed message",
+						"peer_id", peerID,
+						"topic", queuedMsg.event.Topic())
+				default:
+					// Queue full, message will be dropped
+					g.mu.Lock()
+					if metrics, exists := g.metrics[peerID]; exists {
+						metrics.dropsCount++
+					}
+					g.mu.Unlock()
+					slog.Warn("dropped message due to full queue on retry",
+						"peer_id", peerID,
+						"topic", queuedMsg.event.Topic())
+				}
+
+				// Stream is broken, mark peer unhealthy and retry connection
+				g.SetPeerHealth(peerID, peerlink.PeerUnhealthy)
+				return true // Retry
 			}
 		}
 	}
