@@ -226,16 +226,7 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 		t.Fatalf("Failed to start receiver node: %v", err)
 	}
 
-	// Create a local subscriber on the receiver node
-	subscriber := NewTrustedClient("test-subscriber")
-	topic := "peerlink.integration.test"
-
-	err = receiver.Subscribe(ctx, subscriber, topic)
-	if err != nil {
-		t.Fatalf("Failed to subscribe to topic: %v", err)
-	}
-
-	// Connect sender to receiver via PeerLink
+	// Connect sender to receiver via PeerLink FIRST
 	senderPeerLink := sender.GetPeerLink()
 	receiverPeer := &simplePeerNode{
 		id:      receiver.config.NodeID,
@@ -249,7 +240,19 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 	}
 
 	// Give time for connection to establish
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
+
+	// THEN create subscription - this should gossip to the already-connected sender
+	subscriber := NewTrustedClient("test-subscriber")
+	topic := "peerlink.integration.test"
+
+	err = receiver.Subscribe(ctx, subscriber, topic)
+	if err != nil {
+		t.Fatalf("Failed to subscribe to topic: %v", err)
+	}
+
+	// Give time for subscription gossip to propagate to connected peers
+	time.Sleep(1000 * time.Millisecond)
 
 	// Create and publish event from sender
 	testPayload := []byte(`{"message": "PeerLink to MeshNode integration test"}`)
@@ -262,11 +265,29 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 	}
 
 	// Give time for event to propagate through PeerLink and be processed by MeshNode
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	// Verify the subscriber received the event
 	receivedEvents := subscriber.GetReceivedEvents()
 	if len(receivedEvents) == 0 {
+		// Debug: Check if events were persisted in receiver's EventLog
+		receiverEventLog := receiver.GetEventLog()
+		persistedEvents, _ := receiverEventLog.ReadFromTopic(ctx, topic, 0, 10)
+		t.Logf("Debug: Receiver EventLog has %d events for topic %s", len(persistedEvents), topic)
+
+		// Debug: Check sender's EventLog
+		senderEventLog := sender.GetEventLog()
+		senderEvents, _ := senderEventLog.ReadFromTopic(ctx, topic, 0, 10)
+		t.Logf("Debug: Sender EventLog has %d events for topic %s", len(senderEvents), topic)
+
+		// Debug: Check PeerLink connectivity
+		senderPeers, _ := senderPeerLink.GetConnectedPeers(ctx)
+		t.Logf("Debug: Sender has %d connected peers", len(senderPeers))
+
+		// Debug: Check intelligent routing
+		interestedPeers := sender.getInterestedPeers(topic, senderPeers)
+		t.Logf("Debug: Sender found %d interested peers for topic %s", len(interestedPeers), topic)
+
 		t.Fatal("Expected subscriber to receive event via PeerLink -> MeshNode integration, but got no events")
 	}
 
