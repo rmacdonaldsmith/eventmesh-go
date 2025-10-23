@@ -2,6 +2,9 @@ package meshnode
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -711,4 +714,184 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 	node.handleSubscriptionEvent(ctx, unsubscriptionEvent)
 
 	t.Logf("✅ Subscription event handling implemented (basic MVP version)")
+}
+
+// Test client that simulates delivery failures
+type failingClient struct {
+	*TrustedClient
+	shouldFail bool
+	failureMessage string
+}
+
+func newFailingClient(id string, shouldFail bool, failureMessage string) *failingClient {
+	return &failingClient{
+		TrustedClient: NewTrustedClient(id),
+		shouldFail: shouldFail,
+		failureMessage: failureMessage,
+	}
+}
+
+// DeliverEvent implementation that can fail for testing
+func (c *failingClient) DeliverEvent(event *eventlog.Event) error {
+	if c.shouldFail {
+		return fmt.Errorf("delivery failed: %s", c.failureMessage)
+	}
+	c.TrustedClient.DeliverEvent(event)
+	return nil
+}
+
+// TestGRPCMeshNode_PublishEvent_DeliveryErrors tests error handling in local subscriber delivery
+func TestGRPCMeshNode_PublishEvent_DeliveryErrors(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8097")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	// Test 1: Single failing subscriber should return error
+	t.Run("single_failing_subscriber", func(t *testing.T) {
+		failingClient := newFailingClient("failing-client", true, "channel full")
+
+		// Subscribe the failing client
+		err := node.Subscribe(ctx, failingClient, "error-test")
+		if err != nil {
+			t.Fatalf("Expected no error subscribing, got %v", err)
+		}
+
+		// Publish event - should return delivery error
+		event := eventlog.NewEvent("error-test", []byte("test"))
+		err = node.PublishEvent(ctx, failingClient, event)
+
+		// Now this should work - we handle delivery errors properly
+		if err == nil {
+			t.Error("Expected delivery error, but got nil")
+		} else if !strings.Contains(err.Error(), "partial failure") || !strings.Contains(err.Error(), "1 local failures") {
+			t.Errorf("Expected partial failure error message, got: %v", err)
+		}
+	})
+
+	// Test 2: Mixed success/failure scenario
+	t.Run("partial_delivery_failure", func(t *testing.T) {
+		successClient := NewTrustedClient("success-client")
+		failingClient := newFailingClient("failing-client-2", true, "client disconnected")
+
+		// Subscribe both clients
+		err := node.Subscribe(ctx, successClient, "mixed-test")
+		if err != nil {
+			t.Fatalf("Expected no error subscribing success client, got %v", err)
+		}
+
+		err = node.Subscribe(ctx, failingClient, "mixed-test")
+		if err != nil {
+			t.Fatalf("Expected no error subscribing failing client, got %v", err)
+		}
+
+		// Publish event - should return partial failure error
+		event := eventlog.NewEvent("mixed-test", []byte("test"))
+		err = node.PublishEvent(ctx, successClient, event)
+
+		// Now this should work - we report partial failures
+		if err == nil {
+			t.Error("Expected partial delivery failure error, but got nil")
+		} else {
+			// Should contain details about which deliveries failed
+			if !strings.Contains(err.Error(), "1 local successes") || !strings.Contains(err.Error(), "1 local failures") {
+				t.Errorf("Expected detailed delivery results, got: %v", err)
+			}
+		}
+	})
+}
+
+// TestGRPCMeshNode_PublishEvent_ContextCancellation tests context handling
+func TestGRPCMeshNode_PublishEvent_ContextCancellation(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8098")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	backgroundCtx := context.Background()
+	err = node.Start(backgroundCtx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	// Create multiple subscribers
+	for i := 0; i < 5; i++ {
+		client := NewTrustedClient(fmt.Sprintf("client-%d", i))
+		err := node.Subscribe(backgroundCtx, client, "context-test")
+		if err != nil {
+			t.Fatalf("Expected no error subscribing client %d, got %v", i, err)
+		}
+	}
+
+	// Test with cancelled context
+	cancelledCtx, cancel := context.WithCancel(backgroundCtx)
+	cancel() // Cancel immediately
+
+	client := NewTrustedClient("publisher")
+	event := eventlog.NewEvent("context-test", []byte("test"))
+
+	err = node.PublishEvent(cancelledCtx, client, event)
+
+	// This test should FAIL initially - current code doesn't check context
+	if err == nil {
+		t.Error("Expected context.Canceled error, but got nil")
+	} else if !errors.Is(err, context.Canceled) {
+		t.Errorf("Expected context.Canceled error, got: %v (type: %T)", err, err)
+	}
+}
+
+// TestGRPCMeshNode_PublishEvent_EventValidation tests event validation
+func TestGRPCMeshNode_PublishEvent_EventValidation(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8099")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	err = node.Start(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	client := NewTrustedClient("test-client")
+
+	// Test 1: Empty topic should fail (EventLog validates this)
+	t.Run("empty_topic", func(t *testing.T) {
+		event := eventlog.NewEvent("", []byte("test"))
+		err := node.PublishEvent(ctx, client, event)
+
+		// EventLog already validates empty topics
+		if err == nil {
+			t.Error("Expected validation error for empty topic, got nil")
+		} else if !strings.Contains(err.Error(), "topic") && !strings.Contains(err.Error(), "empty") {
+			t.Errorf("Expected topic validation error, got: %v", err)
+		}
+	})
+
+	// Test 2: Oversized payload should fail
+	t.Run("oversized_payload", func(t *testing.T) {
+		// Create 2MB payload (assuming 1MB limit)
+		largePayload := make([]byte, 2*1024*1024)
+		event := eventlog.NewEvent("test-topic", largePayload)
+		err := node.PublishEvent(ctx, client, event)
+
+		// Now this should work - we validate payload size
+		if err == nil {
+			t.Error("Expected validation error for oversized payload, got nil")
+		} else if !strings.Contains(err.Error(), "payload size") && !strings.Contains(err.Error(), "exceeds") {
+			t.Errorf("Expected payload size validation error, got: %v", err)
+		}
+	})
 }

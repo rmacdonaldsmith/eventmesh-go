@@ -54,20 +54,30 @@ func (c *HTTPClient) Type() routingtable.SubscriberType {
 }
 
 // DeliverEvent delivers an event to this client (for SSE streaming)
-// This method is called by MeshNode when events need to be delivered to local subscribers
-func (c *HTTPClient) DeliverEvent(event *eventlogpkg.Event) {
+// Returns an error if delivery fails (e.g., channel full, client disconnected)
+func (c *HTTPClient) DeliverEvent(event *eventlogpkg.Event) error {
+	if event == nil {
+		return fmt.Errorf("cannot deliver nil event to client %s", c.ID())
+	}
+
 	// Try to send to channel (non-blocking)
 	select {
 	case c.eventChan <- event:
 		// Event delivered successfully
+		return nil
 	default:
-		// Channel is full, log the dropped event for observability
-		slog.Warn("event dropped due to full channel",
+		// Channel is full - this is now an error
+		err := fmt.Errorf("failed to deliver event to client %s: channel full (slow consumer)", c.ID())
+
+		// Still log for observability
+		slog.Warn("event delivery failed due to full channel",
 			"client_id", c.ID(),
 			"topic", event.Topic,
 			"event_offset", event.Offset,
 			"channel_capacity", cap(c.eventChan),
 			"reason", "client_slow_consumer")
+
+		return err
 	}
 }
 
