@@ -21,6 +21,11 @@ import (
 const (
 	// MaxEventPayloadSize is the maximum allowed payload size in bytes (1MB)
 	MaxEventPayloadSize = 1024 * 1024
+
+	// Subscription propagation constants
+	SubscriptionTopicPrefix   = "__mesh.subscription"
+	SubscriptionActionSubscribe = "subscribe"
+	SubscriptionActionUnsubscribe = "unsubscribe"
 )
 
 // DeliveryResult tracks the results of event delivery attempts
@@ -49,6 +54,32 @@ func (r DeliveryResult) Error() string {
 	}
 	return fmt.Sprintf("event delivery partial failure: %d local successes, %d local failures, %d peer successes, %d peer failures",
 		r.LocalSuccesses, r.LocalFailures, r.PeerSuccesses, r.PeerFailures)
+}
+
+// SubscriptionChangeEvent represents a subscription change event for peer propagation
+type SubscriptionChangeEvent struct {
+	Action   string `json:"action"`   // "subscribe" or "unsubscribe"
+	ClientID string `json:"clientID"` // ID of the client making the change
+	Topic    string `json:"topic"`    // Topic being subscribed/unsubscribed
+	NodeID   string `json:"nodeID"`   // ID of the node where the change occurred
+}
+
+// Validate checks if the subscription change event is valid
+func (e *SubscriptionChangeEvent) Validate() error {
+	if e.Action != SubscriptionActionSubscribe && e.Action != SubscriptionActionUnsubscribe {
+		return fmt.Errorf("invalid action %q, must be %q or %q",
+			e.Action, SubscriptionActionSubscribe, SubscriptionActionUnsubscribe)
+	}
+	if e.ClientID == "" {
+		return fmt.Errorf("clientID cannot be empty")
+	}
+	if e.Topic == "" {
+		return fmt.Errorf("topic cannot be empty")
+	}
+	if e.NodeID == "" {
+		return fmt.Errorf("nodeID cannot be empty")
+	}
+	return nil
 }
 
 // GRPCMeshNode implements the meshnode.MeshNode interface.
@@ -698,9 +729,21 @@ func (n *GRPCMeshNode) GetHealth(ctx context.Context) (meshnode.HealthStatus, er
 }
 
 // propagateSubscriptionChange sends subscription changes to all connected peers
-// For MVP: Uses special subscription events via existing PeerLink infrastructure
+// Uses structured events for reliable peer subscription synchronization
 // This implements REQ-MNODE-003: Subscription Propagation
 func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, clientID, topic string) error {
+	// Validate input parameters
+	changeEvent := &SubscriptionChangeEvent{
+		Action:   action,
+		ClientID: clientID,
+		Topic:    topic,
+		NodeID:   n.config.NodeID,
+	}
+
+	if err := changeEvent.Validate(); err != nil {
+		return fmt.Errorf("invalid subscription change parameters: %w", err)
+	}
+
 	// Get connected peers
 	connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
 	if err != nil {
@@ -709,31 +752,62 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 
 	if len(connectedPeers) == 0 {
 		// No peers to notify, not an error
+		slog.Debug("subscription change: no peers to notify",
+			"action", action,
+			"client_id", clientID,
+			"topic", topic,
+			"node_id", n.config.NodeID)
 		return nil
 	}
 
-	// Create subscription change event
-	// For MVP: Use JSON payload with subscription information
-	// In production, we'd use structured protobuf messages
-	payloadBytes := []byte(fmt.Sprintf(`{"action":"%s","clientID":"%s","topic":"%s","nodeID":"%s"}`,
-		action, clientID, topic, n.config.NodeID))
+	// Marshal subscription change event to JSON safely
+	payloadBytes, err := json.Marshal(changeEvent)
+	if err != nil {
+		return fmt.Errorf("failed to marshal subscription change event: %w", err)
+	}
 
-	// Create subscription event with special topic prefix
-	subscriptionEvent := eventlogpkg.NewEvent(
-		fmt.Sprintf("__mesh.subscription.%s", action), // Special topic for subscription changes
-		payloadBytes,
-	)
+	// Create subscription event with validated topic
+	subscriptionTopic := fmt.Sprintf("%s.%s", SubscriptionTopicPrefix, action)
+	subscriptionEvent := eventlogpkg.NewEvent(subscriptionTopic, payloadBytes)
 
-	// Send to all connected peers
+	// Track delivery results for observability
+	var successCount, failureCount int
+	var errors []error
+
+	// Send to all connected peers with proper error handling
 	for _, peer := range connectedPeers {
 		err := n.peerLink.SendEvent(ctx, peer.ID(), subscriptionEvent)
 		if err != nil {
-			// Log error but continue with other peers
-			// In production, we'd use structured logging and retry logic
-			_ = err // Failed to send to this peer, continue with others
+			failureCount++
+			errors = append(errors, fmt.Errorf("failed to send to peer %s: %w", peer.ID(), err))
+
+			slog.Warn("failed to propagate subscription change to peer",
+				"peer_id", peer.ID(),
+				"action", action,
+				"client_id", clientID,
+				"topic", topic,
+				"error", err)
+		} else {
+			successCount++
 		}
 	}
 
+	// Log propagation summary
+	slog.Info("subscription change propagation completed",
+		"action", action,
+		"client_id", clientID,
+		"topic", topic,
+		"peers_notified", successCount,
+		"peers_failed", failureCount,
+		"total_peers", len(connectedPeers))
+
+	// Return error if all peers failed, but log partial failures
+	if failureCount > 0 && successCount == 0 {
+		return fmt.Errorf("failed to propagate subscription change to all %d peers: %v", failureCount, errors)
+	}
+
+	// Partial failures are logged but don't fail the operation
+	// The subscription is still valid locally
 	return nil
 }
 
@@ -846,23 +920,32 @@ func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event *eventlog
 
 // isSubscriptionEvent checks if an event is a subscription management event
 func (n *GRPCMeshNode) isSubscriptionEvent(topic string) bool {
-	return topic == "__mesh.subscription.subscribe" || topic == "__mesh.subscription.unsubscribe"
+	subscribeTopic := fmt.Sprintf("%s.%s", SubscriptionTopicPrefix, SubscriptionActionSubscribe)
+	unsubscribeTopic := fmt.Sprintf("%s.%s", SubscriptionTopicPrefix, SubscriptionActionUnsubscribe)
+	return topic == subscribeTopic || topic == unsubscribeTopic
 }
 
 // handleSubscriptionEvent processes subscription events from peers
 // This implements REQ-MNODE-003: Handle incoming peer subscription notifications
 func (n *GRPCMeshNode) handleSubscriptionEvent(ctx context.Context, event *eventlogpkg.Event) {
-	// Simple JSON parsing for MVP - in production we'd use proper JSON unmarshaling
-	var subscriptionInfo struct {
-		Action   string `json:"action"`
-		ClientID string `json:"clientID"`
-		Topic    string `json:"topic"`
-		NodeID   string `json:"nodeID"`
+	// Parse the subscription change event with proper validation
+	var changeEvent SubscriptionChangeEvent
+	if err := json.Unmarshal(event.Payload, &changeEvent); err != nil {
+		slog.Warn("failed to unmarshal subscription change event",
+			"error", err,
+			"topic", event.Topic,
+			"payload_size", len(event.Payload))
+		return
 	}
 
-	// Parse JSON - for MVP, we'll use simple parsing
-	if err := json.Unmarshal(event.Payload, &subscriptionInfo); err != nil {
-		// Log error but continue - don't fail on malformed gossip
+	// Validate the subscription change event
+	if err := changeEvent.Validate(); err != nil {
+		slog.Warn("received invalid subscription change event",
+			"error", err,
+			"action", changeEvent.Action,
+			"client_id", changeEvent.ClientID,
+			"topic", changeEvent.Topic,
+			"node_id", changeEvent.NodeID)
 		return
 	}
 
@@ -871,15 +954,24 @@ func (n *GRPCMeshNode) handleSubscriptionEvent(ctx context.Context, event *event
 	defer n.peerSubscriptionsMu.Unlock()
 
 	// Initialize peer map if it doesn't exist
-	if n.peerSubscriptions[subscriptionInfo.NodeID] == nil {
-		n.peerSubscriptions[subscriptionInfo.NodeID] = make(map[string]bool)
+	if n.peerSubscriptions[changeEvent.NodeID] == nil {
+		n.peerSubscriptions[changeEvent.NodeID] = make(map[string]bool)
 	}
 
-	// Update subscription state based on action
-	if subscriptionInfo.Action == "subscribe" {
-		n.peerSubscriptions[subscriptionInfo.NodeID][subscriptionInfo.Topic] = true
-	} else if subscriptionInfo.Action == "unsubscribe" {
-		n.peerSubscriptions[subscriptionInfo.NodeID][subscriptionInfo.Topic] = false
+	// Update subscription state based on validated action
+	switch changeEvent.Action {
+	case SubscriptionActionSubscribe:
+		n.peerSubscriptions[changeEvent.NodeID][changeEvent.Topic] = true
+		slog.Debug("peer subscription added",
+			"peer_node_id", changeEvent.NodeID,
+			"client_id", changeEvent.ClientID,
+			"topic", changeEvent.Topic)
+	case SubscriptionActionUnsubscribe:
+		n.peerSubscriptions[changeEvent.NodeID][changeEvent.Topic] = false
+		slog.Debug("peer subscription removed",
+			"peer_node_id", changeEvent.NodeID,
+			"client_id", changeEvent.ClientID,
+			"topic", changeEvent.Topic)
 	}
 
 	// Note: This enables intelligent routing in PublishEvent method
