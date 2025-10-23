@@ -503,12 +503,10 @@ func TestGRPCPeerLink_Metrics(t *testing.T) {
 		t.Error("Expected drops count 0 for non-existent peer")
 	}
 
-	// Connect a peer to create metrics
-	peer := &simplePeerNode{id: "test-peer", address: "localhost:8080", healthy: true}
-	err = peerLink.Connect(context.Background(), peer)
-	if err != nil {
-		t.Fatalf("Failed to connect peer: %v", err)
-	}
+	// Register a peer manually to create metrics (avoid actual network connection)
+	peerLink.mu.Lock()
+	peerLink.registerPeer("test-peer")
+	peerLink.mu.Unlock()
 
 	// Test initial metrics
 	if peerLink.GetQueueDepth("test-peer") != 0 {
@@ -663,12 +661,10 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 	}
 	defer peerLink.Stop(ctx)
 
-	// Connect a test peer to create the send queue
-	testPeer := &simplePeerNode{id: "peer1", address: "localhost:8080", healthy: true}
-	err = peerLink.Connect(ctx, testPeer)
-	if err != nil {
-		t.Fatalf("Failed to connect peer: %v", err)
-	}
+	// Register a test peer manually to create the send queue (avoid actual network connection)
+	peerLink.mu.Lock()
+	peerLink.registerPeer("peer1")
+	peerLink.mu.Unlock()
 
 	// Send an event - this should queue the message
 	testEvent := eventlog.NewRecord("test-topic", []byte("test-payload"))
