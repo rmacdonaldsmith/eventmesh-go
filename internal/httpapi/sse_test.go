@@ -80,7 +80,6 @@ func TestStreamEvents(t *testing.T) {
 		}
 	})
 
-
 	t.Run("sse_message_formatting", func(t *testing.T) {
 		// This test verifies that SSE messages are properly formatted when events are delivered
 		// It uses the unified model: create subscription → start SSE → publish event → verify format

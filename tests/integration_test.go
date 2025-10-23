@@ -549,9 +549,9 @@ func startEventMeshServerNoAuth(ctx context.Context) (*exec.Cmd, error) {
 	cmd := exec.CommandContext(ctx, binaryPath,
 		"--http",
 		"--http-port", "8086", // Different port to avoid conflicts
-		"--no-auth",           // Enable no-auth mode
+		"--no-auth", // Enable no-auth mode
 		"--node-id", "integration-test-no-auth-node",
-		"--listen", ":8087",      // Different from HTTP port
+		"--listen", ":8087", // Different from HTTP port
 		"--peer-listen", ":8088") // Different peer port
 
 	// Start the command
@@ -623,7 +623,7 @@ func runNoAuthIntegrationWorkflow(t *testing.T, serverURL string) error {
 		return fmt.Errorf("admin command succeeded in no-auth mode but should have failed")
 	}
 	if !strings.Contains(adminOutput, "403 Forbidden") && !strings.Contains(adminOutput, "Forbidden") &&
-	   !strings.Contains(adminOutput, "401 Unauthorized") && !strings.Contains(adminOutput, "Unauthorized") {
+		!strings.Contains(adminOutput, "401 Unauthorized") && !strings.Contains(adminOutput, "Unauthorized") {
 		return fmt.Errorf("admin command should be forbidden even in no-auth mode: %s", adminOutput)
 	}
 	t.Log("✅ Admin commands still properly protected in no-auth mode")

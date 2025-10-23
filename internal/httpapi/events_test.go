@@ -215,7 +215,7 @@ func TestReadTopicEvents(t *testing.T) {
 
 		// Create test events
 		for i := 0; i < 5; i++ {
-			eventRecord := eventlogpkg.NewRecord("news.sports", []byte(fmt.Sprintf(`{"message": "Event %d"}`, i)))
+			eventRecord := eventlogpkg.NewEvent("news.sports", []byte(fmt.Sprintf(`{"message": "Event %d"}`, i)))
 			err := setup.Node.PublishEvent(ctx, client, eventRecord)
 			if err != nil {
 				t.Fatalf("Failed to publish test event %d: %v", i, err)

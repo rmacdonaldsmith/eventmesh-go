@@ -163,7 +163,7 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Test: Send event from server to client (client should receive it through the loop)
-	testEvent := eventlog.NewRecord("test-topic", []byte("hello from server"))
+	testEvent := eventlog.NewEvent("test-topic", []byte("hello from server"))
 	err = server.SendEvent(testCtx, "client-node", testEvent)
 	if err != nil {
 		t.Fatalf("Failed to send test event: %v", err)
@@ -172,11 +172,11 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 	// Verify client receives the event
 	select {
 	case receivedEvent := <-eventChan:
-		if receivedEvent.Topic() != "test-topic" {
-			t.Errorf("Expected topic 'test-topic', got '%s'", receivedEvent.Topic())
+		if receivedEvent.Topic != "test-topic" {
+			t.Errorf("Expected topic 'test-topic', got '%s'", receivedEvent.Topic)
 		}
-		if string(receivedEvent.Payload()) != "hello from server" {
-			t.Errorf("Expected payload 'hello from server', got '%s'", string(receivedEvent.Payload()))
+		if string(receivedEvent.Payload) != "hello from server" {
+			t.Errorf("Expected payload 'hello from server', got '%s'", string(receivedEvent.Payload))
 		}
 		t.Log("✅ runBidirectionalStreamLoop correctly processed received event")
 	case err := <-errChan:
@@ -186,7 +186,7 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 	}
 
 	// Test: Send event from client to server (through the send queue)
-	outboundEvent := eventlog.NewRecord("outbound-topic", []byte("hello from client"))
+	outboundEvent := eventlog.NewEvent("outbound-topic", []byte("hello from client"))
 	err = client.SendEvent(testCtx, "server-node", outboundEvent)
 	if err != nil {
 		t.Fatalf("Failed to send outbound event: %v", err)

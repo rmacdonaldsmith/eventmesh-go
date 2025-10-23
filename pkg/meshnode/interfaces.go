@@ -56,7 +56,7 @@ type MeshNode interface {
 
 	// PublishEvent accepts an event from a local client and handles routing.
 	// Implements REQ-MNODE-002: persists locally before forwarding to peers.
-	PublishEvent(ctx context.Context, client Client, event eventlog.EventRecord) error
+	PublishEvent(ctx context.Context, client Client, event *eventlog.Event) error
 
 	// Subscribe registers a client's interest in a topic pattern.
 	// Implements REQ-MNODE-003: propagates subscription to peer nodes.

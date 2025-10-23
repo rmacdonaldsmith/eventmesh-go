@@ -15,9 +15,9 @@ import (
 // For local event delivery, it maintains a channel where events are sent.
 type TrustedClient struct {
 	id          string
-	connectedAt time.Time                 // When this client connected
-	eventChan   chan eventlog.EventRecord // Channel for receiving events
-	eventBuffer []eventlog.EventRecord    // Buffer for testing (synchronous delivery)
+	connectedAt time.Time            // When this client connected
+	eventChan   chan *eventlog.Event // Channel for receiving events
+	eventBuffer []*eventlog.Event    // Buffer for testing (synchronous delivery)
 }
 
 // NewTrustedClient creates a new trusted client with the given ID.
@@ -26,8 +26,8 @@ func NewTrustedClient(id string) *TrustedClient {
 	return &TrustedClient{
 		id:          id,
 		connectedAt: time.Now(),
-		eventChan:   make(chan eventlog.EventRecord, 100), // Buffered channel
-		eventBuffer: make([]eventlog.EventRecord, 0),
+		eventChan:   make(chan *eventlog.Event, 100), // Buffered channel
+		eventBuffer: make([]*eventlog.Event, 0),
 	}
 }
 
@@ -54,7 +54,7 @@ func (c *TrustedClient) Type() routingtable.SubscriberType {
 
 // DeliverEvent delivers an event to this client (for local subscriber delivery)
 // FOR MVP: Uses a simple buffer approach for testing
-func (c *TrustedClient) DeliverEvent(event eventlog.EventRecord) {
+func (c *TrustedClient) DeliverEvent(event *eventlog.Event) {
 	// For testing, add to buffer (synchronous)
 	c.eventBuffer = append(c.eventBuffer, event)
 
@@ -68,12 +68,12 @@ func (c *TrustedClient) DeliverEvent(event eventlog.EventRecord) {
 }
 
 // GetReceivedEvents returns all events received by this client (for testing)
-func (c *TrustedClient) GetReceivedEvents() []eventlog.EventRecord {
-	return append([]eventlog.EventRecord{}, c.eventBuffer...) // Return copy
+func (c *TrustedClient) GetReceivedEvents() []*eventlog.Event {
+	return append([]*eventlog.Event{}, c.eventBuffer...) // Return copy
 }
 
 // GetEventChannel returns the channel for receiving events (for production use)
-func (c *TrustedClient) GetEventChannel() <-chan eventlog.EventRecord {
+func (c *TrustedClient) GetEventChannel() <-chan *eventlog.Event {
 	return c.eventChan
 }
 

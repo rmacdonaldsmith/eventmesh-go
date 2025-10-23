@@ -30,7 +30,7 @@ func TestGRPCMeshNode_PublishEvent_LocalPersistence(t *testing.T) {
 
 	// Create event to publish
 	eventData := []byte("test-event-data")
-	event := eventlog.NewRecord("test-topic", eventData)
+	event := eventlog.NewEvent("test-topic", eventData)
 
 	// Publish event
 	err = node.PublishEvent(ctx, client, event)
@@ -40,7 +40,7 @@ func TestGRPCMeshNode_PublishEvent_LocalPersistence(t *testing.T) {
 
 	// Verify event was persisted locally (REQ-MNODE-002)
 	eventLog := node.GetEventLog()
-	events, err := eventLog.ReadFromTopic(ctx, "test-topic", 0, 10)
+	events, err := eventLog.ReadEvents(ctx, "test-topic", 0, 10)
 	if err != nil {
 		t.Errorf("Expected no error reading events, got %v", err)
 	}
@@ -51,14 +51,14 @@ func TestGRPCMeshNode_PublishEvent_LocalPersistence(t *testing.T) {
 
 	if len(events) > 0 {
 		persistedEvent := events[0]
-		if persistedEvent.Topic() != "test-topic" {
-			t.Errorf("Expected topic 'test-topic', got '%s'", persistedEvent.Topic())
+		if persistedEvent.Topic != "test-topic" {
+			t.Errorf("Expected topic 'test-topic', got '%s'", persistedEvent.Topic)
 		}
-		if string(persistedEvent.Payload()) != string(eventData) {
-			t.Errorf("Expected payload '%s', got '%s'", eventData, persistedEvent.Payload())
+		if string(persistedEvent.Payload) != string(eventData) {
+			t.Errorf("Expected payload '%s', got '%s'", eventData, persistedEvent.Payload)
 		}
-		if persistedEvent.Offset() != 0 {
-			t.Errorf("Expected offset 0 for first event, got %d", persistedEvent.Offset())
+		if persistedEvent.Offset != 0 {
+			t.Errorf("Expected offset 0 for first event, got %d", persistedEvent.Offset)
 		}
 	}
 }
@@ -84,7 +84,7 @@ func TestGRPCMeshNode_PublishEvent_Multiple(t *testing.T) {
 	// Publish multiple events
 	for i := 0; i < 5; i++ {
 		eventData := []byte("event-" + string(rune('0'+i)))
-		event := eventlog.NewRecord("multi-topic", eventData)
+		event := eventlog.NewEvent("multi-topic", eventData)
 
 		err = node.PublishEvent(ctx, client, event)
 		if err != nil {
@@ -94,7 +94,7 @@ func TestGRPCMeshNode_PublishEvent_Multiple(t *testing.T) {
 
 	// Verify all events were persisted
 	eventLog := node.GetEventLog()
-	events, err := eventLog.ReadFromTopic(ctx, "multi-topic", 0, 10)
+	events, err := eventLog.ReadEvents(ctx, "multi-topic", 0, 10)
 	if err != nil {
 		t.Errorf("Expected no error reading events, got %v", err)
 	}
@@ -106,8 +106,8 @@ func TestGRPCMeshNode_PublishEvent_Multiple(t *testing.T) {
 	// Verify event ordering (offsets should be sequential)
 	for i, event := range events {
 		expectedOffset := int64(i)
-		if event.Offset() != expectedOffset {
-			t.Errorf("Expected event %d to have offset %d, got %d", i, expectedOffset, event.Offset())
+		if event.Offset != expectedOffset {
+			t.Errorf("Expected event %d to have offset %d, got %d", i, expectedOffset, event.Offset)
 		}
 	}
 }
@@ -127,7 +127,7 @@ func TestGRPCMeshNode_PublishEvent_NilClient(t *testing.T) {
 		t.Fatalf("Expected no error starting node, got %v", err)
 	}
 
-	event := eventlog.NewRecord("test-topic", []byte("test-data"))
+	event := eventlog.NewEvent("test-topic", []byte("test-data"))
 
 	err = node.PublishEvent(ctx, nil, event)
 	if err == nil {
@@ -185,7 +185,7 @@ func TestGRPCMeshNode_LocalSubscriberDelivery(t *testing.T) {
 
 	// Publish event
 	eventData := []byte("delivery-test-data")
-	event := eventlog.NewRecord("delivery-test", eventData)
+	event := eventlog.NewEvent("delivery-test", eventData)
 	err = node.PublishEvent(ctx, publisher, event)
 	if err != nil {
 		t.Errorf("Expected no error publishing, got %v", err)
@@ -199,11 +199,11 @@ func TestGRPCMeshNode_LocalSubscriberDelivery(t *testing.T) {
 
 	if len(receivedEvents) > 0 {
 		received := receivedEvents[0]
-		if received.Topic() != "delivery-test" {
-			t.Errorf("Expected received topic 'delivery-test', got '%s'", received.Topic())
+		if received.Topic != "delivery-test" {
+			t.Errorf("Expected received topic 'delivery-test', got '%s'", received.Topic)
 		}
-		if string(received.Payload()) != string(eventData) {
-			t.Errorf("Expected received payload '%s', got '%s'", eventData, received.Payload())
+		if string(received.Payload) != string(eventData) {
+			t.Errorf("Expected received payload '%s', got '%s'", eventData, received.Payload)
 		}
 	}
 }
@@ -246,7 +246,7 @@ func TestGRPCMeshNode_MultipleLocalSubscribers(t *testing.T) {
 
 	// Publish event
 	eventData := []byte("multi-subscriber-event")
-	event := eventlog.NewRecord(topic, eventData)
+	event := eventlog.NewEvent(topic, eventData)
 	err = node.PublishEvent(ctx, publisher, event)
 	if err != nil {
 		t.Errorf("Expected no error publishing, got %v", err)
@@ -260,7 +260,7 @@ func TestGRPCMeshNode_MultipleLocalSubscribers(t *testing.T) {
 			t.Errorf("Expected subscriber%d to receive 1 event, got %d", i+1, len(received))
 		}
 
-		if len(received) > 0 && string(received[0].Payload()) != string(eventData) {
+		if len(received) > 0 && string(received[0].Payload) != string(eventData) {
 			t.Errorf("Expected subscriber%d to receive correct payload", i+1)
 		}
 	}
@@ -308,7 +308,7 @@ func TestGRPCMeshNode_PublishFlow_Complete(t *testing.T) {
 	// 3. Event would be forwarded to peers (tested via mock)
 
 	eventPayload := []byte(`{"flow": "complete", "data": "test"}`)
-	event := eventlog.NewRecord(topic, eventPayload)
+	event := eventlog.NewEvent(topic, eventPayload)
 
 	err = node.PublishEvent(ctx, publisher, event)
 	if err != nil {
@@ -317,7 +317,7 @@ func TestGRPCMeshNode_PublishFlow_Complete(t *testing.T) {
 
 	// Step 1: Verify local persistence
 	eventLog := node.GetEventLog()
-	persistedEvents, err := eventLog.ReadFromTopic(ctx, topic, 0, 10)
+	persistedEvents, err := eventLog.ReadEvents(ctx, topic, 0, 10)
 	if err != nil {
 		t.Errorf("Expected no error reading persisted events, got %v", err)
 	}
@@ -336,13 +336,13 @@ func TestGRPCMeshNode_PublishFlow_Complete(t *testing.T) {
 		persisted := persistedEvents[0]
 		delivered := deliveredEvents[0]
 
-		if persisted.Topic() != delivered.Topic() {
+		if persisted.Topic != delivered.Topic {
 			t.Error("Topic mismatch between persisted and delivered event")
 		}
-		if string(persisted.Payload()) != string(delivered.Payload()) {
+		if string(persisted.Payload) != string(delivered.Payload) {
 			t.Error("Payload mismatch between persisted and delivered event")
 		}
-		if string(delivered.Payload()) != string(eventPayload) {
+		if string(delivered.Payload) != string(eventPayload) {
 			t.Error("Delivered payload doesn't match original")
 		}
 	}
@@ -363,7 +363,7 @@ func TestGRPCMeshNode_PublishFlow_ErrorHandling(t *testing.T) {
 
 	// Test publishing when node is not started
 	client := NewTrustedClient("test-client")
-	event := eventlog.NewRecord("test-topic", []byte("test-data"))
+	event := eventlog.NewEvent("test-topic", []byte("test-data"))
 
 	err = node.PublishEvent(ctx, client, event)
 	if err == nil {
@@ -405,7 +405,7 @@ func TestGRPCMeshNode_PersistenceBeforeForwarding(t *testing.T) {
 	// Create client and event
 	publisher := NewTrustedClient("persistence-publisher")
 	eventPayload := []byte(`{"requirement": "REQ-MNODE-002", "test": "persistence_before_forwarding"}`)
-	event := eventlog.NewRecord("persistence.test", eventPayload)
+	event := eventlog.NewEvent("persistence.test", eventPayload)
 
 	// Get initial event log state
 	eventLog := node.GetEventLog()
@@ -421,7 +421,7 @@ func TestGRPCMeshNode_PersistenceBeforeForwarding(t *testing.T) {
 	}
 
 	// Verify event was persisted locally FIRST (before any forwarding would occur)
-	persistedEvents, err := eventLog.ReadFromTopic(ctx, "persistence.test", initialOffset, 1)
+	persistedEvents, err := eventLog.ReadEvents(ctx, "persistence.test", initialOffset, 1)
 	if err != nil {
 		t.Errorf("Expected no error reading persisted events, got %v", err)
 	}
@@ -432,13 +432,13 @@ func TestGRPCMeshNode_PersistenceBeforeForwarding(t *testing.T) {
 
 	if len(persistedEvents) > 0 {
 		persistedEvent := persistedEvents[0]
-		if persistedEvent.Topic() != "persistence.test" {
-			t.Errorf("Expected persisted topic 'persistence.test', got '%s'", persistedEvent.Topic())
+		if persistedEvent.Topic != "persistence.test" {
+			t.Errorf("Expected persisted topic 'persistence.test', got '%s'", persistedEvent.Topic)
 		}
-		if persistedEvent.Offset() == initialOffset {
-			t.Logf("✅ REQ-MNODE-002 verified: Event persisted locally with offset %d", persistedEvent.Offset())
+		if persistedEvent.Offset == initialOffset {
+			t.Logf("✅ REQ-MNODE-002 verified: Event persisted locally with offset %d", persistedEvent.Offset)
 		} else {
-			t.Errorf("Expected event offset %d, got %d", initialOffset, persistedEvent.Offset())
+			t.Errorf("Expected event offset %d, got %d", initialOffset, persistedEvent.Offset)
 		}
 	}
 }
@@ -495,7 +495,7 @@ func TestGRPCMeshNode_Unsubscribe(t *testing.T) {
 
 	// Test that events are no longer delivered
 	publisher := NewTrustedClient("unsubscribe-publisher")
-	event := eventlog.NewRecord(topic, []byte("should-not-be-delivered"))
+	event := eventlog.NewEvent(topic, []byte("should-not-be-delivered"))
 	err = node.PublishEvent(ctx, publisher, event)
 	if err != nil {
 		t.Errorf("Expected no error publishing after unsubscribe, got %v", err)
@@ -644,14 +644,14 @@ func TestGRPCMeshNode_IncomingEventHandling(t *testing.T) {
 	// Simulate receiving an event from a peer node
 	// In production, this would come through PeerLink's ReceiveEvents channel
 	peerEventPayload := []byte(`{"source": "peer-node", "data": "forwarded-event"}`)
-	peerEvent := eventlog.NewRecord(topic, peerEventPayload)
+	peerEvent := eventlog.NewEvent(topic, peerEventPayload)
 
 	// Process the incoming peer event (simulate what handleIncomingPeerEvents would do)
 	node.processIncomingEvent(ctx, peerEvent)
 
 	// Verify the event was persisted locally
 	eventLog := node.GetEventLog()
-	persistedEvents, err := eventLog.ReadFromTopic(ctx, topic, 0, 10)
+	persistedEvents, err := eventLog.ReadEvents(ctx, topic, 0, 10)
 	if err != nil {
 		t.Errorf("Expected no error reading persisted events, got %v", err)
 	}
@@ -667,11 +667,11 @@ func TestGRPCMeshNode_IncomingEventHandling(t *testing.T) {
 
 	if len(receivedEvents) > 0 {
 		received := receivedEvents[len(receivedEvents)-1] // Get the last received event
-		if received.Topic() != topic {
-			t.Errorf("Expected received topic '%s', got '%s'", topic, received.Topic())
+		if received.Topic != topic {
+			t.Errorf("Expected received topic '%s', got '%s'", topic, received.Topic)
 		}
-		if string(received.Payload()) != string(peerEventPayload) {
-			t.Errorf("Expected received payload '%s', got '%s'", peerEventPayload, received.Payload())
+		if string(received.Payload) != string(peerEventPayload) {
+			t.Errorf("Expected received payload '%s', got '%s'", peerEventPayload, received.Payload)
 		}
 	}
 
@@ -695,7 +695,7 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 
 	// Create a subscription event like what would be received from a peer
 	subscriptionPayload := []byte(`{"action":"subscribe","clientID":"peer-client-1","topic":"orders.*","nodeID":"peer-node-1"}`)
-	subscriptionEvent := eventlog.NewRecord("__mesh.subscription.subscribe", subscriptionPayload)
+	subscriptionEvent := eventlog.NewEvent("__mesh.subscription.subscribe", subscriptionPayload)
 
 	// Process the subscription event (simulate receiving from peer)
 	node.handleSubscriptionEvent(ctx, subscriptionEvent)
@@ -706,7 +706,7 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 
 	// Test unsubscription event as well
 	unsubscriptionPayload := []byte(`{"action":"unsubscribe","clientID":"peer-client-1","topic":"orders.*","nodeID":"peer-node-1"}`)
-	unsubscriptionEvent := eventlog.NewRecord("__mesh.subscription.unsubscribe", unsubscriptionPayload)
+	unsubscriptionEvent := eventlog.NewEvent("__mesh.subscription.unsubscribe", unsubscriptionPayload)
 
 	node.handleSubscriptionEvent(ctx, unsubscriptionEvent)
 

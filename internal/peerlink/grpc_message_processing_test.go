@@ -75,7 +75,7 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 	recvDone := client.startReceiveGoroutine(testCtx, "server-node", stream)
 
 	// Send a test event from server to client to verify receive goroutine works
-	testEvent := eventlog.NewRecord("test-topic", []byte("hello from server"))
+	testEvent := eventlog.NewEvent("test-topic", []byte("hello from server"))
 	err = server.SendEvent(testCtx, "client-node", testEvent)
 	if err != nil {
 		t.Fatalf("Failed to send test event: %v", err)
@@ -84,11 +84,11 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 	// Verify we receive the event through the receive goroutine
 	select {
 	case receivedEvent := <-eventChan:
-		if receivedEvent.Topic() != "test-topic" {
-			t.Errorf("Expected topic 'test-topic', got '%s'", receivedEvent.Topic())
+		if receivedEvent.Topic != "test-topic" {
+			t.Errorf("Expected topic 'test-topic', got '%s'", receivedEvent.Topic)
 		}
-		if string(receivedEvent.Payload()) != "hello from server" {
-			t.Errorf("Expected payload 'hello from server', got '%s'", string(receivedEvent.Payload()))
+		if string(receivedEvent.Payload) != "hello from server" {
+			t.Errorf("Expected payload 'hello from server', got '%s'", string(receivedEvent.Payload))
 		}
 		t.Log("✅ startReceiveGoroutine working: received event from peer")
 	case err := <-errChan:
@@ -124,7 +124,7 @@ func TestGRPCPeerLink_ProcessOutboundMessage(t *testing.T) {
 	defer client.Close()
 
 	// Create a test message
-	testEvent := eventlog.NewRecord("test-topic", []byte("test payload"))
+	testEvent := eventlog.NewEvent("test-topic", []byte("test payload"))
 	testMsg := queuedMessage{
 		peerID: "test-peer",
 		event:  testEvent,
@@ -162,7 +162,7 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 	client.mu.Unlock()
 
 	// Create a test message
-	testEvent := eventlog.NewRecord("test-topic", []byte("test payload"))
+	testEvent := eventlog.NewEvent("test-topic", []byte("test payload"))
 	testMsg := queuedMessage{
 		peerID: "test-peer",
 		event:  testEvent,
@@ -176,8 +176,8 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 	// Verify message was requeued
 	select {
 	case requeuedMsg := <-sendQueue:
-		if requeuedMsg.event.Topic() != "test-topic" {
-			t.Errorf("Expected requeued topic 'test-topic', got '%s'", requeuedMsg.event.Topic())
+		if requeuedMsg.event.Topic != "test-topic" {
+			t.Errorf("Expected requeued topic 'test-topic', got '%s'", requeuedMsg.event.Topic)
 		}
 		t.Log("✅ handleSendFailure correctly requeued message")
 	case <-time.After(1 * time.Second):
@@ -187,7 +187,7 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 	// Test drops counter increase when queue is full
 	// Fill the queue first
 	for i := 0; i < 10; i++ {
-		dummyEvent := eventlog.NewRecord("dummy", []byte("dummy"))
+		dummyEvent := eventlog.NewEvent("dummy", []byte("dummy"))
 		dummyMsg := queuedMessage{
 			peerID: "test-peer",
 			event:  dummyEvent,

@@ -207,7 +207,7 @@ func (n *GRPCMeshNode) Close() error {
 // 2. Persist event to local EventLog FIRST (durability)
 // 3. Find local subscribers via RoutingTable
 // 4. Forward to remote peers via PeerLink (for remote subscribers)
-func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client, event eventlogpkg.EventRecord) error {
+func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client, event *eventlogpkg.Event) error {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
@@ -232,13 +232,13 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 
 	// Step 1: PERSIST LOCALLY FIRST (REQ-MNODE-002)
 	// This ensures durability before any forwarding occurs
-	persistedEvent, err := n.eventLog.AppendToTopic(ctx, event.Topic(), event)
+	persistedEvent, err := n.eventLog.AppendEvent(ctx, event.Topic, event)
 	if err != nil {
 		return fmt.Errorf("failed to persist event locally: %w", err)
 	}
 
 	// Step 2: Find local subscribers and deliver events
-	localSubscribers, err := n.routingTable.GetSubscribers(ctx, event.Topic())
+	localSubscribers, err := n.routingTable.GetSubscribers(ctx, event.Topic)
 	if err != nil {
 		return fmt.Errorf("failed to get local subscribers: %w", err)
 	}
@@ -247,7 +247,7 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 	for _, subscriber := range localSubscribers {
 		if subscriber.Type() == routingtablepkg.LocalClient {
 			// Try generic event delivery interface first (works for both TrustedClient and HTTPClient)
-			if eventReceiver, ok := subscriber.(interface{ DeliverEvent(eventlogpkg.EventRecord) }); ok {
+			if eventReceiver, ok := subscriber.(interface{ DeliverEvent(*eventlogpkg.Event) }); ok {
 				eventReceiver.DeliverEvent(persistedEvent)
 			}
 			// Note: In production, we'd handle delivery failures, queuing, etc.
@@ -263,7 +263,7 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 		_ = err // Failed to get peers, but local delivery succeeded
 	} else {
 		// Use intelligent routing: only send to peers with interested subscribers
-		interestedPeers := n.getInterestedPeers(event.Topic(), connectedPeers)
+		interestedPeers := n.getInterestedPeers(event.Topic, connectedPeers)
 		for _, peer := range interestedPeers {
 			err := n.peerLink.SendEvent(ctx, peer.ID(), persistedEvent)
 			if err != nil {
@@ -522,8 +522,8 @@ func (n *GRPCMeshNode) GetHealth(ctx context.Context) (meshnode.HealthStatus, er
 		healthMessages = append(healthMessages, "EventLog unhealthy: node is closed")
 	} else if n.eventLog != nil {
 		// Test EventLog by checking if we can create a simple operation
-		testEvent := eventlogpkg.NewRecord("__health.check", []byte("health-check"))
-		_, err := n.eventLog.AppendToTopic(ctx, "__health.check", testEvent)
+		testEvent := eventlogpkg.NewEvent("__health.check", []byte("health-check"))
+		_, err := n.eventLog.AppendEvent(ctx, "__health.check", testEvent)
 		if err != nil {
 			eventLogHealthy = false
 			healthMessages = append(healthMessages, fmt.Sprintf("EventLog unhealthy: %v", err))
@@ -605,7 +605,6 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 		return fmt.Errorf("failed to get connected peers: %w", err)
 	}
 
-
 	if len(connectedPeers) == 0 {
 		// No peers to notify, not an error
 		return nil
@@ -618,7 +617,7 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 		action, clientID, topic, n.config.NodeID))
 
 	// Create subscription event with special topic prefix
-	subscriptionEvent := eventlogpkg.NewRecord(
+	subscriptionEvent := eventlogpkg.NewEvent(
 		fmt.Sprintf("__mesh.subscription.%s", action), // Special topic for subscription changes
 		payloadBytes,
 	)
@@ -673,8 +672,8 @@ func (n *GRPCMeshNode) handleIncomingPeerEvents(ctx context.Context) {
 }
 
 // processIncomingEvent handles a single incoming event from a peer
-func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event eventlogpkg.EventRecord) {
-	topic := event.Topic()
+func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event *eventlogpkg.Event) {
+	topic := event.Topic
 
 	// Check if this is a subscription event
 	if n.isSubscriptionEvent(topic) {
@@ -691,7 +690,7 @@ func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event eventlogp
 	n.mu.RUnlock()
 
 	// Persist the event locally (we received it from a peer)
-	persistedEvent, err := n.eventLog.AppendToTopic(ctx, topic, event)
+	persistedEvent, err := n.eventLog.AppendEvent(ctx, topic, event)
 	if err != nil {
 		// Log error but continue
 		// In production, we'd use structured logging
@@ -713,7 +712,7 @@ func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event eventlogp
 	for _, subscriber := range localSubscribers {
 		if subscriber.Type() == routingtablepkg.LocalClient {
 			// Try generic event delivery interface (works for both TrustedClient and HTTPClient)
-			if eventReceiver, ok := subscriber.(interface{ DeliverEvent(eventlogpkg.EventRecord) }); ok {
+			if eventReceiver, ok := subscriber.(interface{ DeliverEvent(*eventlogpkg.Event) }); ok {
 				eventReceiver.DeliverEvent(persistedEvent)
 			}
 		}
@@ -727,7 +726,7 @@ func (n *GRPCMeshNode) isSubscriptionEvent(topic string) bool {
 
 // handleSubscriptionEvent processes subscription events from peers
 // This implements REQ-MNODE-003: Handle incoming peer subscription notifications
-func (n *GRPCMeshNode) handleSubscriptionEvent(ctx context.Context, event eventlogpkg.EventRecord) {
+func (n *GRPCMeshNode) handleSubscriptionEvent(ctx context.Context, event *eventlogpkg.Event) {
 	// Simple JSON parsing for MVP - in production we'd use proper JSON unmarshaling
 	var subscriptionInfo struct {
 		Action   string `json:"action"`
@@ -737,7 +736,7 @@ func (n *GRPCMeshNode) handleSubscriptionEvent(ctx context.Context, event eventl
 	}
 
 	// Parse JSON - for MVP, we'll use simple parsing
-	if err := json.Unmarshal(event.Payload(), &subscriptionInfo); err != nil {
+	if err := json.Unmarshal(event.Payload, &subscriptionInfo); err != nil {
 		// Log error but continue - don't fail on malformed gossip
 		return
 	}

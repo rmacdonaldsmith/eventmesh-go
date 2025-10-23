@@ -117,7 +117,7 @@ func TestGRPCMeshNode_MultiNodeIntegration(t *testing.T) {
 
 	// Create and publish event on Node A
 	eventPayload := []byte(`{"orderId": "12345", "amount": 99.99}`)
-	publishedEvent := eventlog.NewRecord(topicPattern, eventPayload)
+	publishedEvent := eventlog.NewEvent(topicPattern, eventPayload)
 
 	err = nodeA.PublishEvent(ctx, publisherClient, publishedEvent)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestGRPCMeshNode_MultiNodeIntegration(t *testing.T) {
 
 	// Verify event was persisted locally on Node A (REQ-MNODE-002: Local Persistence Before Forwarding)
 	eventLogA := nodeA.GetEventLog()
-	eventsA, err := eventLogA.ReadFromTopic(ctx, topicPattern, 0, 10)
+	eventsA, err := eventLogA.ReadEvents(ctx, topicPattern, 0, 10)
 	if err != nil {
 		t.Errorf("Expected no error reading events from Node A, got %v", err)
 	}
@@ -145,7 +145,7 @@ func TestGRPCMeshNode_MultiNodeIntegration(t *testing.T) {
 
 	// Simulate event forwarding by manually delivering event to Node B
 	// In production, this would happen via PeerLink network communication
-	_, err = nodeB.GetEventLog().AppendToTopic(ctx, topicPattern, publishedEvent)
+	_, err = nodeB.GetEventLog().AppendEvent(ctx, topicPattern, publishedEvent)
 	if err != nil {
 		t.Errorf("Expected no error persisting forwarded event on Node B, got %v", err)
 	}
@@ -169,11 +169,11 @@ func TestGRPCMeshNode_MultiNodeIntegration(t *testing.T) {
 	}
 
 	if len(receivedEvents) > 0 {
-		if receivedEvents[0].Topic() != topicPattern {
-			t.Errorf("Expected received event topic '%s', got '%s'", topicPattern, receivedEvents[0].Topic())
+		if receivedEvents[0].Topic != topicPattern {
+			t.Errorf("Expected received event topic '%s', got '%s'", topicPattern, receivedEvents[0].Topic)
 		}
-		if string(receivedEvents[0].Payload()) != string(eventPayload) {
-			t.Errorf("Expected received event payload '%s', got '%s'", eventPayload, receivedEvents[0].Payload())
+		if string(receivedEvents[0].Payload) != string(eventPayload) {
+			t.Errorf("Expected received event payload '%s', got '%s'", eventPayload, receivedEvents[0].Payload)
 		}
 	}
 
@@ -256,7 +256,7 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 
 	// Create and publish event from sender
 	testPayload := []byte(`{"message": "PeerLink to MeshNode integration test"}`)
-	publishedEvent := eventlog.NewRecord(topic, testPayload)
+	publishedEvent := eventlog.NewEvent(topic, testPayload)
 
 	publisher := NewTrustedClient("test-publisher")
 	err = sender.PublishEvent(ctx, publisher, publishedEvent)
@@ -272,12 +272,12 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 	if len(receivedEvents) == 0 {
 		// Debug: Check if events were persisted in receiver's EventLog
 		receiverEventLog := receiver.GetEventLog()
-		persistedEvents, _ := receiverEventLog.ReadFromTopic(ctx, topic, 0, 10)
+		persistedEvents, _ := receiverEventLog.ReadEvents(ctx, topic, 0, 10)
 		t.Logf("Debug: Receiver EventLog has %d events for topic %s", len(persistedEvents), topic)
 
 		// Debug: Check sender's EventLog
 		senderEventLog := sender.GetEventLog()
-		senderEvents, _ := senderEventLog.ReadFromTopic(ctx, topic, 0, 10)
+		senderEvents, _ := senderEventLog.ReadEvents(ctx, topic, 0, 10)
 		t.Logf("Debug: Sender EventLog has %d events for topic %s", len(senderEvents), topic)
 
 		// Debug: Check PeerLink connectivity
@@ -293,12 +293,12 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 
 	// Verify the event content
 	receivedEvent := receivedEvents[len(receivedEvents)-1] // Get last event
-	if receivedEvent.Topic() != topic {
-		t.Errorf("Expected topic %s, got %s", topic, receivedEvent.Topic())
+	if receivedEvent.Topic != topic {
+		t.Errorf("Expected topic %s, got %s", topic, receivedEvent.Topic)
 	}
 
-	if string(receivedEvent.Payload()) != string(testPayload) {
-		t.Errorf("Expected payload %s, got %s", testPayload, receivedEvent.Payload())
+	if string(receivedEvent.Payload) != string(testPayload) {
+		t.Errorf("Expected payload %s, got %s", testPayload, receivedEvent.Payload)
 	}
 
 	t.Logf("✅ PeerLink ReceiveEvents → MeshNode.handleIncomingPeerEvents integration verified")
@@ -399,7 +399,7 @@ func TestRealMultiNodeNetworkingEndToEnd(t *testing.T) {
 	// Phase 4: Publish event and test actual networking
 	publisher := NewTrustedClient("end-to-end-publisher")
 	testPayload := []byte(`{"test": "real-networking", "message": "end-to-end with actual PeerLink"}`)
-	publishedEvent := eventlog.NewRecord(topic, testPayload)
+	publishedEvent := eventlog.NewEvent(topic, testPayload)
 
 	err = publisherNode.PublishEvent(ctx, publisher, publishedEvent)
 	if err != nil {
@@ -412,7 +412,7 @@ func TestRealMultiNodeNetworkingEndToEnd(t *testing.T) {
 	// Phase 5: Verify results and provide diagnostic information
 
 	// Check if event was persisted locally on publisher (this should always work)
-	publisherEvents, err := publisherNode.GetEventLog().ReadFromTopic(ctx, topic, 0, 10)
+	publisherEvents, err := publisherNode.GetEventLog().ReadEvents(ctx, topic, 0, 10)
 	if err != nil {
 		t.Errorf("Failed to read events from publisher node: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestRealMultiNodeNetworkingEndToEnd(t *testing.T) {
 	}
 
 	// Check if event reached subscriber node through PeerLink networking
-	subscriberEvents, err := subscriberNode.GetEventLog().ReadFromTopic(ctx, topic, 0, 10)
+	subscriberEvents, err := subscriberNode.GetEventLog().ReadEvents(ctx, topic, 0, 10)
 	if err != nil {
 		t.Errorf("Failed to read events from subscriber node: %v", err)
 	}
@@ -443,10 +443,10 @@ func TestRealMultiNodeNetworkingEndToEnd(t *testing.T) {
 		t.Logf("✅ Publisher → PeerLink → Subscriber → Local Client")
 
 		// Verify event content integrity
-		if string(receivedEvents[0].Payload()) == string(testPayload) {
+		if string(receivedEvents[0].Payload) == string(testPayload) {
 			t.Logf("✅ Event content integrity verified")
 		} else {
-			t.Errorf("Event content mismatch: expected %s, got %s", testPayload, receivedEvents[0].Payload())
+			t.Errorf("Event content mismatch: expected %s, got %s", testPayload, receivedEvents[0].Payload)
 		}
 	} else {
 		t.Logf("⚠️  Real networking not fully functional - this is expected for MVP")
@@ -551,7 +551,7 @@ func TestSubscriptionGossipEndToEnd(t *testing.T) {
 	// In production, this would happen automatically via PeerLink networking
 	publisher := NewTrustedClient("gossip-publisher")
 	testPayload := []byte(`{"test": "gossip-routing", "message": "subscription-based routing"}`)
-	publishedEvent := eventlog.NewRecord(topic, testPayload)
+	publishedEvent := eventlog.NewEvent(topic, testPayload)
 
 	// Publish on Node A
 	err = nodeA.PublishEvent(ctx, publisher, publishedEvent)
@@ -561,14 +561,14 @@ func TestSubscriptionGossipEndToEnd(t *testing.T) {
 
 	// For MVP: Manually simulate the event delivery that would happen via PeerLink
 	// This tests the routing logic even though full networking isn't implemented
-	_, err = nodeB.GetEventLog().AppendToTopic(ctx, topic, publishedEvent)
+	_, err = nodeB.GetEventLog().AppendEvent(ctx, topic, publishedEvent)
 	if err != nil {
 		t.Errorf("Failed to simulate event delivery to node B: %v", err)
 	}
 
 	// Deliver to local subscribers on Node B (simulate mesh forwarding)
 	for _, localSubscriber := range localSubscribers {
-		if eventReceiver, ok := localSubscriber.(interface{ DeliverEvent(eventlog.EventRecord) }); ok {
+		if eventReceiver, ok := localSubscriber.(interface{ DeliverEvent(*eventlog.Event) }); ok {
 			eventReceiver.DeliverEvent(publishedEvent)
 		}
 	}
@@ -581,11 +581,11 @@ func TestSubscriptionGossipEndToEnd(t *testing.T) {
 
 	if len(receivedEvents) > 0 {
 		receivedEvent := receivedEvents[len(receivedEvents)-1] // Get latest event
-		if receivedEvent.Topic() != topic {
-			t.Errorf("Expected received event topic '%s', got '%s'", topic, receivedEvent.Topic())
+		if receivedEvent.Topic != topic {
+			t.Errorf("Expected received event topic '%s', got '%s'", topic, receivedEvent.Topic)
 		}
-		if string(receivedEvent.Payload()) != string(testPayload) {
-			t.Errorf("Expected received payload '%s', got '%s'", testPayload, receivedEvent.Payload())
+		if string(receivedEvent.Payload) != string(testPayload) {
+			t.Errorf("Expected received payload '%s', got '%s'", testPayload, receivedEvent.Payload)
 		}
 	}
 
@@ -718,7 +718,7 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 	// In production, this would happen automatically via PeerLink
 	subscriptionGossipPayload := []byte(fmt.Sprintf(`{"action":"subscribe","clientID":"%s","topic":"%s","nodeID":"%s"}`,
 		subscriber.ID(), topic, subscriberNode.GetNodeID()))
-	subscriptionGossipEvent := eventlog.NewRecord("__mesh.subscription.subscribe", subscriptionGossipPayload)
+	subscriptionGossipEvent := eventlog.NewEvent("__mesh.subscription.subscribe", subscriptionGossipPayload)
 
 	// Simulate publisher node receiving the subscription gossip
 	publisherNode.handleSubscriptionEvent(ctx, subscriptionGossipEvent)
@@ -752,7 +752,7 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 	// Step 2: Publisher publishes event - this should trigger intelligent routing
 	publisher := NewTrustedClient("intelligent-routing-publisher")
 	testPayload := []byte(`{"message": "intelligent routing test", "should_reach": "subscriber_node_only"}`)
-	publishedEvent := eventlog.NewRecord(topic, testPayload)
+	publishedEvent := eventlog.NewEvent(topic, testPayload)
 
 	err = publisherNode.PublishEvent(ctx, publisher, publishedEvent)
 	if err != nil {
@@ -765,7 +765,7 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 	// For MVP: Manually simulate event delivery since PeerLink networking needs refinement
 	// In production, this would happen automatically via the intelligent routing
 	// We need to manually deliver the event to the subscriber node to test the routing logic
-	_, err = subscriberNode.GetEventLog().AppendToTopic(ctx, topic, publishedEvent)
+	_, err = subscriberNode.GetEventLog().AppendEvent(ctx, topic, publishedEvent)
 	if err != nil {
 		t.Errorf("Failed to simulate event delivery to subscriber node: %v", err)
 	}
@@ -778,7 +778,7 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 	}
 
 	for _, localSubscriber := range localSubscribersOnSubscriberNode {
-		if eventReceiver, ok := localSubscriber.(interface{ DeliverEvent(eventlog.EventRecord) }); ok {
+		if eventReceiver, ok := localSubscriber.(interface{ DeliverEvent(*eventlog.Event) }); ok {
 			eventReceiver.DeliverEvent(publishedEvent)
 		}
 	}
@@ -787,7 +787,7 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 
 	// ✅ Subscriber node SHOULD receive the event (has interested subscriber)
 	subscriberEventLog := subscriberNode.GetEventLog()
-	subscriberEvents, err := subscriberEventLog.ReadFromTopic(ctx, topic, 0, 10)
+	subscriberEvents, err := subscriberEventLog.ReadEvents(ctx, topic, 0, 10)
 	if err != nil {
 		t.Errorf("Failed to read events from subscriber node: %v", err)
 	}
@@ -803,7 +803,7 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 
 	// ❌ Uninterested node SHOULD NOT receive the event (no subscribers for this topic)
 	uninterestedEventLog := uninterestedNode.GetEventLog()
-	uninterestedEvents, err := uninterestedEventLog.ReadFromTopic(ctx, topic, 0, 10)
+	uninterestedEvents, err := uninterestedEventLog.ReadEvents(ctx, topic, 0, 10)
 	if err != nil {
 		t.Errorf("Failed to read events from uninterested node: %v", err)
 	}
@@ -813,7 +813,7 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 
 	// ✅ Publisher node SHOULD have the event locally persisted
 	publisherEventLog := publisherNode.GetEventLog()
-	publisherEvents, err := publisherEventLog.ReadFromTopic(ctx, topic, 0, 10)
+	publisherEvents, err := publisherEventLog.ReadEvents(ctx, topic, 0, 10)
 	if err != nil {
 		t.Errorf("Failed to read events from publisher node: %v", err)
 	}
@@ -823,10 +823,10 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 
 	// Verify event content integrity
 	if len(subscriberEvents) > 0 && len(receivedEvents) > 0 {
-		if string(subscriberEvents[0].Payload()) != string(testPayload) {
+		if string(subscriberEvents[0].Payload) != string(testPayload) {
 			t.Error("Event payload integrity check failed in subscriber node")
 		}
-		if string(receivedEvents[0].Payload()) != string(testPayload) {
+		if string(receivedEvents[0].Payload) != string(testPayload) {
 			t.Error("Event payload integrity check failed in subscriber client")
 		}
 	}

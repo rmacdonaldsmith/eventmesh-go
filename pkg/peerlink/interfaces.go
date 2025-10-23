@@ -60,11 +60,11 @@ type PeerLink interface {
 
 	// SendEvent streams an event to the specified peer node.
 	// Handles backpressure and flow control automatically.
-	SendEvent(ctx context.Context, peerID string, event eventlog.EventRecord) error
+	SendEvent(ctx context.Context, peerID string, event *eventlog.Event) error
 
 	// ReceiveEvents returns a channel for receiving events from peer nodes.
 	// Events are received from all connected peers.
-	ReceiveEvents(ctx context.Context) (<-chan eventlog.EventRecord, <-chan error)
+	ReceiveEvents(ctx context.Context) (<-chan *eventlog.Event, <-chan error)
 
 	// GetConnectedPeers returns all currently connected peer nodes.
 	GetConnectedPeers(ctx context.Context) ([]PeerNode, error)

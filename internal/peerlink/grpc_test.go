@@ -517,8 +517,8 @@ func TestGRPCPeerLink_Metrics(t *testing.T) {
 	}
 
 	// Test queue depth by sending messages
-	event1 := eventlog.NewRecord("test", []byte("test1"))
-	event2 := eventlog.NewRecord("test", []byte("test2"))
+	event1 := eventlog.NewEvent("test", []byte("test1"))
+	event2 := eventlog.NewEvent("test", []byte("test2"))
 
 	err = peerLink.SendEvent(context.Background(), "test-peer", event1)
 	if err != nil {
@@ -537,7 +537,7 @@ func TestGRPCPeerLink_Metrics(t *testing.T) {
 	}
 
 	// Test drops count by filling queue and causing drops
-	event3 := eventlog.NewRecord("test", []byte("test3"))
+	event3 := eventlog.NewEvent("test", []byte("test3"))
 	err = peerLink.SendEvent(context.Background(), "test-peer", event3)
 
 	// This should cause a drop since queue is full (size 2) and timeout is short
@@ -582,7 +582,7 @@ func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
 	}
 
 	// Send events to create different queue depths
-	event := eventlog.NewRecord("test", []byte("test"))
+	event := eventlog.NewEvent("test", []byte("test"))
 	err = peerLink.SendEvent(context.Background(), "peer1", event)
 	if err != nil {
 		t.Fatalf("Failed to send event to peer1: %v", err)
@@ -667,7 +667,7 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 	peerLink.mu.Unlock()
 
 	// Send an event - this should queue the message
-	testEvent := eventlog.NewRecord("test-topic", []byte("test-payload"))
+	testEvent := eventlog.NewEvent("test-topic", []byte("test-payload"))
 	err = peerLink.SendEvent(ctx, "peer1", testEvent)
 	if err != nil {
 		t.Fatalf("Failed to send event: %v", err)
@@ -742,7 +742,7 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 	}
 
 	// Send an event to the peer
-	testEvent2 := eventlog.NewRecord("test-topic", []byte("test-payload"))
+	testEvent2 := eventlog.NewEvent("test-topic", []byte("test-payload"))
 	err2 := peerLink.SendEvent(ctx, "test-client", testEvent2)
 	if err2 != nil {
 		t.Fatalf("Failed to send event: %v", err2)
@@ -1034,8 +1034,8 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Test both regular events and subscription events
-	testEvent := eventlog.NewRecord("test-topic", []byte("hello from sender"))
-	subscriptionEvent := eventlog.NewRecord("__mesh.subscription.subscribe",
+	testEvent := eventlog.NewEvent("test-topic", []byte("hello from sender"))
+	subscriptionEvent := eventlog.NewEvent("__mesh.subscription.subscribe",
 		[]byte(`{"action":"subscribe","clientID":"test-client","topic":"test.topic","nodeID":"sender-node"}`))
 
 	// Send regular event first
@@ -1059,19 +1059,19 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 		case receivedEvent := <-eventChan:
 			eventsReceived++
 			t.Logf("✅ Received event %d/%d: %s -> %s",
-				eventsReceived, expectedEvents, receivedEvent.Topic(), string(receivedEvent.Payload()))
+				eventsReceived, expectedEvents, receivedEvent.Topic, string(receivedEvent.Payload))
 
 			// Verify the specific events
-			if receivedEvent.Topic() == "test-topic" {
-				if string(receivedEvent.Payload()) != "hello from sender" {
-					t.Errorf("Expected regular event payload 'hello from sender', got '%s'", string(receivedEvent.Payload()))
+			if receivedEvent.Topic == "test-topic" {
+				if string(receivedEvent.Payload) != "hello from sender" {
+					t.Errorf("Expected regular event payload 'hello from sender', got '%s'", string(receivedEvent.Payload))
 				}
-			} else if receivedEvent.Topic() == "__mesh.subscription.subscribe" {
-				if !strings.Contains(string(receivedEvent.Payload()), "test-client") {
-					t.Errorf("Expected subscription event to contain 'test-client', got '%s'", string(receivedEvent.Payload()))
+			} else if receivedEvent.Topic == "__mesh.subscription.subscribe" {
+				if !strings.Contains(string(receivedEvent.Payload), "test-client") {
+					t.Errorf("Expected subscription event to contain 'test-client', got '%s'", string(receivedEvent.Payload))
 				}
 			} else {
-				t.Errorf("Unexpected event topic: %s", receivedEvent.Topic())
+				t.Errorf("Unexpected event topic: %s", receivedEvent.Topic)
 			}
 
 		case err := <-errChan:
@@ -1156,14 +1156,14 @@ func TestGRPCPeerLink_SimultaneousBidirectionalConnections(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Test: Send event from A to B
-	testEvent := eventlog.NewRecord("test-topic", []byte("hello from A to B"))
+	testEvent := eventlog.NewEvent("test-topic", []byte("hello from A to B"))
 	err = nodeA.SendEvent(ctx, "node-B", testEvent)
 	if err != nil {
 		t.Fatalf("Failed to send event from A to B: %v", err)
 	}
 
 	// Test: Send event from B to A
-	responseEvent := eventlog.NewRecord("response-topic", []byte("hello from B to A"))
+	responseEvent := eventlog.NewEvent("response-topic", []byte("hello from B to A"))
 	err = nodeB.SendEvent(ctx, "node-A", responseEvent)
 	if err != nil {
 		t.Fatalf("Failed to send event from B to A: %v", err)
@@ -1178,16 +1178,16 @@ func TestGRPCPeerLink_SimultaneousBidirectionalConnections(t *testing.T) {
 		select {
 		case receivedEvent := <-nodeBEventChan:
 			eventsReceived++
-			t.Logf("✅ Node B received: %s -> %s", receivedEvent.Topic(), string(receivedEvent.Payload()))
-			if receivedEvent.Topic() != "test-topic" {
-				t.Errorf("Expected test-topic, got %s", receivedEvent.Topic())
+			t.Logf("✅ Node B received: %s -> %s", receivedEvent.Topic, string(receivedEvent.Payload))
+			if receivedEvent.Topic != "test-topic" {
+				t.Errorf("Expected test-topic, got %s", receivedEvent.Topic)
 			}
 
 		case receivedEvent := <-nodeAEventChan:
 			eventsReceived++
-			t.Logf("✅ Node A received: %s -> %s", receivedEvent.Topic(), string(receivedEvent.Payload()))
-			if receivedEvent.Topic() != "response-topic" {
-				t.Errorf("Expected response-topic, got %s", receivedEvent.Topic())
+			t.Logf("✅ Node A received: %s -> %s", receivedEvent.Topic, string(receivedEvent.Payload))
+			if receivedEvent.Topic != "response-topic" {
+				t.Errorf("Expected response-topic, got %s", receivedEvent.Topic)
 			}
 
 		case err := <-nodeAErrChan:

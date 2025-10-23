@@ -19,8 +19,8 @@ import (
 type HTTPClient struct {
 	clientID        string
 	isAuthenticated bool
-	connectedAt     time.Time                     // When this client connected
-	eventChan       chan eventlogpkg.EventRecord // Channel for receiving events (for SSE streaming)
+	connectedAt     time.Time               // When this client connected
+	eventChan       chan *eventlogpkg.Event // Channel for receiving events (for SSE streaming)
 }
 
 // NewHTTPClient creates a new HTTP client from JWT claims
@@ -29,7 +29,7 @@ func NewHTTPClient(claims *JWTClaims) *HTTPClient {
 		clientID:        claims.ClientID,
 		isAuthenticated: true,
 		connectedAt:     time.Now(),
-		eventChan:       make(chan eventlogpkg.EventRecord, 100), // Buffered channel like TrustedClient
+		eventChan:       make(chan *eventlogpkg.Event, 100), // Buffered channel like TrustedClient
 	}
 }
 
@@ -55,7 +55,7 @@ func (c *HTTPClient) Type() routingtable.SubscriberType {
 
 // DeliverEvent delivers an event to this client (for SSE streaming)
 // This method is called by MeshNode when events need to be delivered to local subscribers
-func (c *HTTPClient) DeliverEvent(event eventlogpkg.EventRecord) {
+func (c *HTTPClient) DeliverEvent(event *eventlogpkg.Event) {
 	// Try to send to channel (non-blocking)
 	select {
 	case c.eventChan <- event:
@@ -64,18 +64,17 @@ func (c *HTTPClient) DeliverEvent(event eventlogpkg.EventRecord) {
 		// Channel is full, log the dropped event for observability
 		slog.Warn("event dropped due to full channel",
 			"client_id", c.ID(),
-			"topic", event.Topic(),
-			"event_offset", event.Offset(),
+			"topic", event.Topic,
+			"event_offset", event.Offset,
 			"channel_capacity", cap(c.eventChan),
 			"reason", "client_slow_consumer")
 	}
 }
 
 // GetEventChannel returns the channel for receiving events (for SSE streaming)
-func (c *HTTPClient) GetEventChannel() <-chan eventlogpkg.EventRecord {
+func (c *HTTPClient) GetEventChannel() <-chan *eventlogpkg.Event {
 	return c.eventChan
 }
-
 
 // Handlers contains all HTTP request handlers
 type Handlers struct {
@@ -178,7 +177,7 @@ func (h *Handlers) PublishEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create event record
-	eventRecord := eventlogpkg.NewRecord(req.Topic, payload)
+	eventRecord := eventlogpkg.NewEvent(req.Topic, payload)
 
 	// Publish event through MeshNode
 	ctx := r.Context()
@@ -192,13 +191,13 @@ func (h *Handlers) PublishEvent(w http.ResponseWriter, r *http.Request) {
 	slog.Info("event published",
 		"client_id", client.ID(),
 		"topic", req.Topic,
-		"event_offset", eventRecord.Offset(),
+		"event_offset", eventRecord.Offset,
 		"payload_size", len(payload))
 
 	// Create response
 	resp := PublishResponse{
-		EventID:   fmt.Sprintf("%s-%d", req.Topic, eventRecord.Offset()), // Topic + offset as ID
-		Offset:    eventRecord.Offset(),                                  // This will be set by the EventLog
+		EventID:   fmt.Sprintf("%s-%d", req.Topic, eventRecord.Offset), // Topic + offset as ID
+		Offset:    eventRecord.Offset,                                  // This will be set by the EventLog
 		Timestamp: time.Now(),
 	}
 
@@ -266,7 +265,7 @@ func (h *Handlers) ReadTopicEvents(w http.ResponseWriter, r *http.Request) {
 	// Get EventLog from MeshNode and read events
 	ctx := r.Context()
 	eventLog := h.meshNode.GetEventLog()
-	events, err := eventLog.ReadFromTopic(ctx, topic, startOffset, limit)
+	events, err := eventLog.ReadEvents(ctx, topic, startOffset, limit)
 	if err != nil {
 		h.writeError(w, fmt.Sprintf("Failed to read events: %v", err), http.StatusInternalServerError)
 		return
@@ -277,20 +276,20 @@ func (h *Handlers) ReadTopicEvents(w http.ResponseWriter, r *http.Request) {
 	for _, event := range events {
 		// Parse payload as JSON if possible, otherwise use as string
 		var payload interface{}
-		if event.Payload() != nil {
-			err := json.Unmarshal(event.Payload(), &payload)
+		if event.Payload != nil {
+			err := json.Unmarshal(event.Payload, &payload)
 			if err != nil {
 				// If not valid JSON, use as string
-				payload = string(event.Payload())
+				payload = string(event.Payload)
 			}
 		}
 
 		message := EventStreamMessage{
-			EventID:   fmt.Sprintf("%s-%d", event.Topic(), event.Offset()),
-			Topic:     event.Topic(),
+			EventID:   fmt.Sprintf("%s-%d", event.Topic, event.Offset),
+			Topic:     event.Topic,
 			Payload:   payload,
-			Timestamp: event.Timestamp(),
-			Offset:    event.Offset(),
+			Timestamp: event.Timestamp,
+			Offset:    event.Offset,
 		}
 		eventMessages = append(eventMessages, message)
 	}
@@ -760,7 +759,6 @@ func (h *Handlers) writeJSON(w http.ResponseWriter, data interface{}, statusCode
 	}
 }
 
-
 // validateJSON validates that the request has valid JSON content-type
 func (h *Handlers) validateJSON(r *http.Request) error {
 	contentType := r.Header.Get("Content-Type")
@@ -863,21 +861,21 @@ func (h *Handlers) streamWithKeepalive(w http.ResponseWriter, r *http.Request, c
 			// Received an event from MeshNode, forward it to SSE client
 			// Convert EventRecord to EventStreamMessage
 			var payload interface{}
-			if event.Payload() != nil {
+			if event.Payload != nil {
 				// Try to unmarshal payload as JSON
-				err := json.Unmarshal(event.Payload(), &payload)
+				err := json.Unmarshal(event.Payload, &payload)
 				if err != nil {
 					// If not valid JSON, send as string
-					payload = string(event.Payload())
+					payload = string(event.Payload)
 				}
 			}
 
 			sseMessage := EventStreamMessage{
-				EventID:   fmt.Sprintf("%s-%d", event.Topic(), event.Offset()),
-				Topic:     event.Topic(),
+				EventID:   fmt.Sprintf("%s-%d", event.Topic, event.Offset),
+				Topic:     event.Topic,
 				Payload:   payload,
-				Timestamp: event.Timestamp(),
-				Offset:    event.Offset(),
+				Timestamp: event.Timestamp,
+				Offset:    event.Offset,
 			}
 
 			// Send the event via SSE
