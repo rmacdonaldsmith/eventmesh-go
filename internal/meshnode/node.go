@@ -18,14 +18,42 @@ import (
 	routingtablepkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
 
+const (
+	// MaxEventPayloadSize is the maximum allowed payload size in bytes (1MB)
+	MaxEventPayloadSize = 1024 * 1024
+)
+
+// DeliveryResult tracks the results of event delivery attempts
+type DeliveryResult struct {
+	LocalSuccesses int
+	LocalFailures  int
+	PeerSuccesses  int
+	PeerFailures   int
+	Errors         []error
+}
+
+// HasFailures returns true if any deliveries failed
+func (r DeliveryResult) HasFailures() bool {
+	return r.LocalFailures > 0 || r.PeerFailures > 0
+}
+
+// TotalAttempts returns the total number of delivery attempts
+func (r DeliveryResult) TotalAttempts() int {
+	return r.LocalSuccesses + r.LocalFailures + r.PeerSuccesses + r.PeerFailures
+}
+
+// Error returns a formatted error describing delivery failures
+func (r DeliveryResult) Error() string {
+	if !r.HasFailures() {
+		return ""
+	}
+	return fmt.Sprintf("event delivery partial failure: %d local successes, %d local failures, %d peer successes, %d peer failures",
+		r.LocalSuccesses, r.LocalFailures, r.PeerSuccesses, r.PeerFailures)
+}
+
 // GRPCMeshNode implements the meshnode.MeshNode interface.
 // It orchestrates EventLog, RoutingTable, and PeerLink components to provide
 // distributed event streaming functionality.
-//
-// This implementation focuses on:
-// - REQ-MNODE-002: Local Persistence Before Forwarding
-// - REQ-MNODE-003: Subscription Propagation
-// - Component orchestration and lifecycle management
 type GRPCMeshNode struct {
 	mu     sync.RWMutex
 	config *Config
@@ -230,6 +258,12 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 		return fmt.Errorf("client is not authenticated")
 	}
 
+	// Additional event validation
+	if len(event.Payload) > MaxEventPayloadSize {
+		return fmt.Errorf("event payload size %d bytes exceeds maximum allowed size %d bytes",
+			len(event.Payload), MaxEventPayloadSize)
+	}
+
 	// Step 1: PERSIST LOCALLY FIRST (REQ-MNODE-002)
 	// This ensures durability before any forwarding occurs
 	persistedEvent, err := n.eventLog.AppendEvent(ctx, event.Topic, event)
@@ -243,14 +277,47 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 		return fmt.Errorf("failed to get local subscribers: %w", err)
 	}
 
-	// Deliver to local subscribers
+	// Track delivery results
+	var deliveryResult DeliveryResult
+
+	// Deliver to local subscribers with proper error handling
 	for _, subscriber := range localSubscribers {
+		// Check for context cancellation during delivery loop
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if subscriber.Type() == routingtablepkg.LocalClient {
-			// Try generic event delivery interface first (works for both TrustedClient and HTTPClient)
-			if eventReceiver, ok := subscriber.(interface{ DeliverEvent(*eventlogpkg.Event) }); ok {
-				eventReceiver.DeliverEvent(persistedEvent)
+			// Check if subscriber has error-returning DeliverEvent method
+			type eventDeliverer interface {
+				DeliverEvent(*eventlogpkg.Event) error
 			}
-			// Note: In production, we'd handle delivery failures, queuing, etc.
+
+			if ed, ok := subscriber.(eventDeliverer); ok {
+				err := ed.DeliverEvent(persistedEvent)
+				if err != nil {
+					deliveryResult.LocalFailures++
+					deliveryResult.Errors = append(deliveryResult.Errors, err)
+
+					slog.Warn("failed to deliver event to local subscriber",
+						"client_id", subscriber.ID(),
+						"topic", persistedEvent.Topic,
+						"error", err)
+				} else {
+					deliveryResult.LocalSuccesses++
+				}
+			} else {
+				// Fallback: subscriber doesn't implement error-returning interface
+				deliveryResult.LocalFailures++
+				err := fmt.Errorf("subscriber %s does not implement error-returning DeliverEvent interface", subscriber.ID())
+				deliveryResult.Errors = append(deliveryResult.Errors, err)
+
+				slog.Warn("subscriber missing error-returning DeliverEvent interface",
+					"client_id", subscriber.ID(),
+					"topic", persistedEvent.Topic)
+			}
 		}
 	}
 
@@ -258,23 +325,58 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 	// Only send to peers that have subscribers for this topic
 	connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
 	if err != nil {
-		// Log error but don't fail the publish (local delivery succeeded)
-		// In production, we'd use structured logging
-		_ = err // Failed to get peers, but local delivery succeeded
+		// Log peer connectivity issue but don't fail the publish (local delivery succeeded)
+		slog.Warn("failed to get connected peers for forwarding",
+			"topic", persistedEvent.Topic,
+			"error", err)
+		deliveryResult.Errors = append(deliveryResult.Errors, fmt.Errorf("failed to get peers: %w", err))
 	} else {
 		// Use intelligent routing: only send to peers with interested subscribers
 		interestedPeers := n.getInterestedPeers(event.Topic, connectedPeers)
 		for _, peer := range interestedPeers {
+			// Check for context cancellation during peer forwarding loop
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
 			err := n.peerLink.SendEvent(ctx, peer.ID(), persistedEvent)
 			if err != nil {
-				// Log error but continue with other peers
-				// In production, we'd use structured logging and retry logic
-				_ = err // Failed to send to this peer, continue with others
+				deliveryResult.PeerFailures++
+				deliveryResult.Errors = append(deliveryResult.Errors, err)
+
+				slog.Warn("failed to forward event to peer",
+					"peer_id", peer.ID(),
+					"topic", persistedEvent.Topic,
+					"error", err)
+			} else {
+				deliveryResult.PeerSuccesses++
 			}
 		}
 	}
 
-	// Success: Event was persisted locally and forwarded to peers
+	// Return based on delivery results
+	if deliveryResult.HasFailures() {
+		// Log summary of delivery issues
+		slog.Warn("event publish completed with delivery failures",
+			"topic", persistedEvent.Topic,
+			"local_successes", deliveryResult.LocalSuccesses,
+			"local_failures", deliveryResult.LocalFailures,
+			"peer_successes", deliveryResult.PeerSuccesses,
+			"peer_failures", deliveryResult.PeerFailures,
+			"total_errors", len(deliveryResult.Errors))
+
+		// Return error with detailed information
+		return fmt.Errorf("%s", deliveryResult.Error())
+	}
+
+	// Success: Event was persisted locally and delivered to all subscribers
+	slog.Debug("event publish completed successfully",
+		"topic", persistedEvent.Topic,
+		"local_deliveries", deliveryResult.LocalSuccesses,
+		"peer_deliveries", deliveryResult.PeerSuccesses)
+
 	return nil
 }
 
@@ -711,9 +813,32 @@ func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event *eventlog
 
 	for _, subscriber := range localSubscribers {
 		if subscriber.Type() == routingtablepkg.LocalClient {
-			// Try generic event delivery interface (works for both TrustedClient and HTTPClient)
-			if eventReceiver, ok := subscriber.(interface{ DeliverEvent(*eventlogpkg.Event) }); ok {
-				eventReceiver.DeliverEvent(persistedEvent)
+			// Check if subscriber has error-returning DeliverEvent method
+			type eventDeliverer interface {
+				DeliverEvent(*eventlogpkg.Event) error
+			}
+
+			if ed, ok := subscriber.(eventDeliverer); ok {
+				err := ed.DeliverEvent(persistedEvent)
+				if err != nil {
+					slog.Warn("failed to deliver incoming peer event to local subscriber",
+						"client_id", subscriber.ID(),
+						"topic", persistedEvent.Topic,
+						"error", err)
+				}
+			} else {
+				// Fallback: use non-error returning method if available
+				type legacyEventDeliverer interface {
+					DeliverEvent(*eventlogpkg.Event)
+				}
+				if led, ok := subscriber.(legacyEventDeliverer); ok {
+					led.DeliverEvent(persistedEvent)
+				} else {
+					slog.Warn("subscriber has no DeliverEvent method",
+						"client_id", subscriber.ID(),
+						"topic", persistedEvent.Topic,
+						"subscriber_type", fmt.Sprintf("%T", subscriber))
+				}
 			}
 		}
 	}

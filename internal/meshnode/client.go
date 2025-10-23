@@ -1,12 +1,14 @@
 package meshnode
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/meshnode"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
+
 
 // TrustedClient is a simple client implementation for MVP.
 // Since REQ-MNODE-001 (authentication) is descoped from MVP,
@@ -53,17 +55,23 @@ func (c *TrustedClient) Type() routingtable.SubscriberType {
 }
 
 // DeliverEvent delivers an event to this client (for local subscriber delivery)
-// FOR MVP: Uses a simple buffer approach for testing
-func (c *TrustedClient) DeliverEvent(event *eventlog.Event) {
+// Returns an error if delivery fails (e.g., channel full, client disconnected)
+func (c *TrustedClient) DeliverEvent(event *eventlog.Event) error {
+	if event == nil {
+		return fmt.Errorf("cannot deliver nil event to client %s", c.id)
+	}
+
 	// For testing, add to buffer (synchronous)
 	c.eventBuffer = append(c.eventBuffer, event)
 
-	// Also try to send to channel (asynchronous, non-blocking)
+	// Try to send to channel (asynchronous, non-blocking)
 	select {
 	case c.eventChan <- event:
 		// Event delivered successfully
+		return nil
 	default:
-		// Channel is full, skip (in production, we'd handle this better)
+		// Channel is full - this is now an error
+		return fmt.Errorf("failed to deliver event to client %s: channel full", c.id)
 	}
 }
 
@@ -77,6 +85,6 @@ func (c *TrustedClient) GetEventChannel() <-chan *eventlog.Event {
 	return c.eventChan
 }
 
-// Verify that TrustedClient implements both Client and Subscriber interfaces at compile time
+// Verify that TrustedClient implements required interfaces at compile time
 var _ meshnode.Client = (*TrustedClient)(nil)
 var _ routingtable.Subscriber = (*TrustedClient)(nil)
