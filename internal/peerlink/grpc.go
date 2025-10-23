@@ -51,15 +51,21 @@ func (r *receivedEventRecord) Headers() map[string]string { return r.headers }
 func (r *receivedEventRecord) Offset() int64              { return r.offset }
 func (r *receivedEventRecord) Timestamp() time.Time       { return r.timestamp }
 
-// inboundPeerNode represents a peer that connected to us (inbound connection)
-type inboundPeerNode struct {
+// inboundPeer represents a peer that connected to us (inbound connection)
+type inboundPeer struct {
 	id      string
 	address string
 }
 
-func (p *inboundPeerNode) ID() string      { return p.id }
-func (p *inboundPeerNode) Address() string { return p.address }
-func (p *inboundPeerNode) IsHealthy() bool { return true } // Assume healthy if connected
+func (p *inboundPeer) ID() string      { return p.id }
+func (p *inboundPeer) Address() string { return p.address }
+func (p *inboundPeer) IsHealthy() bool { return true } // Assume healthy if connected
+
+// connectionInfo represents the connection state for a peer
+type connectionInfo struct {
+	node   peerlink.PeerNode
+	stream grpc.BidiStreamingServer[peerlinkv1.PeerMessage, peerlinkv1.PeerMessage] // nil for outbound, non-nil for inbound
+}
 
 // GRPCPeerLink implements the PeerLink interface using gRPC for peer-to-peer communication
 type GRPCPeerLink struct {
@@ -70,7 +76,7 @@ type GRPCPeerLink struct {
 	grpcServer     *grpc.Server
 	listener       net.Listener
 	started        bool
-	connectedPeers map[string]peerlink.PeerNode       // peerID -> PeerNode
+	connections    map[string]*connectionInfo         // peerID -> connection info
 	sendQueues     map[string]chan queuedMessage      // peerID -> send queue
 	metrics        map[string]*peerMetrics            // peerID -> metrics
 	subscribers    map[chan eventlog.EventRecord]bool // active ReceiveEvents channels
@@ -92,7 +98,7 @@ func NewGRPCPeerLink(config *Config) (*GRPCPeerLink, error) {
 		config:         &configCopy,
 		closed:         false,
 		started:        false,
-		connectedPeers: make(map[string]peerlink.PeerNode),
+		connections:    make(map[string]*connectionInfo),
 		sendQueues:     make(map[string]chan queuedMessage),
 		metrics:        make(map[string]*peerMetrics),
 		subscribers:    make(map[chan eventlog.EventRecord]bool),
@@ -207,13 +213,18 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 	g.mu.Lock()
 	g.registerPeer(peerID)
 
-	// Add to connected peers map (inbound connection)
-	// Create a simple peer node representation for the connected peer
-	inboundPeer := &inboundPeerNode{
+	// Create a simple peer node representation for inbound connections
+	// We don't know the actual address, so use a placeholder
+	peerNode := &inboundPeer{
 		id:      peerID,
-		address: "inbound-connection", // We don't have the actual address for inbound connections
+		address: "inbound-connection",
 	}
-	g.connectedPeers[peerID] = inboundPeer
+
+	// Store connection info
+	g.connections[peerID] = &connectionInfo{
+		node:   peerNode,
+		stream: stream,
+	}
 
 	sendQueue := g.sendQueues[peerID]
 	slog.Debug("EventStream registered peer for bidirectional communication",
@@ -332,22 +343,12 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 
 	peerID := peer.ID()
 
-	// Check if already connected
-	if _, exists := g.outboundConns[peerID]; exists {
-		slog.Debug("peer connection already exists",
+	// Check if already connected (from either direction)
+	if _, exists := g.connections[peerID]; exists {
+		slog.Debug("peer already connected",
 			"peer_id", peerID,
 			"peer_address", peer.Address())
 		return nil // Already connected
-	}
-
-	// Connection deduplication: only allow connection if our node ID is lexicographically smaller
-	// This ensures exactly one bidirectional connection between any two nodes
-	if g.config.NodeID >= peerID {
-		slog.Debug("skipping connection due to node ID ordering",
-			"local_node_id", g.config.NodeID,
-			"peer_id", peerID,
-			"reason", "local_node_id >= peer_id")
-		return nil // Let the other node initiate the connection
 	}
 
 	slog.Info("connecting to peer",
@@ -355,8 +356,11 @@ func (g *GRPCPeerLink) Connect(ctx context.Context, peer peerlink.PeerNode) erro
 		"peer_address", peer.Address(),
 		"local_node_id", g.config.NodeID)
 
-	// Add to connected peers map
-	g.connectedPeers[peerID] = peer
+	// Store connection info (outbound connection - no stream yet)
+	g.connections[peerID] = &connectionInfo{
+		node:   peer,
+		stream: nil, // Will be set during stream establishment
+	}
 
 	// Register peer (create queue and metrics)
 	g.registerPeer(peerID)
@@ -416,6 +420,14 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 			// Continue with connection attempt
 		}
 
+		// Check if PeerLink is closed before attempting connection
+		g.mu.RLock()
+		closed := g.closed
+		g.mu.RUnlock()
+		if closed {
+			return
+		}
+
 		// Attempt to establish stream connection
 		success := g.attemptStreamConnection(ctx, peerID, conn)
 		if success {
@@ -454,9 +466,9 @@ func (g *GRPCPeerLink) runOutboundConnection(ctx context.Context, peerID string,
 	}
 }
 
-// attemptStreamConnection attempts to establish and maintain a single stream connection
-// Returns true if the connection should be retried, false if it should terminate
-func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID string, conn *grpc.ClientConn) bool {
+// establishStreamWithHandshake establishes a gRPC stream and performs the PeerLink handshake protocol
+// Returns the established stream on success, or an error on failure
+func (g *GRPCPeerLink) establishStreamWithHandshake(ctx context.Context, peerID string, conn *grpc.ClientConn) (grpc.BidiStreamingClient[peerlinkv1.PeerMessage, peerlinkv1.PeerMessage], error) {
 	// Create gRPC client
 	client := peerlinkv1.NewPeerLinkClient(conn)
 
@@ -467,13 +479,8 @@ func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID strin
 			"peer_id", peerID,
 			"local_node_id", g.config.NodeID,
 			"error", err)
-		return true // Retry
+		return nil, err
 	}
-	defer func() {
-		if err := stream.CloseSend(); err != nil {
-			slog.Debug("failed to close send stream", "error", err)
-		}
-	}()
 
 	// Send handshake
 	handshake := &peerlinkv1.PeerMessage{
@@ -490,7 +497,8 @@ func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID strin
 			"peer_id", peerID,
 			"local_node_id", g.config.NodeID,
 			"error", err)
-		return true // Retry
+		stream.CloseSend()
+		return nil, err
 	}
 
 	// Receive handshake response
@@ -500,7 +508,8 @@ func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID strin
 			"peer_id", peerID,
 			"local_node_id", g.config.NodeID,
 			"error", err)
-		return true // Retry
+		stream.CloseSend()
+		return nil, err
 	}
 
 	slog.Debug("peer handshake completed",
@@ -510,12 +519,12 @@ func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID strin
 	// Mark peer as healthy after successful handshake
 	g.SetPeerHealth(peerID, peerlink.PeerHealthy)
 
-	// Get the send queue for this peer
-	g.mu.RLock()
-	sendQueue := g.sendQueues[peerID]
-	g.mu.RUnlock()
+	return stream, nil
+}
 
-	// Start goroutine for receiving messages from peer (bidirectional communication)
+// startReceiveGoroutine starts a goroutine to receive messages from the peer stream
+// Returns a channel that will receive an error when the goroutine finishes
+func (g *GRPCPeerLink) startReceiveGoroutine(ctx context.Context, peerID string, stream grpc.BidiStreamingClient[peerlinkv1.PeerMessage, peerlinkv1.PeerMessage]) <-chan error {
 	recvDone := make(chan error, 1)
 	go func() {
 		for {
@@ -541,12 +550,87 @@ func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID strin
 				}
 				g.mu.Unlock()
 			} else {
-				slog.Debug("runOutboundConnection received non-event message",
+				slog.Debug("startReceiveGoroutine received non-event message",
 					"peer_id", peerID,
 					"local_node_id", g.config.NodeID)
 			}
 		}
 	}()
+	return recvDone
+}
+
+// processOutboundMessage converts and sends a queued message over the stream
+// Returns nil on success, error on failure
+func (g *GRPCPeerLink) processOutboundMessage(peerID string, msg queuedMessage, stream grpc.BidiStreamingClient[peerlinkv1.PeerMessage, peerlinkv1.PeerMessage]) error {
+	if stream == nil {
+		return errors.New("stream is nil")
+	}
+
+	// Convert EventRecord to protobuf Event message
+	event := &peerlinkv1.Event{
+		Topic:   msg.event.Topic(),
+		Payload: msg.event.Payload(),
+		Headers: msg.event.Headers(),
+		Offset:  msg.event.Offset(),
+	}
+
+	// Wrap in PeerMessage
+	peerMsg := &peerlinkv1.PeerMessage{
+		Kind: &peerlinkv1.PeerMessage_Event{
+			Event: event,
+		},
+	}
+
+	// Send over gRPC stream
+	if err := stream.Send(peerMsg); err != nil {
+		slog.Error("failed to send event to peer",
+			"peer_id", peerID,
+			"local_node_id", g.config.NodeID,
+			"topic", msg.event.Topic(),
+			"event_offset", msg.event.Offset(),
+			"error", err)
+		return err
+	}
+
+	return nil
+}
+
+// handleSendFailure handles message send failures by attempting to requeue or dropping the message
+func (g *GRPCPeerLink) handleSendFailure(peerID string, msg queuedMessage, sendQueue chan queuedMessage, err error) {
+	// Put the message back in the queue if possible (bounded queue, might drop)
+	select {
+	case sendQueue <- msg:
+		slog.Debug("requeued failed message",
+			"peer_id", peerID,
+			"topic", msg.event.Topic())
+	default:
+		// Queue full, message will be dropped
+		g.mu.Lock()
+		if metrics, exists := g.metrics[peerID]; exists {
+			metrics.dropsCount++
+		}
+		g.mu.Unlock()
+		slog.Warn("dropped message due to full queue on retry",
+			"peer_id", peerID,
+			"topic", msg.event.Topic())
+	}
+
+	// Mark peer unhealthy on send failure
+	g.SetPeerHealth(peerID, peerlink.PeerUnhealthy)
+}
+
+// getSendQueue safely retrieves the send queue for a peer
+func (g *GRPCPeerLink) getSendQueue(peerID string) chan queuedMessage {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.sendQueues[peerID]
+}
+
+// runBidirectionalStreamLoop runs the main event processing loop for a bidirectional stream
+// Returns true if the connection should be retried, false if it should terminate
+func (g *GRPCPeerLink) runBidirectionalStreamLoop(ctx context.Context, peerID string, stream grpc.BidiStreamingClient[peerlinkv1.PeerMessage, peerlinkv1.PeerMessage], sendQueue chan queuedMessage) bool {
+	// Start receive goroutine for bidirectional communication
+	recvDone := g.startReceiveGoroutine(ctx, peerID, stream)
 
 	// Main loop: consume from queue and stream events
 	for {
@@ -557,7 +641,7 @@ func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID strin
 
 		case err := <-recvDone:
 			// Receive goroutine finished (error or stream closed)
-			slog.Warn("runOutboundConnection receive goroutine finished",
+			slog.Warn("runBidirectionalStreamLoop receive goroutine finished",
 				"peer_id", peerID,
 				"local_node_id", g.config.NodeID,
 				"error", err)
@@ -569,55 +653,35 @@ func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID strin
 				return false // Don't retry
 			}
 
-			// Convert EventRecord to protobuf Event message
-			event := &peerlinkv1.Event{
-				Topic:   queuedMsg.event.Topic(),
-				Payload: queuedMsg.event.Payload(),
-				Headers: queuedMsg.event.Headers(),
-				Offset:  queuedMsg.event.Offset(),
-			}
-
-			// Wrap in PeerMessage
-			peerMsg := &peerlinkv1.PeerMessage{
-				Kind: &peerlinkv1.PeerMessage_Event{
-					Event: event,
-				},
-			}
-
-			// Send over gRPC stream
-			if err := stream.Send(peerMsg); err != nil {
-				// Log the stream error for debugging
-				slog.Error("failed to send event to peer",
-					"peer_id", peerID,
-					"local_node_id", g.config.NodeID,
-					"topic", queuedMsg.event.Topic(),
-					"event_offset", queuedMsg.event.Offset(),
-					"error", err)
-
-				// Put the message back in the queue if possible (bounded queue, might drop)
-				select {
-				case sendQueue <- queuedMsg:
-					slog.Debug("requeued failed message",
-						"peer_id", peerID,
-						"topic", queuedMsg.event.Topic())
-				default:
-					// Queue full, message will be dropped
-					g.mu.Lock()
-					if metrics, exists := g.metrics[peerID]; exists {
-						metrics.dropsCount++
-					}
-					g.mu.Unlock()
-					slog.Warn("dropped message due to full queue on retry",
-						"peer_id", peerID,
-						"topic", queuedMsg.event.Topic())
-				}
-
-				// Stream is broken, mark peer unhealthy and retry connection
-				g.SetPeerHealth(peerID, peerlink.PeerUnhealthy)
+			// Process outbound message
+			if err := g.processOutboundMessage(peerID, queuedMsg, stream); err != nil {
+				// Handle send failure
+				g.handleSendFailure(peerID, queuedMsg, sendQueue, err)
 				return true // Retry
 			}
 		}
 	}
+}
+
+// attemptStreamConnection attempts to establish and maintain a single stream connection
+// Returns true if the connection should be retried, false if it should terminate
+func (g *GRPCPeerLink) attemptStreamConnection(ctx context.Context, peerID string, conn *grpc.ClientConn) bool {
+	// Establish stream and perform handshake
+	stream, err := g.establishStreamWithHandshake(ctx, peerID, conn)
+	if err != nil {
+		return true // Retry on establishment/handshake failure
+	}
+	defer func() {
+		if err := stream.CloseSend(); err != nil {
+			slog.Debug("failed to close send stream", "error", err)
+		}
+	}()
+
+	// Get the send queue for this peer
+	sendQueue := g.getSendQueue(peerID)
+
+	// Run the bidirectional stream loop
+	return g.runBidirectionalStreamLoop(ctx, peerID, stream, sendQueue)
 }
 
 // Disconnect closes the connection to the specified peer node
@@ -629,8 +693,8 @@ func (g *GRPCPeerLink) Disconnect(ctx context.Context, peerID string) error {
 		return errors.New("PeerLink is closed")
 	}
 
-	// Remove from connected peers map
-	delete(g.connectedPeers, peerID)
+	// Remove from connections map
+	delete(g.connections, peerID)
 
 	// Cancel outbound connection goroutine
 	if cancel, exists := g.outboundCancel[peerID]; exists {
@@ -744,9 +808,9 @@ func (g *GRPCPeerLink) GetConnectedPeers(ctx context.Context) ([]peerlink.PeerNo
 	}
 
 	// Convert map to slice
-	peers := make([]peerlink.PeerNode, 0, len(g.connectedPeers))
-	for _, peer := range g.connectedPeers {
-		peers = append(peers, peer)
+	peers := make([]peerlink.PeerNode, 0, len(g.connections))
+	for _, conn := range g.connections {
+		peers = append(peers, conn.node)
 	}
 
 	return peers, nil
