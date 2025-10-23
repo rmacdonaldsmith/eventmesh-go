@@ -2,6 +2,7 @@ package meshnode
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -44,6 +45,10 @@ type GRPCMeshNode struct {
 	// Subscription management
 	subscriptions   map[string]map[string]*meshnode.ClientSubscription // clientID -> subscriptionID -> subscription
 	subscriptionsMu sync.RWMutex                                       // Protect subscriptions map
+
+	// Peer subscription tracking for intelligent routing
+	peerSubscriptions   map[string]map[string]bool // peerNodeID -> topic -> hasSubscriber
+	peerSubscriptionsMu sync.RWMutex               // Protect peer subscriptions map
 }
 
 // NewGRPCMeshNode creates a new gRPC-based mesh node with the given configuration.
@@ -85,14 +90,15 @@ func NewGRPCMeshNode(config *Config) (*GRPCMeshNode, error) {
 	}
 
 	node := &GRPCMeshNode{
-		config:        config,
-		eventLog:      eventLog,
-		routingTable:  routingTable,
-		peerLink:      peerLink,
-		clients:       make(map[string]meshnode.Client),
-		subscriptions: make(map[string]map[string]*meshnode.ClientSubscription),
-		started:       false,
-		closed:        false,
+		config:            config,
+		eventLog:          eventLog,
+		routingTable:      routingTable,
+		peerLink:          peerLink,
+		clients:           make(map[string]meshnode.Client),
+		subscriptions:     make(map[string]map[string]*meshnode.ClientSubscription),
+		peerSubscriptions: make(map[string]map[string]bool),
+		started:           false,
+		closed:            false,
 	}
 
 	return node, nil
@@ -248,17 +254,17 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 		}
 	}
 
-	// Step 3: Forward to remote peers for distributed routing
-	// For MVP: Forward to all connected peers (simple approach)
-	// In Phase 4.3, we'll implement smarter routing based on peer subscriptions
+	// Step 3: Forward to remote peers using intelligent routing
+	// Only send to peers that have subscribers for this topic
 	connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
 	if err != nil {
 		// Log error but don't fail the publish (local delivery succeeded)
 		// In production, we'd use structured logging
 		_ = err // Failed to get peers, but local delivery succeeded
 	} else {
-		// Forward event to all connected peers
-		for _, peer := range connectedPeers {
+		// Use intelligent routing: only send to peers with interested subscribers
+		interestedPeers := n.getInterestedPeers(event.Topic(), connectedPeers)
+		for _, peer := range interestedPeers {
 			err := n.peerLink.SendEvent(ctx, peer.ID(), persistedEvent)
 			if err != nil {
 				// Log error but continue with other peers
@@ -720,20 +726,59 @@ func (n *GRPCMeshNode) isSubscriptionEvent(topic string) bool {
 // handleSubscriptionEvent processes subscription events from peers
 // This implements REQ-MNODE-003: Handle incoming peer subscription notifications
 func (n *GRPCMeshNode) handleSubscriptionEvent(ctx context.Context, event eventlogpkg.EventRecord) {
-	// For MVP: Just log that we received a subscription event
-	// In a full implementation, we'd:
-	// 1. Parse the JSON payload to extract subscription info
-	// 2. Update our knowledge of peer subscriptions
-	// 3. Use this info for smarter routing decisions
+	// Simple JSON parsing for MVP - in production we'd use proper JSON unmarshaling
+	var subscriptionInfo struct {
+		Action   string `json:"action"`
+		ClientID string `json:"clientID"`
+		Topic    string `json:"topic"`
+		NodeID   string `json:"nodeID"`
+	}
 
-	// Simple implementation: extract basic info for logging
-	payload := string(event.Payload())
-	_ = payload // Subscription event received from peer
+	// Parse JSON - for MVP, we'll use simple parsing
+	if err := json.Unmarshal(event.Payload(), &subscriptionInfo); err != nil {
+		// Log error but continue - don't fail on malformed gossip
+		return
+	}
 
-	// In production, we'd:
-	// - Parse JSON to get action, clientID, topic, nodeID
-	// - Update peer subscription tracking
-	// - Use for intelligent routing instead of broadcasting to all peers
+	// Update peer subscription tracking
+	n.peerSubscriptionsMu.Lock()
+	defer n.peerSubscriptionsMu.Unlock()
+
+	// Initialize peer map if it doesn't exist
+	if n.peerSubscriptions[subscriptionInfo.NodeID] == nil {
+		n.peerSubscriptions[subscriptionInfo.NodeID] = make(map[string]bool)
+	}
+
+	// Update subscription state based on action
+	if subscriptionInfo.Action == "subscribe" {
+		n.peerSubscriptions[subscriptionInfo.NodeID][subscriptionInfo.Topic] = true
+	} else if subscriptionInfo.Action == "unsubscribe" {
+		n.peerSubscriptions[subscriptionInfo.NodeID][subscriptionInfo.Topic] = false
+	}
+
+	// Note: This enables intelligent routing in PublishEvent method
+}
+
+// getInterestedPeers returns only peers that have subscribers for the given topic
+// This enables intelligent routing instead of broadcasting to all peers
+func (n *GRPCMeshNode) getInterestedPeers(topic string, allPeers []peerlinkpkg.PeerNode) []peerlinkpkg.PeerNode {
+	n.peerSubscriptionsMu.RLock()
+	defer n.peerSubscriptionsMu.RUnlock()
+
+	var interestedPeers []peerlinkpkg.PeerNode
+
+	for _, peer := range allPeers {
+		peerID := peer.ID()
+
+		// Check if this peer has subscriptions for the topic
+		if peerTopics, exists := n.peerSubscriptions[peerID]; exists {
+			if hasSubscriber, topicExists := peerTopics[topic]; topicExists && hasSubscriber {
+				interestedPeers = append(interestedPeers, peer)
+			}
+		}
+	}
+
+	return interestedPeers
 }
 
 // Helper methods for subscription metadata management
