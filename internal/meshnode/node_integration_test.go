@@ -3,9 +3,21 @@ package meshnode
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
+
+// simplePeerNode is a test implementation of peerlink.PeerNode
+type simplePeerNode struct {
+	id      string
+	address string
+	healthy bool
+}
+
+func (p *simplePeerNode) ID() string      { return p.id }
+func (p *simplePeerNode) Address() string { return p.address }
+func (p *simplePeerNode) IsHealthy() bool { return p.healthy }
 
 // TestGRPCMeshNode_MultiNodeIntegration tests complete event flow across multiple mesh nodes
 func TestGRPCMeshNode_MultiNodeIntegration(t *testing.T) {
@@ -180,4 +192,93 @@ func TestGRPCMeshNode_MultiNodeIntegration(t *testing.T) {
 	t.Logf("✅ REQ-MNODE-002: Local persistence before forwarding verified")
 	t.Logf("✅ REQ-MNODE-003: Subscription propagation mechanism verified")
 	t.Logf("✅ Complete event flow: Publisher -> Node A -> (mesh) -> Node B -> Subscriber")
+}
+
+// TestPeerLinkToMeshNodeIntegration tests that PeerLink ReceiveEvents properly integrates
+// with MeshNode's handleIncomingPeerEvents to deliver events to local subscribers
+func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
+	// Create two mesh nodes - sender and receiver
+	senderConfig := NewConfig("sender-node", "localhost:9200")
+	sender, err := NewGRPCMeshNode(senderConfig)
+	if err != nil {
+		t.Fatalf("Failed to create sender node: %v", err)
+	}
+	defer sender.Close()
+
+	receiverConfig := NewConfig("receiver-node", "localhost:9201")
+	receiver, err := NewGRPCMeshNode(receiverConfig)
+	if err != nil {
+		t.Fatalf("Failed to create receiver node: %v", err)
+	}
+	defer receiver.Close()
+
+	ctx := context.Background()
+
+	// Start both nodes
+	err = sender.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start sender node: %v", err)
+	}
+
+	err = receiver.Start(ctx)
+	if err != nil {
+		t.Fatalf("Failed to start receiver node: %v", err)
+	}
+
+	// Create a local subscriber on the receiver node
+	subscriber := NewTrustedClient("test-subscriber")
+	topic := "peerlink.integration.test"
+
+	err = receiver.Subscribe(ctx, subscriber, topic)
+	if err != nil {
+		t.Fatalf("Failed to subscribe to topic: %v", err)
+	}
+
+	// Connect sender to receiver via PeerLink
+	senderPeerLink := sender.GetPeerLink()
+	receiverPeer := &simplePeerNode{
+		id:      receiver.config.NodeID,
+		address: receiver.config.ListenAddress,
+		healthy: true,
+	}
+
+	err = senderPeerLink.Connect(ctx, receiverPeer)
+	if err != nil {
+		t.Fatalf("Failed to connect sender to receiver: %v", err)
+	}
+
+	// Give time for connection to establish
+	time.Sleep(100 * time.Millisecond)
+
+	// Create and publish event from sender
+	testPayload := []byte(`{"message": "PeerLink to MeshNode integration test"}`)
+	publishedEvent := eventlog.NewRecord(topic, testPayload)
+
+	publisher := NewTrustedClient("test-publisher")
+	err = sender.PublishEvent(ctx, publisher, publishedEvent)
+	if err != nil {
+		t.Fatalf("Failed to publish event: %v", err)
+	}
+
+	// Give time for event to propagate through PeerLink and be processed by MeshNode
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify the subscriber received the event
+	receivedEvents := subscriber.GetReceivedEvents()
+	if len(receivedEvents) == 0 {
+		t.Fatal("Expected subscriber to receive event via PeerLink -> MeshNode integration, but got no events")
+	}
+
+	// Verify the event content
+	receivedEvent := receivedEvents[len(receivedEvents)-1] // Get last event
+	if receivedEvent.Topic() != topic {
+		t.Errorf("Expected topic %s, got %s", topic, receivedEvent.Topic())
+	}
+
+	if string(receivedEvent.Payload()) != string(testPayload) {
+		t.Errorf("Expected payload %s, got %s", testPayload, receivedEvent.Payload())
+	}
+
+	t.Logf("✅ PeerLink ReceiveEvents → MeshNode.handleIncomingPeerEvents integration verified")
+	t.Logf("✅ Event successfully flowed: Sender → PeerLink → Receiver.MeshNode → Local subscriber")
 }
