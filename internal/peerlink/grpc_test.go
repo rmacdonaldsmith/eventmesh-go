@@ -13,10 +13,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-// TestGRPCPeerLink_InterfaceCompliance verifies that GRPCPeerLink implements the PeerLink interface
+// TestGRPCPeerLink_InterfaceCompliance verifies that GRPCPeerLink implements the focused interfaces
 func TestGRPCPeerLink_InterfaceCompliance(t *testing.T) {
-	// This should compile if GRPCPeerLink properly implements peerlink.PeerLink
-	var _ peerlink.PeerLink = &GRPCPeerLink{}
+	// This should compile if GRPCPeerLink properly implements the focused interfaces
+	var _ peerlink.DataPlanePeerLink = &GRPCPeerLink{}
+	var _ peerlink.ControlPlanePeerLink = &GRPCPeerLink{}
+	var _ peerlink.PeerConnectionManager = &GRPCPeerLink{}
 }
 
 // TestNewGRPCPeerLink tests the constructor
