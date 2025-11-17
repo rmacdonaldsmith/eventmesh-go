@@ -41,33 +41,40 @@ type PeerNode interface {
 	IsHealthy() bool
 }
 
-// PeerLink manages secure streaming connections between mesh nodes.
-// This implements the requirements from design.md for peer-to-peer communication.
-//
-// Requirements implemented:
-// - REQ-PL-001: Secure Connection Lifecycle - mTLS connections with proper lifecycle management
-// - REQ-PL-002: Backpressure and Flow Control - handles streaming backpressure
-// - REQ-PL-003: Heartbeats and Failure Detection - monitors peer health
-type PeerLink interface {
-	io.Closer
+// SubscriptionChange represents a subscription change event for control plane communication
+type SubscriptionChange struct {
+	Action   string // "subscribe" or "unsubscribe"
+	ClientId string // ID of the client making the change
+	Topic    string // Topic pattern being subscribed/unsubscribed
+	NodeId   string // ID of the node where the change occurred
+}
 
-	// Connect establishes a secure connection to the specified peer node.
-	// Uses gRPC with mTLS for secure, efficient bi-directional streaming.
-	Connect(ctx context.Context, peer PeerNode) error
-
-	// Disconnect closes the connection to the specified peer node.
-	Disconnect(ctx context.Context, peerID string) error
-
-	// SendEvent streams an event to the specified peer node.
-	// Handles backpressure and flow control automatically.
+// DataPlanePeerLink handles user event streaming between mesh nodes.
+// Focused interface for data plane communication with independent flow control.
+type DataPlanePeerLink interface {
+	// SendEvent streams a user event to the specified peer node.
+	// Handles backpressure and flow control automatically for data plane.
 	SendEvent(ctx context.Context, peerID string, event *eventlog.Event) error
 
-	// ReceiveEvents returns a channel for receiving events from peer nodes.
-	// Events are received from all connected peers.
+	// ReceiveEvents returns a channel for receiving user events from peer nodes.
+	// Events are received from all connected peers on the data plane.
 	ReceiveEvents(ctx context.Context) (<-chan *eventlog.Event, <-chan error)
+}
 
-	// GetConnectedPeers returns all currently connected peer nodes.
-	GetConnectedPeers(ctx context.Context) ([]PeerNode, error)
+// ControlPlanePeerLink handles subscription gossip and health monitoring between mesh nodes.
+// Focused interface for control plane communication with independent QoS.
+type ControlPlanePeerLink interface {
+	// SendSubscriptionChange sends subscription change notifications to peers.
+	// Used for subscription gossip propagation across the mesh.
+	SendSubscriptionChange(ctx context.Context, peerID string, change *SubscriptionChange) error
+
+	// ReceiveSubscriptionChanges returns a channel for receiving subscription changes.
+	// Subscription changes are received from all connected peers.
+	ReceiveSubscriptionChanges(ctx context.Context) (<-chan *SubscriptionChange, <-chan error)
+
+	// SendHeartbeat sends a heartbeat message to the specified peer.
+	// Implements health monitoring for control plane.
+	SendHeartbeat(ctx context.Context, peerID string) error
 
 	// GetPeerHealth returns health status for a specific peer node.
 	GetPeerHealth(ctx context.Context, peerID string) (PeerHealthState, error)
@@ -79,3 +86,20 @@ type PeerLink interface {
 	// StopHeartbeats stops health monitoring.
 	StopHeartbeats(ctx context.Context) error
 }
+
+// PeerConnectionManager handles peer connection lifecycle and management.
+// Focused interface for connection establishment, cleanup, and peer discovery.
+type PeerConnectionManager interface {
+	io.Closer
+
+	// Connect establishes a secure connection to the specified peer node.
+	// Uses gRPC with mTLS for secure, efficient bi-directional streaming.
+	Connect(ctx context.Context, peer PeerNode) error
+
+	// Disconnect closes the connection to the specified peer node.
+	Disconnect(ctx context.Context, peerID string) error
+
+	// GetConnectedPeers returns all currently connected peer nodes.
+	GetConnectedPeers(ctx context.Context) ([]PeerNode, error)
+}
+
