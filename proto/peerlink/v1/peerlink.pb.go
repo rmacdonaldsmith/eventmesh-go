@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.9
 // 	protoc        v6.32.1
-// source: proto/peerlink/v1/peerlink.proto
+// source: peerlink/v1/peerlink.proto
 
 package peerlinkv1
 
@@ -22,6 +22,7 @@ const (
 )
 
 // Wrapper message for all frame types.
+// Separates data plane (user events) from control plane (subscription gossip) communication.
 type PeerMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Kind:
@@ -30,6 +31,7 @@ type PeerMessage struct {
 	//	*PeerMessage_Event
 	//	*PeerMessage_Ack
 	//	*PeerMessage_Heartbeat
+	//	*PeerMessage_ControlPlane
 	Kind          isPeerMessage_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -37,7 +39,7 @@ type PeerMessage struct {
 
 func (x *PeerMessage) Reset() {
 	*x = PeerMessage{}
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[0]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -49,7 +51,7 @@ func (x *PeerMessage) String() string {
 func (*PeerMessage) ProtoMessage() {}
 
 func (x *PeerMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[0]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -62,7 +64,7 @@ func (x *PeerMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerMessage.ProtoReflect.Descriptor instead.
 func (*PeerMessage) Descriptor() ([]byte, []int) {
-	return file_proto_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{0}
+	return file_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *PeerMessage) GetKind() isPeerMessage_Kind {
@@ -108,6 +110,15 @@ func (x *PeerMessage) GetHeartbeat() *Heartbeat {
 	return nil
 }
 
+func (x *PeerMessage) GetControlPlane() *ControlPlaneMessage {
+	if x != nil {
+		if x, ok := x.Kind.(*PeerMessage_ControlPlane); ok {
+			return x.ControlPlane
+		}
+	}
+	return nil
+}
+
 type isPeerMessage_Kind interface {
 	isPeerMessage_Kind()
 }
@@ -117,7 +128,7 @@ type PeerMessage_Handshake struct {
 }
 
 type PeerMessage_Event struct {
-	Event *Event `protobuf:"bytes,2,opt,name=event,proto3,oneof"`
+	Event *Event `protobuf:"bytes,2,opt,name=event,proto3,oneof"` // Data plane: user events
 }
 
 type PeerMessage_Ack struct {
@@ -128,6 +139,10 @@ type PeerMessage_Heartbeat struct {
 	Heartbeat *Heartbeat `protobuf:"bytes,4,opt,name=heartbeat,proto3,oneof"`
 }
 
+type PeerMessage_ControlPlane struct {
+	ControlPlane *ControlPlaneMessage `protobuf:"bytes,5,opt,name=control_plane,json=controlPlane,proto3,oneof"` // Control plane: subscription gossip
+}
+
 func (*PeerMessage_Handshake) isPeerMessage_Kind() {}
 
 func (*PeerMessage_Event) isPeerMessage_Kind() {}
@@ -135,6 +150,8 @@ func (*PeerMessage_Event) isPeerMessage_Kind() {}
 func (*PeerMessage_Ack) isPeerMessage_Kind() {}
 
 func (*PeerMessage_Heartbeat) isPeerMessage_Kind() {}
+
+func (*PeerMessage_ControlPlane) isPeerMessage_Kind() {}
 
 // Sent once at stream startup.
 type Handshake struct {
@@ -148,7 +165,7 @@ type Handshake struct {
 
 func (x *Handshake) Reset() {
 	*x = Handshake{}
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[1]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -160,7 +177,7 @@ func (x *Handshake) String() string {
 func (*Handshake) ProtoMessage() {}
 
 func (x *Handshake) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[1]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -173,7 +190,7 @@ func (x *Handshake) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Handshake.ProtoReflect.Descriptor instead.
 func (*Handshake) Descriptor() ([]byte, []int) {
-	return file_proto_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{1}
+	return file_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Handshake) GetNodeId() string {
@@ -211,7 +228,7 @@ type Event struct {
 
 func (x *Event) Reset() {
 	*x = Event{}
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[2]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -223,7 +240,7 @@ func (x *Event) String() string {
 func (*Event) ProtoMessage() {}
 
 func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[2]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -236,7 +253,7 @@ func (x *Event) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Event.ProtoReflect.Descriptor instead.
 func (*Event) Descriptor() ([]byte, []int) {
-	return file_proto_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{2}
+	return file_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Event) GetTopic() string {
@@ -279,7 +296,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[3]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -291,7 +308,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[3]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -304,7 +321,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_proto_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{3}
+	return file_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Ack) GetTopic() string {
@@ -332,7 +349,7 @@ type Heartbeat struct {
 
 func (x *Heartbeat) Reset() {
 	*x = Heartbeat{}
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[4]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +361,7 @@ func (x *Heartbeat) String() string {
 func (*Heartbeat) ProtoMessage() {}
 
 func (x *Heartbeat) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_peerlink_v1_peerlink_proto_msgTypes[4]
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +374,7 @@ func (x *Heartbeat) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Heartbeat.ProtoReflect.Descriptor instead.
 func (*Heartbeat) Descriptor() ([]byte, []int) {
-	return file_proto_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{4}
+	return file_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Heartbeat) GetTimestamp() int64 {
@@ -367,16 +384,155 @@ func (x *Heartbeat) GetTimestamp() int64 {
 	return 0
 }
 
-var File_proto_peerlink_v1_peerlink_proto protoreflect.FileDescriptor
+// Control plane message wrapper for subscription gossip and other mesh coordination.
+// Separates control plane communication from user event data plane.
+type ControlPlaneMessage struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Kind:
+	//
+	//	*ControlPlaneMessage_SubscriptionChange
+	Kind          isControlPlaneMessage_Kind `protobuf_oneof:"kind"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
 
-const file_proto_peerlink_v1_peerlink_proto_rawDesc = "" +
+func (x *ControlPlaneMessage) Reset() {
+	*x = ControlPlaneMessage{}
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ControlPlaneMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ControlPlaneMessage) ProtoMessage() {}
+
+func (x *ControlPlaneMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ControlPlaneMessage.ProtoReflect.Descriptor instead.
+func (*ControlPlaneMessage) Descriptor() ([]byte, []int) {
+	return file_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ControlPlaneMessage) GetKind() isControlPlaneMessage_Kind {
+	if x != nil {
+		return x.Kind
+	}
+	return nil
+}
+
+func (x *ControlPlaneMessage) GetSubscriptionChange() *SubscriptionChange {
+	if x != nil {
+		if x, ok := x.Kind.(*ControlPlaneMessage_SubscriptionChange); ok {
+			return x.SubscriptionChange
+		}
+	}
+	return nil
+}
+
+type isControlPlaneMessage_Kind interface {
+	isControlPlaneMessage_Kind()
+}
+
+type ControlPlaneMessage_SubscriptionChange struct {
+	SubscriptionChange *SubscriptionChange `protobuf:"bytes,1,opt,name=subscription_change,json=subscriptionChange,proto3,oneof"` // Subscription gossip between nodes
+}
+
+func (*ControlPlaneMessage_SubscriptionChange) isControlPlaneMessage_Kind() {}
+
+// Subscription change notification for peer-to-peer gossip.
+// Replaces the previous approach of using special Event topics like "__mesh.subscription.subscribe".
+type SubscriptionChange struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Action        string                 `protobuf:"bytes,1,opt,name=action,proto3" json:"action,omitempty"`                     // "subscribe" or "unsubscribe"
+	ClientId      string                 `protobuf:"bytes,2,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"` // ID of the client making the change
+	Topic         string                 `protobuf:"bytes,3,opt,name=topic,proto3" json:"topic,omitempty"`                       // Topic pattern being subscribed/unsubscribed
+	NodeId        string                 `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`       // ID of the node where the change occurred
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscriptionChange) Reset() {
+	*x = SubscriptionChange{}
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscriptionChange) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscriptionChange) ProtoMessage() {}
+
+func (x *SubscriptionChange) ProtoReflect() protoreflect.Message {
+	mi := &file_peerlink_v1_peerlink_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscriptionChange.ProtoReflect.Descriptor instead.
+func (*SubscriptionChange) Descriptor() ([]byte, []int) {
+	return file_peerlink_v1_peerlink_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SubscriptionChange) GetAction() string {
+	if x != nil {
+		return x.Action
+	}
+	return ""
+}
+
+func (x *SubscriptionChange) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *SubscriptionChange) GetTopic() string {
+	if x != nil {
+		return x.Topic
+	}
+	return ""
+}
+
+func (x *SubscriptionChange) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
+}
+
+var File_peerlink_v1_peerlink_proto protoreflect.FileDescriptor
+
+const file_peerlink_v1_peerlink_proto_rawDesc = "" +
 	"\n" +
-	" proto/peerlink/v1/peerlink.proto\x12\vpeerlink.v1\"\xd7\x01\n" +
+	"\x1apeerlink/v1/peerlink.proto\x12\vpeerlink.v1\"\xa0\x02\n" +
 	"\vPeerMessage\x126\n" +
 	"\thandshake\x18\x01 \x01(\v2\x16.peerlink.v1.HandshakeH\x00R\thandshake\x12*\n" +
 	"\x05event\x18\x02 \x01(\v2\x12.peerlink.v1.EventH\x00R\x05event\x12$\n" +
 	"\x03ack\x18\x03 \x01(\v2\x10.peerlink.v1.AckH\x00R\x03ack\x126\n" +
-	"\theartbeat\x18\x04 \x01(\v2\x16.peerlink.v1.HeartbeatH\x00R\theartbeatB\x06\n" +
+	"\theartbeat\x18\x04 \x01(\v2\x16.peerlink.v1.HeartbeatH\x00R\theartbeat\x12G\n" +
+	"\rcontrol_plane\x18\x05 \x01(\v2 .peerlink.v1.ControlPlaneMessageH\x00R\fcontrolPlaneB\x06\n" +
 	"\x04kind\"k\n" +
 	"\tHandshake\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12)\n" +
@@ -394,72 +550,88 @@ const file_proto_peerlink_v1_peerlink_proto_rawDesc = "" +
 	"\x05topic\x18\x01 \x01(\tR\x05topic\x12\x16\n" +
 	"\x06offset\x18\x02 \x01(\x03R\x06offset\")\n" +
 	"\tHeartbeat\x12\x1c\n" +
-	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp2Q\n" +
+	"\ttimestamp\x18\x01 \x01(\x03R\ttimestamp\"q\n" +
+	"\x13ControlPlaneMessage\x12R\n" +
+	"\x13subscription_change\x18\x01 \x01(\v2\x1f.peerlink.v1.SubscriptionChangeH\x00R\x12subscriptionChangeB\x06\n" +
+	"\x04kind\"x\n" +
+	"\x12SubscriptionChange\x12\x16\n" +
+	"\x06action\x18\x01 \x01(\tR\x06action\x12\x1b\n" +
+	"\tclient_id\x18\x02 \x01(\tR\bclientId\x12\x14\n" +
+	"\x05topic\x18\x03 \x01(\tR\x05topic\x12\x17\n" +
+	"\anode_id\x18\x04 \x01(\tR\x06nodeId2Q\n" +
 	"\bPeerLink\x12E\n" +
 	"\vEventStream\x12\x18.peerlink.v1.PeerMessage\x1a\x18.peerlink.v1.PeerMessage(\x010\x01BFZDgithub.com/rmacdonaldsmith/eventmesh-go/proto/peerlink/v1;peerlinkv1b\x06proto3"
 
 var (
-	file_proto_peerlink_v1_peerlink_proto_rawDescOnce sync.Once
-	file_proto_peerlink_v1_peerlink_proto_rawDescData []byte
+	file_peerlink_v1_peerlink_proto_rawDescOnce sync.Once
+	file_peerlink_v1_peerlink_proto_rawDescData []byte
 )
 
-func file_proto_peerlink_v1_peerlink_proto_rawDescGZIP() []byte {
-	file_proto_peerlink_v1_peerlink_proto_rawDescOnce.Do(func() {
-		file_proto_peerlink_v1_peerlink_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_peerlink_v1_peerlink_proto_rawDesc), len(file_proto_peerlink_v1_peerlink_proto_rawDesc)))
+func file_peerlink_v1_peerlink_proto_rawDescGZIP() []byte {
+	file_peerlink_v1_peerlink_proto_rawDescOnce.Do(func() {
+		file_peerlink_v1_peerlink_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_peerlink_v1_peerlink_proto_rawDesc), len(file_peerlink_v1_peerlink_proto_rawDesc)))
 	})
-	return file_proto_peerlink_v1_peerlink_proto_rawDescData
+	return file_peerlink_v1_peerlink_proto_rawDescData
 }
 
-var file_proto_peerlink_v1_peerlink_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_proto_peerlink_v1_peerlink_proto_goTypes = []any{
-	(*PeerMessage)(nil), // 0: peerlink.v1.PeerMessage
-	(*Handshake)(nil),   // 1: peerlink.v1.Handshake
-	(*Event)(nil),       // 2: peerlink.v1.Event
-	(*Ack)(nil),         // 3: peerlink.v1.Ack
-	(*Heartbeat)(nil),   // 4: peerlink.v1.Heartbeat
-	nil,                 // 5: peerlink.v1.Event.HeadersEntry
+var file_peerlink_v1_peerlink_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_peerlink_v1_peerlink_proto_goTypes = []any{
+	(*PeerMessage)(nil),         // 0: peerlink.v1.PeerMessage
+	(*Handshake)(nil),           // 1: peerlink.v1.Handshake
+	(*Event)(nil),               // 2: peerlink.v1.Event
+	(*Ack)(nil),                 // 3: peerlink.v1.Ack
+	(*Heartbeat)(nil),           // 4: peerlink.v1.Heartbeat
+	(*ControlPlaneMessage)(nil), // 5: peerlink.v1.ControlPlaneMessage
+	(*SubscriptionChange)(nil),  // 6: peerlink.v1.SubscriptionChange
+	nil,                         // 7: peerlink.v1.Event.HeadersEntry
 }
-var file_proto_peerlink_v1_peerlink_proto_depIdxs = []int32{
+var file_peerlink_v1_peerlink_proto_depIdxs = []int32{
 	1, // 0: peerlink.v1.PeerMessage.handshake:type_name -> peerlink.v1.Handshake
 	2, // 1: peerlink.v1.PeerMessage.event:type_name -> peerlink.v1.Event
 	3, // 2: peerlink.v1.PeerMessage.ack:type_name -> peerlink.v1.Ack
 	4, // 3: peerlink.v1.PeerMessage.heartbeat:type_name -> peerlink.v1.Heartbeat
-	5, // 4: peerlink.v1.Event.headers:type_name -> peerlink.v1.Event.HeadersEntry
-	0, // 5: peerlink.v1.PeerLink.EventStream:input_type -> peerlink.v1.PeerMessage
-	0, // 6: peerlink.v1.PeerLink.EventStream:output_type -> peerlink.v1.PeerMessage
-	6, // [6:7] is the sub-list for method output_type
-	5, // [5:6] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	5, // 4: peerlink.v1.PeerMessage.control_plane:type_name -> peerlink.v1.ControlPlaneMessage
+	7, // 5: peerlink.v1.Event.headers:type_name -> peerlink.v1.Event.HeadersEntry
+	6, // 6: peerlink.v1.ControlPlaneMessage.subscription_change:type_name -> peerlink.v1.SubscriptionChange
+	0, // 7: peerlink.v1.PeerLink.EventStream:input_type -> peerlink.v1.PeerMessage
+	0, // 8: peerlink.v1.PeerLink.EventStream:output_type -> peerlink.v1.PeerMessage
+	8, // [8:9] is the sub-list for method output_type
+	7, // [7:8] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
-func init() { file_proto_peerlink_v1_peerlink_proto_init() }
-func file_proto_peerlink_v1_peerlink_proto_init() {
-	if File_proto_peerlink_v1_peerlink_proto != nil {
+func init() { file_peerlink_v1_peerlink_proto_init() }
+func file_peerlink_v1_peerlink_proto_init() {
+	if File_peerlink_v1_peerlink_proto != nil {
 		return
 	}
-	file_proto_peerlink_v1_peerlink_proto_msgTypes[0].OneofWrappers = []any{
+	file_peerlink_v1_peerlink_proto_msgTypes[0].OneofWrappers = []any{
 		(*PeerMessage_Handshake)(nil),
 		(*PeerMessage_Event)(nil),
 		(*PeerMessage_Ack)(nil),
 		(*PeerMessage_Heartbeat)(nil),
+		(*PeerMessage_ControlPlane)(nil),
+	}
+	file_peerlink_v1_peerlink_proto_msgTypes[5].OneofWrappers = []any{
+		(*ControlPlaneMessage_SubscriptionChange)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_peerlink_v1_peerlink_proto_rawDesc), len(file_proto_peerlink_v1_peerlink_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_peerlink_v1_peerlink_proto_rawDesc), len(file_peerlink_v1_peerlink_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_proto_peerlink_v1_peerlink_proto_goTypes,
-		DependencyIndexes: file_proto_peerlink_v1_peerlink_proto_depIdxs,
-		MessageInfos:      file_proto_peerlink_v1_peerlink_proto_msgTypes,
+		GoTypes:           file_peerlink_v1_peerlink_proto_goTypes,
+		DependencyIndexes: file_peerlink_v1_peerlink_proto_depIdxs,
+		MessageInfos:      file_peerlink_v1_peerlink_proto_msgTypes,
 	}.Build()
-	File_proto_peerlink_v1_peerlink_proto = out.File
-	file_proto_peerlink_v1_peerlink_proto_goTypes = nil
-	file_proto_peerlink_v1_peerlink_proto_depIdxs = nil
+	File_peerlink_v1_peerlink_proto = out.File
+	file_peerlink_v1_peerlink_proto_goTypes = nil
+	file_peerlink_v1_peerlink_proto_depIdxs = nil
 }

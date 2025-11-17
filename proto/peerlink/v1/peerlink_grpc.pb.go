@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v6.32.1
-// source: proto/peerlink/v1/peerlink.proto
+// source: peerlink/v1/peerlink.proto
 
 package peerlinkv1
 
@@ -117,5 +117,5 @@ var PeerLink_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "proto/peerlink/v1/peerlink.proto",
+	Metadata: "peerlink/v1/peerlink.proto",
 }

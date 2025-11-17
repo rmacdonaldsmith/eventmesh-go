@@ -11,12 +11,14 @@ service PeerLink {
 }
 
 // Wrapper message for all frame types.
+// Separates data plane (user events) from control plane (subscription gossip) communication.
 message PeerMessage {
   oneof kind {
     Handshake handshake = 1;
-    Event event = 2;
+    Event event = 2;              // Data plane: user events
     Ack ack = 3;
     Heartbeat heartbeat = 4;
+    ControlPlaneMessage control_plane = 5;  // Control plane: subscription gossip
   }
 }
 
@@ -47,4 +49,21 @@ message Ack {
 // Can also carry RTT measurement.
 message Heartbeat {
   int64 timestamp = 1;
+}
+
+// Control plane message wrapper for subscription gossip and other mesh coordination.
+// Separates control plane communication from user event data plane.
+message ControlPlaneMessage {
+  oneof kind {
+    SubscriptionChange subscription_change = 1;  // Subscription gossip between nodes
+  }
+}
+
+// Subscription change notification for peer-to-peer gossip.
+// Replaces the previous approach of using special Event topics like "__mesh.subscription.subscribe".
+message SubscriptionChange {
+  string action = 1;     // "subscribe" or "unsubscribe"
+  string client_id = 2;  // ID of the client making the change
+  string topic = 3;      // Topic pattern being subscribed/unsubscribed
+  string node_id = 4;    // ID of the node where the change occurred
 }
