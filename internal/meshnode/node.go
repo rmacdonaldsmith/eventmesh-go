@@ -2,7 +2,6 @@ package meshnode
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -21,11 +20,6 @@ import (
 const (
 	// MaxEventPayloadSize is the maximum allowed payload size in bytes (1MB)
 	MaxEventPayloadSize = 1024 * 1024
-
-	// Subscription propagation constants
-	SubscriptionTopicPrefix   = "__mesh.subscription"
-	SubscriptionActionSubscribe = "subscribe"
-	SubscriptionActionUnsubscribe = "unsubscribe"
 )
 
 // DeliveryResult tracks the results of event delivery attempts
@@ -56,31 +50,6 @@ func (r DeliveryResult) Error() string {
 		r.LocalSuccesses, r.LocalFailures, r.PeerSuccesses, r.PeerFailures)
 }
 
-// SubscriptionChangeEvent represents a subscription change event for peer propagation
-type SubscriptionChangeEvent struct {
-	Action   string `json:"action"`   // "subscribe" or "unsubscribe"
-	ClientID string `json:"clientID"` // ID of the client making the change
-	Topic    string `json:"topic"`    // Topic being subscribed/unsubscribed
-	NodeID   string `json:"nodeID"`   // ID of the node where the change occurred
-}
-
-// Validate checks if the subscription change event is valid
-func (e *SubscriptionChangeEvent) Validate() error {
-	if e.Action != SubscriptionActionSubscribe && e.Action != SubscriptionActionUnsubscribe {
-		return fmt.Errorf("invalid action %q, must be %q or %q",
-			e.Action, SubscriptionActionSubscribe, SubscriptionActionUnsubscribe)
-	}
-	if e.ClientID == "" {
-		return fmt.Errorf("clientID cannot be empty")
-	}
-	if e.Topic == "" {
-		return fmt.Errorf("topic cannot be empty")
-	}
-	if e.NodeID == "" {
-		return fmt.Errorf("nodeID cannot be empty")
-	}
-	return nil
-}
 
 // GRPCMeshNode implements the meshnode.MeshNode interface.
 // It orchestrates EventLog, RoutingTable, and PeerLink components to provide
@@ -92,7 +61,11 @@ type GRPCMeshNode struct {
 	// Core components
 	eventLog     eventlogpkg.EventLog
 	routingTable routingtablepkg.RoutingTable
-	peerLink     peerlinkpkg.PeerLink
+	peerLink     interface {
+		peerlinkpkg.DataPlanePeerLink
+		peerlinkpkg.ControlPlanePeerLink
+		peerlinkpkg.PeerConnectionManager
+	}
 
 	// State management
 	started bool
@@ -597,7 +570,11 @@ func (n *GRPCMeshNode) GetRoutingTable() routingtablepkg.RoutingTable {
 }
 
 // GetPeerLink returns the node's peer link interface.
-func (n *GRPCMeshNode) GetPeerLink() peerlinkpkg.PeerLink {
+func (n *GRPCMeshNode) GetPeerLink() interface {
+	peerlinkpkg.DataPlanePeerLink
+	peerlinkpkg.ControlPlanePeerLink
+	peerlinkpkg.PeerConnectionManager
+} {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.peerLink
@@ -733,15 +710,11 @@ func (n *GRPCMeshNode) GetHealth(ctx context.Context) (meshnode.HealthStatus, er
 // This implements REQ-MNODE-003: Subscription Propagation
 func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, clientID, topic string) error {
 	// Validate input parameters
-	changeEvent := &SubscriptionChangeEvent{
-		Action:   action,
-		ClientID: clientID,
-		Topic:    topic,
-		NodeID:   n.config.NodeID,
+	if action == "" || clientID == "" || topic == "" {
+		return fmt.Errorf("action, clientID, and topic cannot be empty")
 	}
-
-	if err := changeEvent.Validate(); err != nil {
-		return fmt.Errorf("invalid subscription change parameters: %w", err)
+	if action != "subscribe" && action != "unsubscribe" {
+		return fmt.Errorf("action must be 'subscribe' or 'unsubscribe'")
 	}
 
 	// Get connected peers
@@ -760,23 +733,21 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 		return nil
 	}
 
-	// Marshal subscription change event to JSON safely
-	payloadBytes, err := json.Marshal(changeEvent)
-	if err != nil {
-		return fmt.Errorf("failed to marshal subscription change event: %w", err)
+	// Create subscription change message
+	subscriptionChange := &peerlinkpkg.SubscriptionChange{
+		Action:   action,
+		ClientId: clientID,
+		Topic:    topic,
+		NodeId:   n.config.NodeID,
 	}
-
-	// Create subscription event with validated topic
-	subscriptionTopic := fmt.Sprintf("%s.%s", SubscriptionTopicPrefix, action)
-	subscriptionEvent := eventlogpkg.NewEvent(subscriptionTopic, payloadBytes)
 
 	// Track delivery results for observability
 	var successCount, failureCount int
 	var errors []error
 
-	// Send to all connected peers with proper error handling
+	// Send to all connected peers using control plane
 	for _, peer := range connectedPeers {
-		err := n.peerLink.SendEvent(ctx, peer.ID(), subscriptionEvent)
+		err := n.peerLink.SendSubscriptionChange(ctx, peer.ID(), subscriptionChange)
 		if err != nil {
 			failureCount++
 			errors = append(errors, fmt.Errorf("failed to send to peer %s: %w", peer.ID(), err))
@@ -812,9 +783,16 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 }
 
 // handleIncomingPeerEvents processes events received from peer nodes
-// This handles both regular events and subscription events (REQ-MNODE-003)
+// Now handles data plane (user events) and control plane (subscription changes) separately
 func (n *GRPCMeshNode) handleIncomingPeerEvents(ctx context.Context) {
-	// Get event channel from PeerLink
+	// Start separate goroutines for data plane and control plane
+	go n.handleIncomingDataPlaneEvents(ctx)
+	go n.handleIncomingControlPlaneMessages(ctx)
+}
+
+// handleIncomingDataPlaneEvents processes user events from peer nodes
+func (n *GRPCMeshNode) handleIncomingDataPlaneEvents(ctx context.Context) {
+	// Get event channel from PeerLink data plane
 	eventChan, errChan := n.peerLink.ReceiveEvents(ctx)
 
 	for {
@@ -829,8 +807,8 @@ func (n *GRPCMeshNode) handleIncomingPeerEvents(ctx context.Context) {
 				return
 			}
 
-			// Process the incoming event
-			n.processIncomingEvent(ctx, event)
+			// Process the incoming user event (no subscription filtering needed)
+			n.processIncomingUserEvent(ctx, event)
 
 		case err, ok := <-errChan:
 			if !ok {
@@ -847,17 +825,47 @@ func (n *GRPCMeshNode) handleIncomingPeerEvents(ctx context.Context) {
 	}
 }
 
-// processIncomingEvent handles a single incoming event from a peer
-func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event *eventlogpkg.Event) {
+// handleIncomingControlPlaneMessages processes subscription changes from peer nodes
+func (n *GRPCMeshNode) handleIncomingControlPlaneMessages(ctx context.Context) {
+	// Get subscription change channel from PeerLink control plane
+	changeChan, errChan := n.peerLink.ReceiveSubscriptionChanges(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Context cancelled, stop processing
+			return
+
+		case change, ok := <-changeChan:
+			if !ok {
+				// Change channel closed, stop processing
+				return
+			}
+
+			// Process the incoming subscription change
+			n.processIncomingSubscriptionChange(ctx, change)
+
+		case err, ok := <-errChan:
+			if !ok {
+				// Error channel closed, stop processing
+				return
+			}
+			if err != nil {
+				// Log error but continue processing
+				slog.Error("error receiving subscription changes from peers",
+					"node_id", n.config.NodeID,
+					"error", err)
+			}
+		}
+	}
+}
+
+// processIncomingUserEvent handles a single incoming user event from a peer
+// This is now pure data plane processing - no subscription filtering needed
+func (n *GRPCMeshNode) processIncomingUserEvent(ctx context.Context, event *eventlogpkg.Event) {
 	topic := event.Topic
 
-	// Check if this is a subscription event
-	if n.isSubscriptionEvent(topic) {
-		n.handleSubscriptionEvent(ctx, event)
-		return
-	}
-
-	// This is a regular event - persist locally and deliver to local subscribers
+	// This is a regular user event - persist locally and deliver to local subscribers
 	n.mu.RLock()
 	if n.closed || !n.started {
 		n.mu.RUnlock()
@@ -918,64 +926,41 @@ func (n *GRPCMeshNode) processIncomingEvent(ctx context.Context, event *eventlog
 	}
 }
 
-// isSubscriptionEvent checks if an event is a subscription management event
-func (n *GRPCMeshNode) isSubscriptionEvent(topic string) bool {
-	subscribeTopic := fmt.Sprintf("%s.%s", SubscriptionTopicPrefix, SubscriptionActionSubscribe)
-	unsubscribeTopic := fmt.Sprintf("%s.%s", SubscriptionTopicPrefix, SubscriptionActionUnsubscribe)
-	return topic == subscribeTopic || topic == unsubscribeTopic
-}
-
-// handleSubscriptionEvent processes subscription events from peers
-// This implements REQ-MNODE-003: Handle incoming peer subscription notifications
-func (n *GRPCMeshNode) handleSubscriptionEvent(ctx context.Context, event *eventlogpkg.Event) {
-	// Parse the subscription change event with proper validation
-	var changeEvent SubscriptionChangeEvent
-	if err := json.Unmarshal(event.Payload, &changeEvent); err != nil {
-		slog.Warn("failed to unmarshal subscription change event",
-			"error", err,
-			"topic", event.Topic,
-			"payload_size", len(event.Payload))
-		return
-	}
-
-	// Validate the subscription change event
-	if err := changeEvent.Validate(); err != nil {
-		slog.Warn("received invalid subscription change event",
-			"error", err,
-			"action", changeEvent.Action,
-			"client_id", changeEvent.ClientID,
-			"topic", changeEvent.Topic,
-			"node_id", changeEvent.NodeID)
-		return
-	}
-
+// processIncomingSubscriptionChange handles a single incoming subscription change from a peer
+// This is clean control plane processing using protobuf messages
+func (n *GRPCMeshNode) processIncomingSubscriptionChange(ctx context.Context, change *peerlinkpkg.SubscriptionChange) {
 	// Update peer subscription tracking
 	n.peerSubscriptionsMu.Lock()
 	defer n.peerSubscriptionsMu.Unlock()
 
 	// Initialize peer map if it doesn't exist
-	if n.peerSubscriptions[changeEvent.NodeID] == nil {
-		n.peerSubscriptions[changeEvent.NodeID] = make(map[string]bool)
+	if n.peerSubscriptions[change.NodeId] == nil {
+		n.peerSubscriptions[change.NodeId] = make(map[string]bool)
 	}
 
-	// Update subscription state based on validated action
-	switch changeEvent.Action {
-	case SubscriptionActionSubscribe:
-		n.peerSubscriptions[changeEvent.NodeID][changeEvent.Topic] = true
+	// Update subscription state
+	switch change.Action {
+	case "subscribe":
+		n.peerSubscriptions[change.NodeId][change.Topic] = true
 		slog.Debug("peer subscription added",
-			"peer_node_id", changeEvent.NodeID,
-			"client_id", changeEvent.ClientID,
-			"topic", changeEvent.Topic)
-	case SubscriptionActionUnsubscribe:
-		n.peerSubscriptions[changeEvent.NodeID][changeEvent.Topic] = false
+			"peer_node_id", change.NodeId,
+			"client_id", change.ClientId,
+			"topic", change.Topic)
+	case "unsubscribe":
+		delete(n.peerSubscriptions[change.NodeId], change.Topic)
 		slog.Debug("peer subscription removed",
-			"peer_node_id", changeEvent.NodeID,
-			"client_id", changeEvent.ClientID,
-			"topic", changeEvent.Topic)
+			"peer_node_id", change.NodeId,
+			"client_id", change.ClientId,
+			"topic", change.Topic)
+	default:
+		slog.Warn("received subscription change with unknown action",
+			"action", change.Action,
+			"peer_node_id", change.NodeId,
+			"client_id", change.ClientId,
+			"topic", change.Topic)
 	}
-
-	// Note: This enables intelligent routing in PublishEvent method
 }
+
 
 // getInterestedPeers returns only peers that have subscribers for the given topic
 // This enables intelligent routing instead of broadcasting to all peers

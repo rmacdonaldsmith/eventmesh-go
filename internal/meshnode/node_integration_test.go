@@ -2,11 +2,11 @@ package meshnode
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
+	"github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 )
 
 // simplePeerNode is a test implementation of peerlink.PeerNode
@@ -724,13 +724,16 @@ func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// For MVP: Manually simulate subscription gossip since PeerLink networking needs refinement
-	// In production, this would happen automatically via PeerLink
-	subscriptionGossipPayload := []byte(fmt.Sprintf(`{"action":"subscribe","clientID":"%s","topic":"%s","nodeID":"%s"}`,
-		subscriber.ID(), topic, subscriberNode.GetNodeID()))
-	subscriptionGossipEvent := eventlog.NewEvent("__mesh.subscription.subscribe", subscriptionGossipPayload)
+	// In production, this would happen automatically via ControlPlanePeerLink
+	subscriptionChange := &peerlink.SubscriptionChange{
+		Action:   "subscribe",
+		ClientId: subscriber.ID(),
+		Topic:    topic,
+		NodeId:   subscriberNode.GetNodeID(),
+	}
 
-	// Simulate publisher node receiving the subscription gossip
-	publisherNode.handleSubscriptionEvent(ctx, subscriptionGossipEvent)
+	// Simulate publisher node receiving the subscription change
+	publisherNode.processIncomingSubscriptionChange(ctx, subscriptionChange)
 
 	// Verify that the publisher node now knows about the subscriber's interest
 	allConnectedPeers, err := publisherNode.GetPeerLink().GetConnectedPeers(ctx)

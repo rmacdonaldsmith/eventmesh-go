@@ -307,27 +307,63 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 				return nil
 			}
 
-			// Convert EventRecord to protobuf Event message
-			event := &peerlinkv1.Event{
-				Topic:   queuedMsg.event.Topic,
-				Payload: queuedMsg.event.Payload,
-				Headers: queuedMsg.event.Headers,
-				Offset:  queuedMsg.event.Offset,
-			}
+			var peerMsg *peerlinkv1.PeerMessage
 
-			// Wrap in PeerMessage
-			peerMsg := &peerlinkv1.PeerMessage{
-				Kind: &peerlinkv1.PeerMessage_Event{
-					Event: event,
-				},
+			// Handle different message types
+			if queuedMsg.event != nil {
+				// Data plane: user event
+				event := &peerlinkv1.Event{
+					Topic:   queuedMsg.event.Topic,
+					Payload: queuedMsg.event.Payload,
+					Headers: queuedMsg.event.Headers,
+					Offset:  queuedMsg.event.Offset,
+				}
+
+				peerMsg = &peerlinkv1.PeerMessage{
+					Kind: &peerlinkv1.PeerMessage_Event{
+						Event: event,
+					},
+				}
+			} else if queuedMsg.subscriptionChange != nil {
+				// Control plane: subscription change
+				subChange := &peerlinkv1.SubscriptionChange{
+					Action:   queuedMsg.subscriptionChange.Action,
+					ClientId: queuedMsg.subscriptionChange.ClientId,
+					Topic:    queuedMsg.subscriptionChange.Topic,
+					NodeId:   queuedMsg.subscriptionChange.NodeId,
+				}
+
+				controlMsg := &peerlinkv1.ControlPlaneMessage{
+					Kind: &peerlinkv1.ControlPlaneMessage_SubscriptionChange{
+						SubscriptionChange: subChange,
+					},
+				}
+
+				peerMsg = &peerlinkv1.PeerMessage{
+					Kind: &peerlinkv1.PeerMessage_ControlPlane{
+						ControlPlane: controlMsg,
+					},
+				}
+			} else {
+				slog.Warn("EventStream received queued message with no content",
+					"peer_id", peerID)
+				continue
 			}
 
 			// Send over gRPC stream
 			if err := stream.Send(peerMsg); err != nil {
-				slog.Error("EventStream failed to send message",
-					"topic", queuedMsg.event.Topic,
-					"peer_id", peerID,
-					"error", err)
+				if queuedMsg.event != nil {
+					slog.Error("EventStream failed to send user event",
+						"topic", queuedMsg.event.Topic,
+						"peer_id", peerID,
+						"error", err)
+				} else if queuedMsg.subscriptionChange != nil {
+					slog.Error("EventStream failed to send subscription change",
+						"action", queuedMsg.subscriptionChange.Action,
+						"topic", queuedMsg.subscriptionChange.Topic,
+						"peer_id", peerID,
+						"error", err)
+				}
 				return err
 			}
 		}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
+	"github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 )
 
 // TestGRPCMeshNode_PublishEvent_LocalPersistence tests REQ-MNODE-002: Local Persistence Before Forwarding
@@ -650,7 +651,7 @@ func TestGRPCMeshNode_IncomingEventHandling(t *testing.T) {
 	peerEvent := eventlog.NewEvent(topic, peerEventPayload)
 
 	// Process the incoming peer event (simulate what handleIncomingPeerEvents would do)
-	node.processIncomingEvent(ctx, peerEvent)
+	node.processIncomingUserEvent(ctx, peerEvent)
 
 	// Verify the event was persisted locally
 	eventLog := node.GetEventLog()
@@ -696,22 +697,26 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 		t.Fatalf("Expected no error starting node, got %v", err)
 	}
 
-	// Create a subscription event like what would be received from a peer
-	subscriptionPayload := []byte(`{"action":"subscribe","clientID":"peer-client-1","topic":"orders.*","nodeID":"peer-node-1"}`)
-	subscriptionEvent := eventlog.NewEvent("__mesh.subscription.subscribe", subscriptionPayload)
+	// Create a subscription change like what would be received from a peer via control plane
+	subscriptionChange := &peerlink.SubscriptionChange{
+		Action:   "subscribe",
+		ClientId: "peer-client-1",
+		Topic:    "orders.*",
+		NodeId:   "peer-node-1",
+	}
 
-	// Process the subscription event (simulate receiving from peer)
-	node.handleSubscriptionEvent(ctx, subscriptionEvent)
+	// Process the subscription change (simulate receiving from peer)
+	node.processIncomingSubscriptionChange(ctx, subscriptionChange)
 
-	// For MVP: We just handle the event without errors
-	// In a full implementation, we'd verify that peer subscription info was stored
-	// and used for smarter routing decisions
+	// Test unsubscription as well
+	unsubscriptionChange := &peerlink.SubscriptionChange{
+		Action:   "unsubscribe",
+		ClientId: "peer-client-1",
+		Topic:    "orders.*",
+		NodeId:   "peer-node-1",
+	}
 
-	// Test unsubscription event as well
-	unsubscriptionPayload := []byte(`{"action":"unsubscribe","clientID":"peer-client-1","topic":"orders.*","nodeID":"peer-node-1"}`)
-	unsubscriptionEvent := eventlog.NewEvent("__mesh.subscription.unsubscribe", unsubscriptionPayload)
-
-	node.handleSubscriptionEvent(ctx, unsubscriptionEvent)
+	node.processIncomingSubscriptionChange(ctx, unsubscriptionChange)
 
 	t.Logf("✅ Subscription event handling implemented (basic MVP version)")
 }
