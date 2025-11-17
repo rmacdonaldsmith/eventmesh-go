@@ -103,3 +103,11 @@ type PeerConnectionManager interface {
 	GetConnectedPeers(ctx context.Context) ([]PeerNode, error)
 }
 
+// CompletePeerLink combines all three focused PeerLink interfaces
+// into a single composite interface for components that need all functionality.
+// This provides a clean, named interface instead of anonymous composition.
+type CompletePeerLink interface {
+	DataPlanePeerLink
+	ControlPlanePeerLink
+	PeerConnectionManager
+}

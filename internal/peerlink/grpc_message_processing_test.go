@@ -125,7 +125,7 @@ func TestGRPCPeerLink_ProcessOutboundMessage(t *testing.T) {
 
 	// Create a test message
 	testEvent := eventlog.NewEvent("test-topic", []byte("test payload"))
-	testMsg := queuedMessage{
+	testMsg := &DataPlaneMessage{
 		peerID: "test-peer",
 		event:  testEvent,
 		sentAt: time.Now(),
@@ -163,7 +163,7 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 
 	// Create a test message
 	testEvent := eventlog.NewEvent("test-topic", []byte("test payload"))
-	testMsg := queuedMessage{
+	testMsg := &DataPlaneMessage{
 		peerID: "test-peer",
 		event:  testEvent,
 		sentAt: time.Now(),
@@ -176,8 +176,8 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 	// Verify message was requeued
 	select {
 	case requeuedMsg := <-sendQueue:
-		if requeuedMsg.event.Topic != "test-topic" {
-			t.Errorf("Expected requeued topic 'test-topic', got '%s'", requeuedMsg.event.Topic)
+		if dataMsg, ok := requeuedMsg.(*DataPlaneMessage); !ok || dataMsg.Event().Topic != "test-topic" {
+			t.Errorf("Expected requeued topic 'test-topic', got wrong message type or topic")
 		}
 		t.Log("✅ handleSendFailure correctly requeued message")
 	case <-time.After(1 * time.Second):
@@ -188,7 +188,7 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 	// Fill the queue first
 	for i := 0; i < 10; i++ {
 		dummyEvent := eventlog.NewEvent("dummy", []byte("dummy"))
-		dummyMsg := queuedMessage{
+		dummyMsg := &DataPlaneMessage{
 			peerID: "test-peer",
 			event:  dummyEvent,
 			sentAt: time.Now(),

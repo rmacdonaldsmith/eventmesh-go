@@ -219,12 +219,12 @@ func TestDataControlPlaneSeparation(t *testing.T) {
 // TestSubscriptionChangeValidation tests validation of subscription change messages
 func TestSubscriptionChangeValidation(t *testing.T) {
 	testCases := []struct {
-		name           string
-		action         string
-		clientId       string
-		topic          string
-		nodeId         string
-		expectValid    bool
+		name        string
+		action      string
+		clientId    string
+		topic       string
+		nodeId      string
+		expectValid bool
 	}{
 		{
 			name:        "valid subscribe",
@@ -287,7 +287,7 @@ func TestSubscriptionChangeValidation(t *testing.T) {
 
 			// Basic field validation (protobuf will handle this)
 			isEmpty := subChange.Action == "" || subChange.ClientId == "" ||
-					   subChange.Topic == "" || subChange.NodeId == ""
+				subChange.Topic == "" || subChange.NodeId == ""
 
 			if tc.expectValid && isEmpty {
 				t.Error("Expected valid subscription change to have all fields populated")

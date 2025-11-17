@@ -724,14 +724,14 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 // Test client that simulates delivery failures
 type failingClient struct {
 	*TrustedClient
-	shouldFail bool
+	shouldFail     bool
 	failureMessage string
 }
 
 func newFailingClient(id string, shouldFail bool, failureMessage string) *failingClient {
 	return &failingClient{
-		TrustedClient: NewTrustedClient(id),
-		shouldFail: shouldFail,
+		TrustedClient:  NewTrustedClient(id),
+		shouldFail:     shouldFail,
 		failureMessage: failureMessage,
 	}
 }

@@ -88,11 +88,7 @@ type MeshNode interface {
 
 	// GetPeerLink returns the node's peer link interface.
 	// Used for direct access to peer communication.
-	GetPeerLink() interface {
-		peerlink.DataPlanePeerLink
-		peerlink.ControlPlanePeerLink
-		peerlink.PeerConnectionManager
-	}
+	GetPeerLink() peerlink.CompletePeerLink
 
 	// GetNodeID returns this node's unique identifier in the mesh.
 	GetNodeID() string

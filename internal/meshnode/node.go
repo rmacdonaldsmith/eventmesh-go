@@ -50,7 +50,6 @@ func (r DeliveryResult) Error() string {
 		r.LocalSuccesses, r.LocalFailures, r.PeerSuccesses, r.PeerFailures)
 }
 
-
 // GRPCMeshNode implements the meshnode.MeshNode interface.
 // It orchestrates EventLog, RoutingTable, and PeerLink components to provide
 // distributed event streaming functionality.
@@ -61,11 +60,7 @@ type GRPCMeshNode struct {
 	// Core components
 	eventLog     eventlogpkg.EventLog
 	routingTable routingtablepkg.RoutingTable
-	peerLink     interface {
-		peerlinkpkg.DataPlanePeerLink
-		peerlinkpkg.ControlPlanePeerLink
-		peerlinkpkg.PeerConnectionManager
-	}
+	peerLink     peerlinkpkg.CompletePeerLink
 
 	// State management
 	started bool
@@ -207,11 +202,8 @@ func (n *GRPCMeshNode) Close() error {
 		return nil // Already closed, idempotent
 	}
 
-	// Stop if still running
-	if n.started {
-		// For MVP: Components manage their own lifecycle
-		// In future phases, we'll add explicit stop coordination
-	}
+	// Stop if still running (empty branch is intentional - components manage lifecycle)
+	_ = n.started // For future use in explicit stop coordination
 
 	// Close components
 	if err := n.eventLog.Close(); err != nil {
@@ -231,6 +223,126 @@ func (n *GRPCMeshNode) Close() error {
 	return nil
 }
 
+// validatePublishRequest validates the node state and publish request parameters
+func (n *GRPCMeshNode) validatePublishRequest(client meshnode.Client, event *eventlogpkg.Event) error {
+	if n.closed {
+		return fmt.Errorf("cannot publish to closed mesh node")
+	}
+
+	if !n.started {
+		return fmt.Errorf("cannot publish to stopped mesh node")
+	}
+
+	if client == nil {
+		return fmt.Errorf("client cannot be nil")
+	}
+	if event == nil {
+		return fmt.Errorf("event cannot be nil")
+	}
+	if !client.IsAuthenticated() {
+		return fmt.Errorf("client is not authenticated")
+	}
+
+	if len(event.Payload) > MaxEventPayloadSize {
+		return fmt.Errorf("event payload size %d bytes exceeds maximum allowed size %d bytes",
+			len(event.Payload), MaxEventPayloadSize)
+	}
+
+	return nil
+}
+
+// eventDeliverer interface for subscribers that can receive events with error reporting
+type eventDeliverer interface {
+	DeliverEvent(*eventlogpkg.Event) error
+}
+
+// deliverToLocalSubscribers delivers an event to all local subscribers
+func (n *GRPCMeshNode) deliverToLocalSubscribers(ctx context.Context, event *eventlogpkg.Event) DeliveryResult {
+	var result DeliveryResult
+
+	localSubscribers, err := n.routingTable.GetSubscribers(ctx, event.Topic)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Errorf("failed to get local subscribers: %w", err))
+		return result
+	}
+
+	for _, subscriber := range localSubscribers {
+		// Check for context cancellation during delivery loop
+		select {
+		case <-ctx.Done():
+			result.Errors = append(result.Errors, ctx.Err())
+			return result
+		default:
+		}
+
+		if subscriber.Type() == routingtablepkg.LocalClient {
+			if ed, ok := subscriber.(eventDeliverer); ok {
+				err := ed.DeliverEvent(event)
+				if err != nil {
+					result.LocalFailures++
+					result.Errors = append(result.Errors, err)
+
+					slog.Warn("failed to deliver event to local subscriber",
+						"client_id", subscriber.ID(),
+						"topic", event.Topic,
+						"error", err)
+				} else {
+					result.LocalSuccesses++
+				}
+			} else {
+				// Fallback: subscriber doesn't implement error-returning interface
+				result.LocalFailures++
+				err := fmt.Errorf("subscriber %s does not implement error-returning DeliverEvent interface", subscriber.ID())
+				result.Errors = append(result.Errors, err)
+
+				slog.Warn("subscriber missing error-returning DeliverEvent interface",
+					"client_id", subscriber.ID(),
+					"topic", event.Topic)
+			}
+		}
+	}
+
+	return result
+}
+
+// forwardToPeers forwards an event to interested remote peers using intelligent routing
+func (n *GRPCMeshNode) forwardToPeers(ctx context.Context, event *eventlogpkg.Event, result *DeliveryResult) {
+	connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
+	if err != nil {
+		// Log peer connectivity issue but don't fail the publish (local delivery succeeded)
+		slog.Warn("failed to get connected peers for forwarding",
+			"topic", event.Topic,
+			"error", err)
+		result.Errors = append(result.Errors, fmt.Errorf("failed to get peers: %w", err))
+		return
+	}
+
+	// Use intelligent routing: only send to peers with interested subscribers
+	interestedPeers := n.getInterestedPeers(event.Topic, connectedPeers)
+	for _, peer := range interestedPeers {
+		// Check for context cancellation during peer forwarding loop
+		select {
+		case <-ctx.Done():
+			result.Errors = append(result.Errors, ctx.Err())
+			return
+		default:
+		}
+
+		err := n.peerLink.SendEvent(ctx, peer.ID(), event)
+		if err != nil {
+			result.PeerFailures++
+			result.Errors = append(result.Errors, err)
+
+			slog.Warn("failed to forward event to peer",
+				"peer_id", peer.ID(),
+				"topic", event.Topic,
+				"error", err)
+		} else {
+			result.PeerSuccesses++
+		}
+	}
+}
+
 // PublishEvent accepts an event from a local client and handles routing.
 // Implements REQ-MNODE-002: persists locally before forwarding to peers.
 //
@@ -243,29 +355,9 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
-	if n.closed {
-		return fmt.Errorf("cannot publish to closed mesh node")
-	}
-
-	if !n.started {
-		return fmt.Errorf("cannot publish to stopped mesh node")
-	}
-
-	// Validate inputs
-	if client == nil {
-		return fmt.Errorf("client cannot be nil")
-	}
-	if event == nil {
-		return fmt.Errorf("event cannot be nil")
-	}
-	if !client.IsAuthenticated() {
-		return fmt.Errorf("client is not authenticated")
-	}
-
-	// Additional event validation
-	if len(event.Payload) > MaxEventPayloadSize {
-		return fmt.Errorf("event payload size %d bytes exceeds maximum allowed size %d bytes",
-			len(event.Payload), MaxEventPayloadSize)
+	// Validate inputs and node state
+	if err := n.validatePublishRequest(client, event); err != nil {
+		return err
 	}
 
 	// Step 1: PERSIST LOCALLY FIRST (REQ-MNODE-002)
@@ -275,89 +367,20 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 		return fmt.Errorf("failed to persist event locally: %w", err)
 	}
 
-	// Step 2: Find local subscribers and deliver events
-	localSubscribers, err := n.routingTable.GetSubscribers(ctx, event.Topic)
-	if err != nil {
-		return fmt.Errorf("failed to get local subscribers: %w", err)
-	}
+	// Step 2: Deliver to local subscribers
+	deliveryResult := n.deliverToLocalSubscribers(ctx, persistedEvent)
 
-	// Track delivery results
-	var deliveryResult DeliveryResult
-
-	// Deliver to local subscribers with proper error handling
-	for _, subscriber := range localSubscribers {
-		// Check for context cancellation during delivery loop
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		if subscriber.Type() == routingtablepkg.LocalClient {
-			// Check if subscriber has error-returning DeliverEvent method
-			type eventDeliverer interface {
-				DeliverEvent(*eventlogpkg.Event) error
-			}
-
-			if ed, ok := subscriber.(eventDeliverer); ok {
-				err := ed.DeliverEvent(persistedEvent)
-				if err != nil {
-					deliveryResult.LocalFailures++
-					deliveryResult.Errors = append(deliveryResult.Errors, err)
-
-					slog.Warn("failed to deliver event to local subscriber",
-						"client_id", subscriber.ID(),
-						"topic", persistedEvent.Topic,
-						"error", err)
-				} else {
-					deliveryResult.LocalSuccesses++
-				}
-			} else {
-				// Fallback: subscriber doesn't implement error-returning interface
-				deliveryResult.LocalFailures++
-				err := fmt.Errorf("subscriber %s does not implement error-returning DeliverEvent interface", subscriber.ID())
-				deliveryResult.Errors = append(deliveryResult.Errors, err)
-
-				slog.Warn("subscriber missing error-returning DeliverEvent interface",
-					"client_id", subscriber.ID(),
-					"topic", persistedEvent.Topic)
-			}
-		}
+	// Check for context cancellation after local delivery
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	// Step 3: Forward to remote peers using intelligent routing
-	// Only send to peers that have subscribers for this topic
-	connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
-	if err != nil {
-		// Log peer connectivity issue but don't fail the publish (local delivery succeeded)
-		slog.Warn("failed to get connected peers for forwarding",
-			"topic", persistedEvent.Topic,
-			"error", err)
-		deliveryResult.Errors = append(deliveryResult.Errors, fmt.Errorf("failed to get peers: %w", err))
-	} else {
-		// Use intelligent routing: only send to peers with interested subscribers
-		interestedPeers := n.getInterestedPeers(event.Topic, connectedPeers)
-		for _, peer := range interestedPeers {
-			// Check for context cancellation during peer forwarding loop
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+	n.forwardToPeers(ctx, persistedEvent, &deliveryResult)
 
-			err := n.peerLink.SendEvent(ctx, peer.ID(), persistedEvent)
-			if err != nil {
-				deliveryResult.PeerFailures++
-				deliveryResult.Errors = append(deliveryResult.Errors, err)
-
-				slog.Warn("failed to forward event to peer",
-					"peer_id", peer.ID(),
-					"topic", persistedEvent.Topic,
-					"error", err)
-			} else {
-				deliveryResult.PeerSuccesses++
-			}
-		}
+	// Check for context cancellation after peer forwarding
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	// Return based on delivery results
@@ -570,11 +593,7 @@ func (n *GRPCMeshNode) GetRoutingTable() routingtablepkg.RoutingTable {
 }
 
 // GetPeerLink returns the node's peer link interface.
-func (n *GRPCMeshNode) GetPeerLink() interface {
-	peerlinkpkg.DataPlanePeerLink
-	peerlinkpkg.ControlPlanePeerLink
-	peerlinkpkg.PeerConnectionManager
-} {
+func (n *GRPCMeshNode) GetPeerLink() peerlinkpkg.CompletePeerLink {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 	return n.peerLink
@@ -960,7 +979,6 @@ func (n *GRPCMeshNode) processIncomingSubscriptionChange(ctx context.Context, ch
 			"topic", change.Topic)
 	}
 }
-
 
 // getInterestedPeers returns only peers that have subscribers for the given topic
 // This enables intelligent routing instead of broadcasting to all peers

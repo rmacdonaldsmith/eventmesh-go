@@ -9,7 +9,6 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
 
-
 // TrustedClient is a simple client implementation for MVP.
 // Since REQ-MNODE-001 (authentication) is descoped from MVP,
 // this client always reports as authenticated.
