@@ -90,6 +90,11 @@ func (s *Server) Stop(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
+// ServeHTTP allows Server to be used directly as an http.Handler.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.server.Handler.ServeHTTP(w, r)
+}
+
 // GetListeningAddress returns the actual address this HTTP server is listening on
 // Returns empty string if not started or no listener
 func (s *Server) GetListeningAddress() string {

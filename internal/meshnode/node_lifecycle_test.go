@@ -238,3 +238,41 @@ func TestGRPCMeshNode_ComprehensiveHealthMonitoring(t *testing.T) {
 
 	t.Logf("✅ Phase 4.5: Comprehensive health monitoring implemented and tested")
 }
+
+func TestGRPCMeshNode_GetHealthDoesNotMutateEventLog(t *testing.T) {
+	config := NewConfig("health-readonly-node", "localhost:0")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+	eventLog := node.GetEventLog()
+
+	before, err := eventLog.GetStatistics(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error getting initial event log statistics, got %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		if _, err := node.GetHealth(ctx); err != nil {
+			t.Fatalf("Expected no error from GetHealth(), got %v", err)
+		}
+	}
+
+	after, err := eventLog.GetStatistics(ctx)
+	if err != nil {
+		t.Fatalf("Expected no error getting final event log statistics, got %v", err)
+	}
+
+	if after.TotalEvents != before.TotalEvents {
+		t.Errorf("Expected GetHealth not to change total events, before=%d after=%d", before.TotalEvents, after.TotalEvents)
+	}
+	if after.TopicCount != before.TopicCount {
+		t.Errorf("Expected GetHealth not to change topic count, before=%d after=%d", before.TopicCount, after.TopicCount)
+	}
+	if _, exists := after.TopicCounts["__health.check"]; exists {
+		t.Error("Expected GetHealth not to create __health.check topic")
+	}
+}

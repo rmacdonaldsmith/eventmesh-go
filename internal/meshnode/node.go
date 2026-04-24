@@ -643,16 +643,14 @@ func (n *GRPCMeshNode) GetHealth(ctx context.Context) (meshnode.HealthStatus, er
 		healthMessages = append(healthMessages, "node is not started")
 	}
 
-	// Check EventLog health - test basic operations
+	// Check EventLog health with a read-only operation.
 	eventLogHealthy := true
 	if n.closed {
 		// If node is closed, components are closed and unhealthy
 		eventLogHealthy = false
 		healthMessages = append(healthMessages, "EventLog unhealthy: node is closed")
 	} else if n.eventLog != nil {
-		// Test EventLog by checking if we can create a simple operation
-		testEvent := eventlogpkg.NewEvent("__health.check", []byte("health-check"))
-		_, err := n.eventLog.AppendEvent(ctx, "__health.check", testEvent)
+		_, err := n.eventLog.GetStatistics(ctx)
 		if err != nil {
 			eventLogHealthy = false
 			healthMessages = append(healthMessages, fmt.Sprintf("EventLog unhealthy: %v", err))

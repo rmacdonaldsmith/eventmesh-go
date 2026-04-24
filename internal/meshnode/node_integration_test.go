@@ -2,6 +2,7 @@ package meshnode
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -199,14 +200,14 @@ func TestGRPCMeshNode_MultiNodeIntegration(t *testing.T) {
 // with MeshNode's handleIncomingPeerEvents to deliver events to local subscribers
 func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 	// Create two mesh nodes - sender and receiver
-	senderConfig := NewConfig("sender-node", "localhost:9200")
+	senderConfig := NewConfig("sender-node", "localhost:0")
 	sender, err := NewGRPCMeshNode(senderConfig)
 	if err != nil {
 		t.Fatalf("Failed to create sender node: %v", err)
 	}
 	defer sender.Close()
 
-	receiverConfig := NewConfig("receiver-node", "localhost:9201")
+	receiverConfig := NewConfig("receiver-node", "localhost:0")
 	receiver, err := NewGRPCMeshNode(receiverConfig)
 	if err != nil {
 		t.Fatalf("Failed to create receiver node: %v", err)
@@ -230,7 +231,7 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 	senderPeerLink := sender.GetPeerLink()
 	receiverPeer := &simplePeerNode{
 		id:      receiver.config.NodeID,
-		address: receiver.config.ListenAddress,
+		address: meshNodeListeningAddress(t, receiver),
 		healthy: true,
 	}
 
@@ -239,8 +240,10 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 		t.Fatalf("Failed to connect sender to receiver: %v", err)
 	}
 
-	// Give time for connection to establish
-	time.Sleep(500 * time.Millisecond)
+	waitForMeshNodeCondition(t, time.Second, func() bool {
+		peers, err := receiver.GetPeerLink().GetConnectedPeers(ctx)
+		return err == nil && len(peers) > 0
+	}, "receiver to register inbound sender connection")
 
 	// THEN create subscription - this should gossip to the already-connected sender
 	subscriber := NewTrustedClient("test-subscriber")
@@ -251,8 +254,13 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 		t.Fatalf("Failed to subscribe to topic: %v", err)
 	}
 
-	// Give time for subscription gossip to propagate to connected peers
-	time.Sleep(1000 * time.Millisecond)
+	waitForMeshNodeCondition(t, 2*time.Second, func() bool {
+		peers, err := senderPeerLink.GetConnectedPeers(ctx)
+		if err != nil {
+			return false
+		}
+		return len(sender.getInterestedPeers(topic, peers)) > 0
+	}, "sender to learn receiver subscription via gossip")
 
 	// Create and publish event from sender
 	testPayload := []byte(`{"message": "PeerLink to MeshNode integration test"}`)
@@ -264,8 +272,9 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 		t.Fatalf("Failed to publish event: %v", err)
 	}
 
-	// Give time for event to propagate through PeerLink and be processed by MeshNode
-	time.Sleep(1000 * time.Millisecond)
+	waitForMeshNodeCondition(t, 2*time.Second, func() bool {
+		return len(subscriber.GetReceivedEvents()) > 0
+	}, "subscriber to receive peer-routed event")
 
 	// Verify the subscriber received the event
 	receivedEvents := subscriber.GetReceivedEvents()
@@ -303,6 +312,36 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 
 	t.Logf("✅ PeerLink ReceiveEvents → MeshNode.handleIncomingPeerEvents integration verified")
 	t.Logf("✅ Event successfully flowed: Sender → PeerLink → Receiver.MeshNode → Local subscriber")
+}
+
+func waitForMeshNodeCondition(t *testing.T, timeout time.Duration, condition func() bool, description string) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	t.Fatal(fmt.Sprintf("Timed out waiting for %s", description))
+}
+
+func meshNodeListeningAddress(t *testing.T, node *GRPCMeshNode) string {
+	t.Helper()
+
+	listener, ok := node.GetPeerLink().(interface{ GetListeningAddress() string })
+	if !ok {
+		t.Fatal("PeerLink does not expose listening address")
+	}
+
+	address := listener.GetListeningAddress()
+	if address == "" {
+		t.Fatal("PeerLink listening address is empty")
+	}
+
+	return address
 }
 
 // TestRealMultiNodeNetworkingEndToEnd tests complete EventMesh flow with actual PeerLink networking

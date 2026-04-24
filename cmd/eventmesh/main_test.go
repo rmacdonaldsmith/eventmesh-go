@@ -1,46 +1,39 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"testing"
-	"time"
+
+	"github.com/rmacdonaldsmith/eventmesh-go/internal/httpapi"
+	"github.com/rmacdonaldsmith/eventmesh-go/internal/meshnode"
 )
 
 // TestHTTPIntegration tests that the HTTP API server starts successfully
 // and can serve the root endpoint
 func TestHTTPIntegration(t *testing.T) {
-	// Skip this test in short mode since it's an integration test
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
+	config := meshnode.NewConfig("cmd-http-test-node", "localhost:0")
+	node, err := meshnode.NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Failed to create mesh node: %v", err)
 	}
+	defer node.Close()
 
-	// Start the server in the background
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "go", "run", ".", "--http", "--http-port", "8082")
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("Failed to start server: %v", err)
-	}
-
-	// Wait a moment for server to start
-	time.Sleep(2 * time.Second)
+	server := httpapi.NewServer(node, httpapi.Config{
+		Port:      "0",
+		SecretKey: "test-secret",
+	})
 
 	// Test the HTTP API root endpoint
-	resp, err := http.Get("http://localhost:8082/")
-	if err != nil {
-		t.Fatalf("Failed to connect to HTTP API: %v", err)
-	}
-	defer resp.Body.Close()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	resp := httptest.NewRecorder()
+	server.ServeHTTP(resp, req)
 
 	// Verify we get a successful response
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	if resp.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.Code)
 	}
 
 	// Verify the response is JSON with service info
@@ -57,14 +50,6 @@ func TestHTTPIntegration(t *testing.T) {
 	if version, ok := apiInfo["version"].(string); !ok || version == "" {
 		t.Errorf("Expected non-empty version, got %v", apiInfo["version"])
 	}
-
-	// Stop the server
-	if err := cmd.Process.Kill(); err != nil {
-		t.Errorf("Failed to kill server process: %v", err)
-	}
-
-	// Wait for process to exit
-	cmd.Wait()
 }
 
 // TestVersionFlag tests the --version flag
