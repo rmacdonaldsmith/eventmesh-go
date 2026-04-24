@@ -107,6 +107,54 @@ eventmesh-go/
 
    All tests **must pass** before merging.
 
+### Closing the Loop
+
+Agents should not stop at writing code. Every change should end with a local
+feedback loop that proves the work is correct, or with a clear note explaining
+what could not be verified.
+
+**Default loop for code changes:**
+
+```bash
+bd --no-db show <issue-id>        # Confirm the active Bead and acceptance criteria
+go fmt ./...                      # Or make fmt
+go test ./... -timeout 2m         # Or make test
+make build                        # Builds both server and CLI
+bd --no-db close <issue-id> --reason "..."  # Only after verification passes
+```
+
+**Sandboxed agent loop:**
+
+Some agent sandboxes cannot write to the normal Go cache or module cache. In
+that case, keep the human's Go environment untouched and use temporary caches:
+
+```bash
+env GOCACHE=/tmp/eventmesh-go-build-cache \
+    GOMODCACHE=/tmp/eventmesh-go-mod-cache \
+    go test ./... -timeout 2m
+```
+
+Networking tests use local loopback listeners. If a sandbox blocks bind/connect
+operations, rerun the same test with the tool's approved elevated/network
+permission rather than weakening the test.
+
+**Fast lanes:**
+
+```bash
+go test ./internal/httpapi ./internal/meshnode -timeout 2m
+go test ./cmd/eventmesh ./cmd/eventmesh-cli -timeout 2m
+```
+
+**Full local CI:**
+
+```bash
+make
+```
+
+Before handing work back, agents should report the exact commands run and their
+results. If a command fails, capture the failure in Beads or create a follow-up
+issue rather than leaving it as conversation-only context.
+
 ---
 
 ## 🧰 5. Build & Test Commands
@@ -115,7 +163,9 @@ eventmesh-go/
 # Use Makefile (recommended)
 make help           # Show all available targets
 make                # Run full pipeline: fmt + vet + test + build
-make build          # Build server binary to bin/eventmesh
+make build          # Build server and CLI binaries
+make build-server   # Build server binary to bin/eventmesh
+make build-cli      # Build CLI binary to bin/eventmesh-cli
 make test           # Run all tests with coverage
 make test-coverage  # Generate detailed HTML coverage report
 make fmt            # Format Go code
@@ -125,8 +175,9 @@ make run            # Build and start development server
 
 # Direct Go commands (if needed)
 go build -o bin/eventmesh ./cmd/eventmesh
-go test ./... -v
-go test ./... -cover
+go build -o bin/eventmesh-cli ./cmd/eventmesh-cli
+go test ./... -timeout 2m -v
+go test ./... -timeout 2m -cover
 go fmt ./...
 go vet ./...
 
@@ -241,4 +292,3 @@ When assisting in this repository, **Claude should:**
 * `tests/eventlog_test.go` — full EventLog integration example
 
 ---
-
