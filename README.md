@@ -132,7 +132,12 @@ Advanced command-line workflows:
 
 **Events:**
 - `POST /api/v1/events` - Publish event
-- `GET /api/v1/events/stream?topic=pattern` - Subscribe via Server-Sent Events
+- `GET /api/v1/events/stream` - Stream events for active subscriptions via Server-Sent Events
+
+**Subscriptions:**
+- `POST /api/v1/subscriptions` - Subscribe the authenticated client to a topic pattern
+- `GET /api/v1/subscriptions` - List the authenticated client's subscriptions
+- `DELETE /api/v1/subscriptions/{id}` - Remove a subscription
 
 **Topics:**
 - `GET /api/v1/topics/{topic}/info` - Topic metadata and offsets

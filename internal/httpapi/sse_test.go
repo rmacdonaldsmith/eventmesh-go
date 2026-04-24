@@ -80,6 +80,123 @@ func TestStreamEvents(t *testing.T) {
 		}
 	})
 
+	t.Run("topic_query_is_rejected_with_clear_contract", func(t *testing.T) {
+		token, _, err := auth.GenerateToken("test-sse-client", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		req, err := http.NewRequest("GET", "/api/v1/events/stream?topic=test.events", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "text/event-stream")
+
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		ctx := context.WithValue(req.Context(), ClaimsKey, claims)
+		req = req.WithContext(ctx)
+
+		rr := httptest.NewRecorder()
+		handlers.StreamEvents(rr, req)
+
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, status, rr.Body.String())
+		}
+
+		body := rr.Body.String()
+		if !strings.Contains(body, "topic query parameter is not supported") {
+			t.Errorf("Expected clear topic-query error, got: %s", body)
+		}
+		if !strings.Contains(body, "POST /api/v1/subscriptions") {
+			t.Errorf("Expected error to describe subscription API, got: %s", body)
+		}
+	})
+
+	t.Run("stream_connection_does_not_create_subscription_metadata", func(t *testing.T) {
+		token, _, err := auth.GenerateToken("metadata-test-client", false)
+		if err != nil {
+			t.Fatalf("Failed to generate token: %v", err)
+		}
+
+		claims, err := auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+
+		subReq := SubscriptionRequest{Topic: "metadata.test"}
+		subBody, err := json.Marshal(subReq)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		req, err := http.NewRequest("POST", "/api/v1/subscriptions", strings.NewReader(string(subBody)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		req = req.WithContext(context.WithValue(req.Context(), ClaimsKey, claims))
+
+		rr := httptest.NewRecorder()
+		handlers.CreateSubscription(rr, req)
+		if status := rr.Code; status != http.StatusCreated {
+			t.Fatalf("Failed to create subscription: got status %d", status)
+		}
+
+		before, err := node.GetClientSubscriptions(context.Background(), claims.ClientID)
+		if err != nil {
+			t.Fatalf("Failed to get subscriptions before stream: %v", err)
+		}
+		if len(before) != 1 {
+			t.Fatalf("Expected 1 subscription before stream, got %d", len(before))
+		}
+
+		sseReq, err := http.NewRequest("GET", "/api/v1/events/stream", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sseReq.Header.Set("Authorization", "Bearer "+token)
+		sseReq.Header.Set("Accept", "text/event-stream")
+
+		ctx, cancel := context.WithCancel(context.Background())
+		ctx = context.WithValue(ctx, ClaimsKey, claims)
+		sseReq = sseReq.WithContext(ctx)
+
+		recorder := NewStreamingRecorder()
+		go func() {
+			defer recorder.Close()
+			handlers.StreamEvents(recorder, sseReq)
+		}()
+
+		select {
+		case <-recorder.Data:
+		case <-time.After(1 * time.Second):
+			cancel()
+			t.Fatal("Timeout waiting for SSE connection")
+		}
+
+		during, err := node.GetClientSubscriptions(context.Background(), claims.ClientID)
+		if err != nil {
+			cancel()
+			t.Fatalf("Failed to get subscriptions during stream: %v", err)
+		}
+		if len(during) != len(before) {
+			cancel()
+			t.Fatalf("Expected stream registration to keep %d subscription metadata record(s), got %d", len(before), len(during))
+		}
+
+		cancel()
+		select {
+		case <-recorder.Done:
+		case <-time.After(1 * time.Second):
+			t.Fatal("Stream did not end after cancellation")
+		}
+	})
+
 	t.Run("sse_message_formatting", func(t *testing.T) {
 		// This test verifies that SSE messages are properly formatted when events are delivered
 		// It uses the unified model: create subscription → start SSE → publish event → verify format

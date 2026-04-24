@@ -484,7 +484,9 @@ HTTPClient is **NOT** a client SDK component. It is a server-side component that
 
 #### Current Architecture (Unified Ephemeral Model)
 - **Single Subscription API**: Only `POST/GET/DELETE /api/v1/subscriptions` for subscription management
-- **Unified SSE Streaming**: `GET /api/v1/events/stream` streams ALL active client subscriptions (no topic parameter)
+- **Unified SSE Streaming**: `GET /api/v1/events/stream` streams ALL active client subscriptions
+- **No Topic Query Contract**: `GET /api/v1/events/stream?topic=pattern` is rejected with a clear error; clients should create a subscription first
+- **Client SDK Convenience**: `StreamConfig{Topic: "pattern"}` may create a temporary subscription, connect to the unified stream, filter received events locally, and clean up on close
 - **Ephemeral by Design**: All subscriptions exist only during client connection lifetime
 - **Stateless Nodes**: No cross-node subscription state management or persistence
 

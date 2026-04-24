@@ -14,12 +14,13 @@ import (
 
 // StreamClient handles Server-Sent Events streaming
 type StreamClient struct {
-	client   *Client
-	events   chan EventStreamMessage
-	errors   chan error
-	done     chan struct{}
-	cancel   context.CancelFunc
-	response *http.Response
+	client                  *Client
+	events                  chan EventStreamMessage
+	errors                  chan error
+	done                    chan struct{}
+	cancel                  context.CancelFunc
+	response                *http.Response
+	temporarySubscriptionID string
 }
 
 // StreamConfig configures the streaming client
@@ -47,8 +48,9 @@ func (sc *StreamConfig) SetDefaults() {
 	}
 }
 
-// Stream creates a new SSE streaming client for events
-// This automatically subscribes to the topic and streams events in real-time
+// Stream creates a new SSE streaming client for events.
+// If Topic is set, the client creates a temporary subscription for that topic,
+// filters the unified SSE stream locally, and removes the subscription on Close.
 func (c *Client) Stream(ctx context.Context, config StreamConfig) (*StreamClient, error) {
 	if c.token == "" {
 		return nil, fmt.Errorf("client not authenticated - call Authenticate() first")
@@ -56,15 +58,25 @@ func (c *Client) Stream(ctx context.Context, config StreamConfig) (*StreamClient
 
 	config.SetDefaults()
 
+	var temporarySubscriptionID string
+	if config.Topic != "" {
+		subscriptionID, err := c.ensureStreamSubscription(ctx, config.Topic)
+		if err != nil {
+			return nil, err
+		}
+		temporarySubscriptionID = subscriptionID
+	}
+
 	// Create cancellable context
 	streamCtx, cancel := context.WithCancel(ctx)
 
 	streamClient := &StreamClient{
-		client: c,
-		events: make(chan EventStreamMessage, config.BufferSize),
-		errors: make(chan error, 10),
-		done:   make(chan struct{}),
-		cancel: cancel,
+		client:                  c,
+		events:                  make(chan EventStreamMessage, config.BufferSize),
+		errors:                  make(chan error, 10),
+		done:                    make(chan struct{}),
+		cancel:                  cancel,
+		temporarySubscriptionID: temporarySubscriptionID,
 	}
 
 	// Start streaming in background
@@ -100,7 +112,39 @@ func (sc *StreamClient) Close() error {
 	// Wait for streaming goroutine to finish
 	<-sc.done
 
+	if sc.temporarySubscriptionID == "" {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), sc.client.config.Timeout)
+	defer cancel()
+
+	if err := sc.client.DeleteSubscription(ctx, sc.temporarySubscriptionID); err != nil {
+		return fmt.Errorf("failed to remove temporary stream subscription: %w", err)
+	}
+	sc.temporarySubscriptionID = ""
+
 	return nil
+}
+
+func (c *Client) ensureStreamSubscription(ctx context.Context, topic string) (string, error) {
+	subscriptions, err := c.ListSubscriptions(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to check existing subscriptions for stream topic %q: %w", topic, err)
+	}
+
+	for _, subscription := range subscriptions {
+		if subscription.Topic == topic {
+			return "", nil
+		}
+	}
+
+	subscription, err := c.CreateSubscription(ctx, topic)
+	if err != nil {
+		return "", fmt.Errorf("failed to create temporary stream subscription for topic %q: %w", topic, err)
+	}
+
+	return subscription.ID, nil
 }
 
 // startStreaming handles the SSE streaming loop with reconnection
@@ -152,13 +196,6 @@ func (sc *StreamClient) connectAndStream(ctx context.Context, config StreamConfi
 	// Build streaming URL
 	streamURL := sc.client.baseURL.ResolveReference(&url.URL{Path: "/api/v1/events/stream"})
 
-	// Add topic filter if specified
-	if config.Topic != "" {
-		values := streamURL.Query()
-		values.Set("topic", config.Topic)
-		streamURL.RawQuery = values.Encode()
-	}
-
 	// Create request
 	req, err := http.NewRequestWithContext(ctx, "GET", streamURL.String(), nil)
 	if err != nil {
@@ -189,11 +226,11 @@ func (sc *StreamClient) connectAndStream(ctx context.Context, config StreamConfi
 	}
 
 	// Process SSE stream
-	return sc.processSSEStream(ctx, resp.Body)
+	return sc.processSSEStream(ctx, resp.Body, config)
 }
 
 // processSSEStream reads and parses Server-Sent Events
-func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader) error {
+func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader, config StreamConfig) error {
 	scanner := bufio.NewScanner(reader)
 
 	for scanner.Scan() {
@@ -223,6 +260,10 @@ func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader) 
 				continue
 			}
 
+			if config.Topic != "" && !matchesStreamTopic(config.Topic, event.Topic) {
+				continue
+			}
+
 			// Send event to channel
 			select {
 			case sc.events <- event:
@@ -246,4 +287,24 @@ func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader) 
 	}
 
 	return nil
+}
+
+func matchesStreamTopic(pattern, topic string) bool {
+	if pattern == topic {
+		return true
+	}
+
+	patternParts := strings.Split(pattern, ".")
+	topicParts := strings.Split(topic, ".")
+	if len(patternParts) != len(topicParts) {
+		return false
+	}
+
+	for i, part := range patternParts {
+		if part != "*" && part != topicParts[i] {
+			return false
+		}
+	}
+
+	return true
 }

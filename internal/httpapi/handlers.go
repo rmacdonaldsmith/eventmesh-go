@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -324,6 +325,11 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if topic := strings.TrimSpace(r.URL.Query().Get("topic")); topic != "" {
+		h.writeError(w, "topic query parameter is not supported for SSE streaming; create a subscription with POST /api/v1/subscriptions, then connect to /api/v1/events/stream", http.StatusBadRequest)
+		return
+	}
+
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -348,15 +354,14 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Subscribe the HTTPClient to each existing subscription topic
+		// Register the streaming HTTPClient for each existing subscription topic.
 		// This allows the MeshNode to deliver events to the SSE stream via HTTPClient.DeliverEvent()
-		for _, subscription := range existingSubscriptions {
-			err := h.meshNode.Subscribe(ctx, client, subscription.Topic)
-			if err != nil {
-				h.writeError(w, fmt.Sprintf("Failed to register SSE client for topic %s: %v", subscription.Topic, err), http.StatusInternalServerError)
-				return
-			}
+		topics, err := h.registerSSEClient(ctx, client, existingSubscriptions)
+		if err != nil {
+			h.writeError(w, fmt.Sprintf("Failed to register SSE client: %v", err), http.StatusInternalServerError)
+			return
 		}
+		defer h.unregisterSSEClient(client, topics)
 
 		// Send connection established message
 		w.Write([]byte(": SSE connection established for all topics\n\n"))
@@ -366,6 +371,42 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// For non-streaming clients, just send connection message
 		w.Write([]byte(": SSE connection established for all topics\n\n"))
+	}
+}
+
+func (h *Handlers) registerSSEClient(ctx context.Context, client *HTTPClient, subscriptions []meshnodepkg.ClientSubscription) ([]string, error) {
+	seenTopics := make(map[string]struct{})
+	var topics []string
+
+	routingTable := h.meshNode.GetRoutingTable()
+	for _, subscription := range subscriptions {
+		if _, seen := seenTopics[subscription.Topic]; seen {
+			continue
+		}
+
+		if err := routingTable.Subscribe(ctx, subscription.Topic, client); err != nil {
+			return nil, fmt.Errorf("topic %s: %w", subscription.Topic, err)
+		}
+
+		seenTopics[subscription.Topic] = struct{}{}
+		topics = append(topics, subscription.Topic)
+	}
+
+	return topics, nil
+}
+
+func (h *Handlers) unregisterSSEClient(client *HTTPClient, topics []string) {
+	routingTable := h.meshNode.GetRoutingTable()
+	for _, topic := range topics {
+		if err := routingTable.Unsubscribe(context.Background(), topic, client.ID()); err != nil {
+			if strings.Contains(err.Error(), "routing table is closed") {
+				continue
+			}
+			slog.Warn("failed to unregister SSE client",
+				"client_id", client.ID(),
+				"topic", topic,
+				"error", err)
+		}
 	}
 }
 

@@ -61,9 +61,26 @@ func TestClient_Stream(t *testing.T) {
 	t.Run("creates_stream_client_successfully", func(t *testing.T) {
 		// Create a mock server for this test to avoid connection issues
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/event-stream")
-			// Just establish connection, don't send data
-			time.Sleep(100 * time.Millisecond)
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v1/subscriptions":
+				_ = json.NewEncoder(w).Encode([]SubscriptionResponse{})
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/subscriptions":
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(SubscriptionResponse{
+					ID:       "sub-temp-stream",
+					Topic:    "test.events",
+					ClientID: "test-client",
+				})
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v1/events/stream":
+				assert.Empty(t, r.URL.Query().Get("topic"))
+				w.Header().Set("Content-Type", "text/event-stream")
+				time.Sleep(100 * time.Millisecond)
+			case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/subscriptions/sub-temp-stream":
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+				http.NotFound(w, r)
+			}
 		}))
 		defer server.Close()
 
@@ -94,14 +111,31 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 	t.Run("successful_sse_connection", func(t *testing.T) {
 		// Create mock SSE server
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && r.URL.Path == "/api/v1/subscriptions":
+				_ = json.NewEncoder(w).Encode([]SubscriptionResponse{})
+				return
+			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/subscriptions":
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(SubscriptionResponse{
+					ID:       "sub-stream-topic",
+					Topic:    "test.events",
+					ClientID: "test-client",
+				})
+				return
+			case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/subscriptions/sub-stream-topic":
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
 			// Verify SSE headers are set correctly by client
 			assert.Equal(t, "text/event-stream", r.Header.Get("Accept"))
 			assert.Equal(t, "no-cache", r.Header.Get("Cache-Control"))
 			assert.Equal(t, "Bearer test-token", r.Header.Get("Authorization"))
 
-			// Verify streaming endpoint and topic parameter
+			// Verify streaming endpoint uses the unified stream without a topic query.
 			assert.Equal(t, "/api/v1/events/stream", r.URL.Path)
-			assert.Equal(t, "test.events", r.URL.Query().Get("topic"))
+			assert.Empty(t, r.URL.Query().Get("topic"))
 
 			// Set SSE headers
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -122,6 +156,19 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 
 			eventJSON, err := json.Marshal(event)
 			require.NoError(t, err)
+
+			otherEvent := EventStreamMessage{
+				EventID:   "other-event-123",
+				Topic:     "other.events",
+				Payload:   map[string]interface{}{"message": "filtered payload"},
+				Offset:    43,
+				Timestamp: time.Now(),
+			}
+			otherEventJSON, err := json.Marshal(otherEvent)
+			require.NoError(t, err)
+
+			fmt.Fprintf(w, "data: %s\n\n", string(otherEventJSON))
+			flusher.Flush()
 
 			// Send SSE formatted data
 			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))

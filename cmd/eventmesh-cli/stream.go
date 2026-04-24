@@ -24,7 +24,8 @@ func newStreamCommand() *cobra.Command {
 		Use:   "stream",
 		Short: "Stream events from a topic in real-time",
 		Long: `Stream events from a topic in real-time using Server-Sent Events.
-This automatically subscribes to the topic and streams events as they are published.
+When --topic is set, the CLI creates a temporary subscription, streams matching
+events as they are published, and removes that subscription when the stream stops.
 Optionally specify an offset to start streaming from historical events.
 Press Ctrl+C to stop streaming.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -32,7 +33,7 @@ Press Ctrl+C to stop streaming.`,
 		},
 	}
 
-	cmd.Flags().StringVar(&topic, "topic", "", "Topic to stream from (optional - streams all events if not specified)")
+	cmd.Flags().StringVar(&topic, "topic", "", "Topic to stream from using a temporary subscription (optional - streams active subscriptions if not specified)")
 	cmd.Flags().Int64Var(&offset, "offset", -1, "Starting offset for streaming (-1 means real-time only, 0+ starts from historical events)")
 	cmd.Flags().IntVar(&bufferSize, "buffer-size", 100, "Event buffer size")
 	cmd.Flags().BoolVar(&prettyFormat, "pretty", false, "Pretty print JSON payloads")
