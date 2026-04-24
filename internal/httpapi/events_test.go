@@ -194,6 +194,71 @@ func TestPublishEvent(t *testing.T) {
 			t.Errorf("Expected status %d for nil payload, got %d. Body: %s", http.StatusCreated, status, rr.Body.String())
 		}
 	})
+
+	t.Run("response_uses_persisted_offsets", func(t *testing.T) {
+		token := setup.GenerateTestToken(t, "offset-publisher", false)
+		topic := "offset.response"
+
+		first := publishEventForTest(t, handlers, auth, token, topic, `{"sequence": 1}`)
+		second := publishEventForTest(t, handlers, auth, token, topic, `{"sequence": 2}`)
+
+		if first.Offset != 0 {
+			t.Errorf("Expected first publish response offset 0, got %d", first.Offset)
+		}
+		if first.EventID != topic+"-0" {
+			t.Errorf("Expected first event ID %s-0, got %s", topic, first.EventID)
+		}
+		if second.Offset != 1 {
+			t.Errorf("Expected second publish response offset 1, got %d", second.Offset)
+		}
+		if second.EventID != topic+"-1" {
+			t.Errorf("Expected second event ID %s-1, got %s", topic, second.EventID)
+		}
+
+		events, err := setup.Node.GetEventLog().ReadEvents(context.Background(), topic, 0, 10)
+		if err != nil {
+			t.Fatalf("Failed to read persisted events: %v", err)
+		}
+		if len(events) != 2 {
+			t.Fatalf("Expected 2 persisted events, got %d", len(events))
+		}
+		if events[0].Offset != first.Offset || events[1].Offset != second.Offset {
+			t.Errorf("Expected response offsets to match persisted offsets, got responses [%d,%d] persisted [%d,%d]",
+				first.Offset, second.Offset, events[0].Offset, events[1].Offset)
+		}
+	})
+}
+
+func publishEventForTest(t *testing.T, handlers *Handlers, auth *JWTAuth, token, topic, payload string) PublishResponse {
+	t.Helper()
+
+	requestBody := fmt.Sprintf(`{"topic": %q, "payload": %s}`, topic, payload)
+	req, err := http.NewRequest("POST", "/api/v1/events", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	claims, err := auth.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("Failed to validate token: %v", err)
+	}
+	req = req.WithContext(context.WithValue(req.Context(), ClaimsKey, claims))
+
+	rr := httptest.NewRecorder()
+	handlers.PublishEvent(rr, req)
+
+	if status := rr.Code; status != http.StatusCreated {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusCreated, status, rr.Body.String())
+	}
+
+	var response PublishResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to parse publish response: %v", err)
+	}
+
+	return response
 }
 
 // TestReadTopicEvents tests the GET /api/v1/topics/{topic}/events endpoint

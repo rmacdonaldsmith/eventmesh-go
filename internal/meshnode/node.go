@@ -352,19 +352,26 @@ func (n *GRPCMeshNode) forwardToPeers(ctx context.Context, event *eventlogpkg.Ev
 // 3. Find local subscribers via RoutingTable
 // 4. Forward to remote peers via PeerLink (for remote subscribers)
 func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client, event *eventlogpkg.Event) error {
+	_, err := n.PublishEventWithResult(ctx, client, event)
+	return err
+}
+
+// PublishEventWithResult accepts an event from a local client and returns the persisted event.
+// The returned event contains the EventLog-assigned offset and should be used for API responses.
+func (n *GRPCMeshNode) PublishEventWithResult(ctx context.Context, client meshnode.Client, event *eventlogpkg.Event) (*eventlogpkg.Event, error) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
 
 	// Validate inputs and node state
 	if err := n.validatePublishRequest(client, event); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Step 1: PERSIST LOCALLY FIRST (REQ-MNODE-002)
 	// This ensures durability before any forwarding occurs
 	persistedEvent, err := n.eventLog.AppendEvent(ctx, event.Topic, event)
 	if err != nil {
-		return fmt.Errorf("failed to persist event locally: %w", err)
+		return nil, fmt.Errorf("failed to persist event locally: %w", err)
 	}
 
 	// Step 2: Deliver to local subscribers
@@ -372,7 +379,7 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 
 	// Check for context cancellation after local delivery
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	// Step 3: Forward to remote peers using intelligent routing
@@ -380,7 +387,7 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 
 	// Check for context cancellation after peer forwarding
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 
 	// Return based on delivery results
@@ -395,7 +402,7 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 			"total_errors", len(deliveryResult.Errors))
 
 		// Return error with detailed information
-		return fmt.Errorf("%s", deliveryResult.Error())
+		return nil, fmt.Errorf("%s", deliveryResult.Error())
 	}
 
 	// Success: Event was persisted locally and delivered to all subscribers
@@ -404,7 +411,7 @@ func (n *GRPCMeshNode) PublishEvent(ctx context.Context, client meshnode.Client,
 		"local_deliveries", deliveryResult.LocalSuccesses,
 		"peer_deliveries", deliveryResult.PeerSuccesses)
 
-	return nil
+	return persistedEvent, nil
 }
 
 // Subscribe registers a client's interest in a topic pattern.

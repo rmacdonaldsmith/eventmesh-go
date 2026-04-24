@@ -191,7 +191,7 @@ func (h *Handlers) PublishEvent(w http.ResponseWriter, r *http.Request) {
 
 	// Publish event through MeshNode
 	ctx := r.Context()
-	err := h.meshNode.PublishEvent(ctx, client, eventRecord)
+	persistedEvent, err := h.meshNode.PublishEventWithResult(ctx, client, eventRecord)
 	if err != nil {
 		h.writeError(w, fmt.Sprintf("Failed to publish event: %v", err), http.StatusInternalServerError)
 		return
@@ -201,14 +201,14 @@ func (h *Handlers) PublishEvent(w http.ResponseWriter, r *http.Request) {
 	slog.Info("event published",
 		"client_id", client.ID(),
 		"topic", req.Topic,
-		"event_offset", eventRecord.Offset,
+		"event_offset", persistedEvent.Offset,
 		"payload_size", len(payload))
 
 	// Create response
 	resp := PublishResponse{
-		EventID:   fmt.Sprintf("%s-%d", req.Topic, eventRecord.Offset), // Topic + offset as ID
-		Offset:    eventRecord.Offset,                                  // This will be set by the EventLog
-		Timestamp: time.Now(),
+		EventID:   fmt.Sprintf("%s-%d", persistedEvent.Topic, persistedEvent.Offset),
+		Offset:    persistedEvent.Offset,
+		Timestamp: persistedEvent.Timestamp,
 	}
 
 	h.writeJSON(w, resp, http.StatusCreated)
