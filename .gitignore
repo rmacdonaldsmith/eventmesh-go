@@ -20,6 +20,7 @@ eventmesh-cli
 
 # Beads task management - exclude SQLite cache, include JSONL source of truth
 .beads/*.db
+.beads/last-touched
 
 # Code coverage profiles and other test artifacts
 *.out
