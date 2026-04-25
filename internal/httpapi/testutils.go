@@ -19,8 +19,8 @@ type TestServerSetup struct {
 func NewTestServerSetup(t *testing.T) *TestServerSetup {
 	t.Helper()
 
-	// Create test mesh node
-	config := meshnode.NewConfig("test-node", "localhost:8080")
+	// Create test mesh node with an OS-assigned peer port to avoid test collisions.
+	config := meshnode.NewConfig("test-node", "localhost:0")
 	node, err := meshnode.NewGRPCMeshNode(config)
 	if err != nil {
 		t.Fatalf("Failed to create mesh node: %v", err)

@@ -20,7 +20,7 @@ import (
 // 6. Clean up subscription via DELETE /api/v1/subscriptions/{id}
 func TestEndToEndSubscriptionAndSSEIntegration(t *testing.T) {
 	// Setup test server and dependencies
-	config := meshnode.NewConfig("test-node", "localhost:9090")
+	config := meshnode.NewConfig("test-node", "localhost:0")
 	node, err := meshnode.NewGRPCMeshNode(config)
 	if err != nil {
 		t.Fatalf("Failed to create mesh node: %v", err)

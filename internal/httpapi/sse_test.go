@@ -14,8 +14,8 @@ import (
 
 // TestStreamEvents tests the GET /api/v1/events/stream SSE endpoint
 func TestStreamEvents(t *testing.T) {
-	// Create a test mesh node config
-	config := meshnode.NewConfig("test-node", "localhost:8080")
+	// Create a test mesh node config with an OS-assigned peer port.
+	config := meshnode.NewConfig("test-node", "localhost:0")
 
 	// Create mesh node
 	node, err := meshnode.NewGRPCMeshNode(config)
