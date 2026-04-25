@@ -47,8 +47,8 @@
 //   - "*" matches any single topic segment
 //   - "orders.*" matches "orders.created", "orders.updated", etc.
 //   - "*.urgent" matches "orders.urgent", "payments.urgent", etc.
-//   - Future: "orders.**" for multi-level wildcards
+//   - Multi-segment wildcards such as "orders.#" are not implemented
 //
-// This package is part of the EventMesh system for secure, distributed event routing.
-// See the design.md file for complete architecture and requirements.
+// This package is part of EventMesh's local subscription routing boundary.
+// See docs/design.md for current architecture and roadmap notes.
 package routingtable

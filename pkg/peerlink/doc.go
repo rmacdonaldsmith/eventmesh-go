@@ -1,16 +1,16 @@
-// Package peerlink provides interfaces for secure peer-to-peer communication.
+// Package peerlink provides interfaces for peer-to-peer mesh communication.
 //
 // This package defines the core abstractions for EventMesh peer link component:
 //   - PeerNode: Interface representing a remote mesh node
 //   - PeerLink: Interface for managing connections and streaming between mesh nodes
 //
-// The peer link implements the following requirements from design.md:
-//   - REQ-PL-001: Secure Connection Lifecycle - mTLS connections with proper lifecycle management
-//   - REQ-PL-002: Backpressure and Flow Control - handles streaming backpressure
-//   - REQ-PL-003: Heartbeats and Failure Detection - monitors peer health
+// The peer link is the transport boundary between mesh nodes. The current
+// implementation uses gRPC bidirectional streams for events, subscription
+// changes, and heartbeats. mTLS and stronger peer identity are roadmap work,
+// not current implementation guarantees.
 //
 // Key features:
-//   - gRPC over HTTP/2 with mTLS for secure, efficient streaming
+//   - gRPC over HTTP/2 for bidirectional peer streaming
 //   - Bi-directional event streaming between mesh nodes
 //   - Automatic connection lifecycle management
 //   - Built-in backpressure and flow control
@@ -33,7 +33,7 @@
 //	}
 //
 //	// Send an event to the peer
-//	event := eventlog.NewRecord("orders.created", eventData)
+//	event := &eventlog.Event{Topic: "orders.created", Payload: eventData}
 //	err = peerLink.SendEvent(ctx, "node-2", event)
 //	if err != nil {
 //		return err
@@ -58,6 +58,6 @@
 //		return err
 //	}
 //
-// This package is part of the EventMesh system for secure, distributed event routing.
-// See the design.md file for complete architecture and requirements.
+// This package is part of the EventMesh system for distributed event routing.
+// See docs/design.md for current architecture and roadmap notes.
 package peerlink

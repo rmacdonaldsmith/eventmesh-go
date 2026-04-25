@@ -92,8 +92,9 @@ type ControlPlanePeerLink interface {
 type PeerConnectionManager interface {
 	io.Closer
 
-	// Connect establishes a secure connection to the specified peer node.
-	// Uses gRPC with mTLS for secure, efficient bi-directional streaming.
+	// Connect establishes a connection to the specified peer node.
+	// The current implementation uses gRPC bidirectional streaming; authenticated
+	// peer identity and mTLS are tracked as roadmap work.
 	Connect(ctx context.Context, peer PeerNode) error
 
 	// Disconnect closes the connection to the specified peer node.

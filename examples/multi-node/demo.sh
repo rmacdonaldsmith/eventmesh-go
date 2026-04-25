@@ -9,10 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLI="$PROJECT_ROOT/bin/eventmesh-cli"
 SERVER_SCRIPT="$SCRIPT_DIR/start-server.sh"
-SERVER="http://localhost:8081"
+SERVER="${EVENTMESH_SERVER:-http://localhost:8081}"
 
 echo "EventMesh Simple Demo"
 echo "===================="
+echo "Server: $SERVER"
 
 # Check CLI exists
 if [ ! -f "$CLI" ]; then
@@ -44,8 +45,7 @@ PUB_TOKEN=$(echo "$PUB_AUTH" | grep "Token:" | awk '{print $2}')
 echo ""
 echo "Starting 5-second event stream..."
 
-# Start streaming in background (using specific topic since wildcard streaming not supported yet)
-$CLI stream --server "$SERVER" --client-id subscriber --token "$SUB_TOKEN" --topic "news.sports" &
+$CLI stream --server "$SERVER" --client-id subscriber --token "$SUB_TOKEN" --topic "news.*" &
 STREAM_PID=$!
 
 sleep 2

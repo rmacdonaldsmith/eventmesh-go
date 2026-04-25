@@ -8,11 +8,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLI="$PROJECT_ROOT/bin/eventmesh-cli"
-SERVER="http://localhost:8091"
+SERVER="${EVENTMESH_SERVER:-http://localhost:8081}"
 CLIENT_ID="subscriber"
 
 echo "EventMesh Subscriber"
 echo "==================="
+echo "Server: $SERVER"
 
 # Check CLI exists
 if [ ! -f "$CLI" ]; then
@@ -42,10 +43,8 @@ echo ""
 echo "Streaming events (Press Ctrl+C to stop):"
 echo "Run ./publisher.sh in another terminal to see events here"
 echo ""
-echo "Note: Streaming from news.sports topic"
-echo "(Subscription covers news.* pattern, but streaming requires specific topics)"
+echo "Streaming topic pattern: news.*"
+echo "The CLI creates a temporary subscription and filters matching SSE events."
 echo ""
 
-# Stream from one specific topic to avoid output conflicts
-# The subscription will still catch events from all news.* topics
-$CLI stream --server "$SERVER" --client-id "$CLIENT_ID" --token "$TOKEN" --topic "news.sports"
+$CLI stream --server "$SERVER" --client-id "$CLIENT_ID" --token "$TOKEN" --topic "news.*"

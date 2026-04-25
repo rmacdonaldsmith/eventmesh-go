@@ -9,8 +9,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// JWT authentication for EventMesh HTTP API
-// Using golang-jwt/jwt library for production-ready JWT handling
+// JWT authentication for EventMesh HTTP API.
+// Uses golang-jwt/jwt for token creation and validation.
 
 // JWTClaims represents the JWT token claims
 type JWTClaims struct {

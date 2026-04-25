@@ -42,6 +42,9 @@ go.work.sum
 # .idea/
 # .vscode/
 
+# OS-generated files
+.DS_Store
+
 # Backup files
 *.backup
 *.bak

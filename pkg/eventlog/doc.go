@@ -1,8 +1,11 @@
-// Package eventlog provides interfaces for append-only event storage.
+// Package eventlog provides interfaces for topic-scoped append-only event storage.
 //
 // This package defines the core abstractions for the EventMesh event log component:
-//   - EventRecord: Interface for individual events with offset, topic, payload, timestamp, and headers
-//   - EventLog: Interface for append-only log operations (append, read, replay, compact)
+//   - Event: A topic event with offset, payload, timestamp, and headers
+//   - EventLog: Interface for appending, reading, replaying, compacting, and reporting statistics
+//
+// The current in-repository implementation is in-memory. Offsets are assigned
+// independently per topic and start at 0. Durable storage is roadmap work.
 //
 // The interfaces use Go idioms:
 //   - context.Context instead of CancellationToken for cancellation and timeouts
@@ -12,20 +15,20 @@
 //
 // Example usage:
 //
-//	// Append an event
-//	record, err := log.Append(ctx, event)
+//	// Append an event to a topic
+//	stored, err := log.AppendEvent(ctx, "orders.created", event)
 //	if err != nil {
 //		return err
 //	}
 //
 //	// Read events from offset 0, max 100 events
-//	events, err := log.ReadFrom(ctx, 0, 100)
+//	events, err := log.ReadEvents(ctx, "orders.created", 0, 100)
 //	if err != nil {
 //		return err
 //	}
 //
-//	// Replay events starting from offset 10
-//	eventChan, errChan := log.Replay(ctx, 10)
+//	// Replay events for one topic starting from offset 10
+//	eventChan, errChan := log.ReplayEvents(ctx, "orders.created", 10)
 //	for {
 //		select {
 //		case event, ok := <-eventChan:
@@ -42,6 +45,9 @@
 //		}
 //	}
 //
-// This package is part of the EventMesh system for secure, distributed event routing.
-// See the design.md file for complete architecture and requirements.
+//	_ = stored
+//	_ = events
+//
+// This package is part of EventMesh's local persistence and replay boundary.
+// See docs/design.md for current architecture and roadmap notes.
 package eventlog

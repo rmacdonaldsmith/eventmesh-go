@@ -8,11 +8,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 CLI="$PROJECT_ROOT/bin/eventmesh-cli"
-SERVER="http://localhost:8091"
+SERVER="${EVENTMESH_SERVER:-http://localhost:8081}"
 CLIENT_ID="publisher"
 
 echo "EventMesh Publisher"
 echo "=================="
+echo "Server: $SERVER"
 
 # Check CLI exists
 if [ ! -f "$CLI" ]; then

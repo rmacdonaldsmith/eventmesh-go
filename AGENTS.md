@@ -10,13 +10,14 @@ Provide structured guidance to Codex and human contributors when working on the 
 
 ## 🧠 1. Project Overview
 
-**EventMesh** is a **production-ready, distributed event streaming platform** in Go.
-It enables **secure, scalable, and low-latency** event routing across a peer-to-peer mesh network.
+**EventMesh** is a Go event-streaming project with a working HTTP/CLI MVP and
+an in-progress peer-to-peer mesh layer. Treat production claims as roadmap work
+unless the code and tests prove the behavior today.
 
 **Core Goals**
 
 * 🔐 Client isolation via JWT authentication
-* 📡 Real-time event streaming (SSE / gRPC)
+* 📡 Real-time client streaming via SSE and peer transport via gRPC
 * 🧱 Modular architecture (EventLog, MeshNode, RoutingTable, PeerLink)
 * 🧪 Test-driven, interface-first design
 * 🧭 Production-grade orchestration (graceful shutdown, observability)
@@ -29,11 +30,11 @@ It enables **secure, scalable, and low-latency** event routing across a peer-to-
 
 | Component        | Purpose                                                | Status         |
 | ---------------- | ------------------------------------------------------ | -------------- |
-| **EventLog**     | Append-only event persistence with replay              | ✅ Complete     |
-| **MeshNode**     | Core orchestration: manages clients, routes, lifecycle | ✅ Complete     |
-| **RoutingTable** | Topic-based subscription mapping with wildcard support | ✅ Complete     |
-| **PeerLink**     | Peer-to-peer communication layer                       | 🚧 In Progress |
-| **HTTP API**     | REST + SSE interface for external clients              | 📋 Planned     |
+| **EventLog**     | In-memory append-only event storage with replay        | ✅ MVP implemented |
+| **MeshNode**     | Core orchestration: clients, routes, lifecycle         | ✅ MVP implemented |
+| **RoutingTable** | Topic subscriptions with single-segment wildcards      | ✅ Implemented  |
+| **PeerLink**     | gRPC peer communication layer                          | 🚧 In progress |
+| **HTTP API**     | REST + SSE interface for external clients              | ✅ Implemented  |
 
 **Design Principles**
 
@@ -49,18 +50,20 @@ It enables **secure, scalable, and low-latency** event routing across a peer-to-
 
 ```
 eventmesh-go/
-├── cmd/eventmesh/         # CLI entrypoint
-├── pkg/                   # Public interfaces
+├── cmd/eventmesh/         # Server binary
+├── cmd/eventmesh-cli/     # CLI binary
+├── pkg/                   # Public interfaces and clients
+│   ├── httpclient/        # HTTP client and SSE streaming
 │   ├── eventlog/          # EventLog contracts
 │   └── meshnode/          # MeshNode interfaces
 ├── internal/              # Implementations
-│   ├── eventlog/          # InMemory + Persistent logs
+│   ├── eventlog/          # In-memory EventLog
 │   ├── meshnode/          # Core orchestration
 │   ├── routingtable/      # Subscription routing
 │   ├── peerlink/          # Networking layer
-│   └── httpapi/           # HTTP interface (planned)
+│   └── httpapi/           # HTTP API implementation
 ├── tests/                 # Integration tests
-└── docs/                  # Design docs & API plans
+└── docs/                  # Current docs and future design notes
 ```
 
 ---
@@ -193,16 +196,23 @@ Tests are organized by concern:
 
 ---
 
-## 🌐 6. API Overview (Planned HTTP Layer)
+## 🌐 6. API Overview
 
 **Client APIs (JWT-protected):**
 
 ```http
 POST /api/v1/auth/login              # Authenticate client
 POST /api/v1/events                  # Publish event
-GET  /api/v1/events/stream?topic=*   # Subscribe via SSE
+GET  /api/v1/events/stream           # SSE for active subscriptions
+GET  /api/v1/topics/{topic}/events   # Read/replay events by topic and offset
 POST /api/v1/subscriptions           # Add topic subscription
+GET  /api/v1/subscriptions           # List client subscriptions
+DELETE /api/v1/subscriptions/{id}    # Remove subscription
 ```
+
+`GET /api/v1/events/stream?topic=...` is intentionally rejected. Use
+`POST /api/v1/subscriptions` first, or use the CLI/Go client `StreamConfig.Topic`
+convenience that creates a temporary subscription and cleans it up on close.
 
 **Admin APIs:**
 
@@ -283,12 +293,20 @@ When assisting in this repository, **Codex should:**
 6. **Prefer correctness over performance** in early iterations.
 7. **Never overwrite tests** — new code must extend existing coverage, not replace it.
 
+### Documentation Maintenance
+
+* Prefer documenting current behavior before roadmap ideas.
+* Mark future design explicitly as future or planned.
+* Keep commands copy/pasteable from the repository root unless noted.
+* When API behavior changes, update the root README, design doc, examples, and
+  agent guidance in the same change.
+
 ---
 
 ## 📘 11. Key References
 
-* `docs/design.md` — original system design document
-* `docs/EventMesh-HTTP-API-Implementation-Plan.md` — API specs
-* `tests/eventlog_test.go` — full EventLog integration example
+* `docs/design.md` — current architecture, limits, and roadmap
+* `docs/discovery.md` — future discovery design notes
+* `README.md` — quickstart and current API summary
 
 ---

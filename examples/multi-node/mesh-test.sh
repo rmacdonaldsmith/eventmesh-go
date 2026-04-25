@@ -77,9 +77,9 @@ echo ""
 echo "✅ All nodes are responding!"
 echo ""
 
-# Test 1: Publish to Node1, check Node2 and Node3 can see it
-echo "🧪 Test 1: Cross-Node Event Distribution"
-echo "========================================="
+# Test 1: Publish to Node1, then probe Node2 and Node3 for propagated data
+echo "🧪 Test 1: Cross-Node Event Propagation Probe"
+echo "============================================="
 echo ""
 
 TOPIC="mesh.test.cross_node"
@@ -103,7 +103,7 @@ else
 fi
 
 echo ""
-echo "🔍 Checking if event reached other nodes..."
+echo "🔍 Checking whether the event reached other nodes..."
 
 # Small delay to allow propagation
 sleep 2
@@ -129,8 +129,8 @@ fi
 echo ""
 
 # Test 2: Replay the event from different nodes
-echo "🧪 Test 2: Event Replay Across Nodes"
-echo "====================================="
+echo "🧪 Test 2: Event Replay Probe Across Nodes"
+echo "=========================================="
 echo ""
 
 for i in 1 2 3; do
@@ -223,11 +223,11 @@ done
 echo "🎉 Multi-Node Mesh Test Complete!"
 echo ""
 echo "💡 What this test demonstrated:"
-echo "   ✅ Events published to one node propagate to others"
-echo "   ✅ All nodes can replay the same events (mesh consistency)"
 echo "   ✅ Events can be published from any node in the mesh"
-echo "   ✅ Node discovery enables automatic mesh formation"
+echo "   ✅ Static seed discovery can form local peer connections"
+echo "   ✅ Replay can be probed from each node"
+echo "   ⚠️  Cross-node delivery semantics are still being hardened"
 echo ""
 echo "🔍 To see discovery logs:"
-echo "   Check /tmp/eventmesh-demo-*/node*.log for discovery messages"
-echo "   Look for: '🔍 Discovery found X peers' and '✅ Connected to peer'"
+echo "   Check /tmp/eventmesh-demo/node*.log for discovery messages"
+echo "   Look for peer discovery and connection log lines"

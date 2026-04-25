@@ -5,15 +5,13 @@
 //   - MeshNode: Main orchestrator interface that coordinates all mesh components
 //   - HealthStatus: Health monitoring and status reporting
 //
-// The mesh node implements the following requirements from design.md:
-//   - REQ-MNODE-001: Authentication of Clients - validates and authenticates connecting clients
-//   - REQ-MNODE-002: Local Persistence Before Forwarding - persists events locally before routing
-//   - REQ-MNODE-003: Subscription Propagation - propagates subscriptions to peer nodes
+// The mesh node owns client identity, local persistence, routing decisions, and
+// peer forwarding. The current implementation is used by the HTTP API and CLI.
 //
 // The MeshNode is the main entry point that orchestrates:
 //   - EventLog: For local event persistence and replay
 //   - RoutingTable: For topic-to-subscriber mapping and routing decisions
-//   - PeerLink: For secure communication with other mesh nodes
+//   - PeerLink: For gRPC communication with other mesh nodes
 //   - Client connections: For handling publisher/subscriber clients
 //
 // Architecture:
@@ -32,8 +30,8 @@
 //
 // Example usage:
 //
-//	// Create and start a mesh node
-//	node := meshnode.New(config)
+//	// Start a mesh node supplied by the concrete implementation.
+//	var node MeshNode = configuredNode
 //	err := node.Start(ctx)
 //	if err != nil {
 //		return err
@@ -53,7 +51,7 @@
 //	}
 //
 //	// Handle client publishing
-//	event := eventlog.NewRecord("orders.created", eventData)
+//	event := &eventlog.Event{Payload: eventData}
 //	err = node.PublishEvent(ctx, client, event)
 //	if err != nil {
 //		return err
@@ -68,6 +66,6 @@
 //		log.Printf("Node unhealthy: %s", health.Message)
 //	}
 //
-// This package is part of the EventMesh system for secure, distributed event routing.
-// See the design.md file for complete architecture and requirements.
+// This package is part of EventMesh's orchestration boundary.
+// See docs/design.md for current architecture and roadmap notes.
 package meshnode

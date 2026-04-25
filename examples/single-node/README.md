@@ -1,247 +1,103 @@
-# Single Node EventMesh Server Example
+# Single-Node Example
 
-This example demonstrates how to run a single-node EventMesh server and interact with it using the CLI tool.
+This example shows the simplest useful EventMesh setup: one server, one HTTP
+API, and CLI clients.
 
-## Overview
+Run commands from the repository root unless noted.
 
-EventMesh provides a distributed event streaming platform with:
-- **HTTP API** for publishing events and managing subscriptions
-- **Server-Sent Events (SSE)** for real-time event streaming
-- **JWT authentication** for client isolation
-- **CLI tool** for easy interaction
-
-## Quick Start
-
-### 1. Build the Binaries
-
-First, build both the server and CLI:
+## Build
 
 ```bash
-# From the project root
 make build
-
-# This creates:
-# - bin/eventmesh (server)
-# - bin/eventmesh-cli (CLI tool)
 ```
 
-### 2. Start the EventMesh Server
+## Start A Development Server
 
 ```bash
-./bin/eventmesh \
-  --http \
-  --http-port 8081 \
-  --http-secret "my-secret-key" \
-  --node-id "demo-node" \
-  --listen ":8082" \
-  --peer-listen ":8083"
+./examples/single-node/start-server.sh
 ```
 
-**Server Options Explained:**
-- `--http`: Enable HTTP API
-- `--http-port 8081`: HTTP API listens on port 8081
-- `--http-secret "my-secret-key"`: JWT signing secret
-- `--node-id "demo-node"`: Unique identifier for this node
-- `--listen ":8082"`: Internal mesh communication port
-- `--peer-listen ":8083"`: Peer-to-peer communication port
+The script starts `bin/eventmesh` with:
 
-### 3. Verify Server is Running
+- HTTP API on `http://localhost:8081`
+- node ID `single-node-demo`
+- `--no-auth` enabled for development
+- default ports `8082` and `8083` for internal/peer listeners
 
-Check the server health:
+Override ports if needed:
 
 ```bash
-./bin/eventmesh-cli health \
-  --server http://localhost:8081 \
-  --client-id demo-client
+HTTP_PORT=8181 LISTEN_PORT=8182 PEER_LISTEN_PORT=8183 \
+  ./examples/single-node/start-server.sh
 ```
 
-Expected output:
-```
-✅ Server is healthy
-Connected Clients: 0
-Connected Peers: 0
-Event Log: Healthy
-Routing Table: Healthy
-Peer Link: Healthy
-```
+## Try The CLI
 
-## Basic Operations
-
-### Authentication
-
-Before publishing or subscribing, authenticate with the server:
+In another terminal:
 
 ```bash
-./bin/eventmesh-cli auth \
-  --server http://localhost:8081 \
-  --client-id demo-client
+./bin/eventmesh-cli --no-auth health
+
+./bin/eventmesh-cli --no-auth publish \
+  --topic orders.created \
+  --payload '{"order_id":"001","total":149.99}'
+
+./bin/eventmesh-cli --no-auth topics info --topic orders.created
+
+./bin/eventmesh-cli --no-auth replay --topic orders.created --offset 0
 ```
 
-This returns a JWT token that's automatically stored for subsequent commands.
+## Stream Events
 
-### Publishing Events
-
-Publish an event to a topic:
+Terminal 2:
 
 ```bash
+./bin/eventmesh-cli --no-auth stream --topic 'orders.*'
+```
+
+Terminal 3:
+
+```bash
+./bin/eventmesh-cli --no-auth publish \
+  --topic orders.updated \
+  --payload '{"order_id":"001","status":"processing"}'
+```
+
+The stream command creates a temporary subscription for `orders.*`, opens the
+SSE stream, filters matching events locally, and removes the temporary
+subscription when it exits.
+
+## Authenticated Mode
+
+For JWT mode, start the server manually without `--no-auth`:
+
+```bash
+EVENTMESH_JWT_SECRET="demo-secret" \
+  ./bin/eventmesh --http --node-id demo-node
+```
+
+Then authenticate:
+
+```bash
+./bin/eventmesh-cli auth --client-id demo-client
 ./bin/eventmesh-cli publish \
-  --server http://localhost:8081 \
   --client-id demo-client \
-  --topic "orders.created" \
-  --payload '{"order_id": "12345", "customer": "john@example.com", "amount": 99.99}'
+  --topic orders.created \
+  --payload '{"order_id":"002"}'
 ```
 
-### Creating Subscriptions
-
-Subscribe to a topic pattern:
+Admin commands require the `admin` client ID:
 
 ```bash
-./bin/eventmesh-cli subscribe \
-  --server http://localhost:8081 \
-  --client-id demo-client \
-  --topic "orders.*"
+./bin/eventmesh-cli auth --client-id admin
+./bin/eventmesh-cli admin stats --client-id admin
 ```
-
-### Listing Subscriptions
-
-View all your subscriptions:
-
-```bash
-./bin/eventmesh-cli subscriptions list \
-  --server http://localhost:8081 \
-  --client-id demo-client
-```
-
-### Streaming Events (Real-time)
-
-Stream events in real-time using Server-Sent Events:
-
-```bash
-./bin/eventmesh-cli stream \
-  --server http://localhost:8081 \
-  --client-id demo-client \
-  --topic "orders.*"
-```
-
-This will show live events as they're published. Press Ctrl+C to stop.
-
-## Complete Workflow Example
-
-Here's a complete workflow demonstrating EventMesh capabilities:
-
-### Terminal 1: Start Server
-```bash
-./bin/eventmesh --http --http-port 8081 --http-secret "demo-secret" --node-id "demo-node" --listen ":8082" --peer-listen ":8083"
-```
-
-### Terminal 2: Setup Subscriber
-```bash
-# Authenticate
-./bin/eventmesh-cli auth --server http://localhost:8081 --client-id subscriber
-
-# Create subscription
-./bin/eventmesh-cli subscribe --server http://localhost:8081 --client-id subscriber --topic "orders.*"
-
-# Start streaming (this will block and show live events)
-./bin/eventmesh-cli stream --server http://localhost:8081 --client-id subscriber --topic "orders.*"
-```
-
-### Terminal 3: Publish Events
-```bash
-# Authenticate
-./bin/eventmesh-cli auth --server http://localhost:8081 --client-id publisher
-
-# Publish some events
-./bin/eventmesh-cli publish --server http://localhost:8081 --client-id publisher --topic "orders.created" --payload '{"order_id": "001", "customer": "alice@example.com"}'
-
-./bin/eventmesh-cli publish --server http://localhost:8081 --client-id publisher --topic "orders.updated" --payload '{"order_id": "001", "status": "processing"}'
-
-./bin/eventmesh-cli publish --server http://localhost:8081 --client-id publisher --topic "orders.completed" --payload '{"order_id": "001", "total": 149.99}'
-```
-
-You should see these events appear in real-time in Terminal 2!
-
-## Configuration Options
-
-### Server Configuration
-
-The EventMesh server supports various configuration options:
-
-```bash
-./bin/eventmesh --help
-```
-
-Key options:
-- `--http`: Enable HTTP API (required for CLI interaction)
-- `--http-port`: HTTP API port (default: 8081)
-- `--http-secret`: JWT signing secret (required for authentication)
-- `--node-id`: Unique node identifier (required)
-- `--listen`: Internal mesh communication address
-- `--peer-listen`: Peer-to-peer communication address
-- `--log-level`: Logging level (debug, info, warn, error)
-
-### CLI Configuration
-
-The CLI tool supports global flags:
-
-```bash
-./bin/eventmesh-cli --help
-```
-
-Key options:
-- `--server`: EventMesh server URL (default: http://localhost:8081)
-- `--client-id`: Client identifier (required for most operations)
-- `--token`: JWT token (if you want to reuse a previous token)
-- `--timeout`: Request timeout (default: 30s)
-
-## Advanced Topics
-
-### Topic Patterns
-
-EventMesh supports wildcard patterns in subscriptions:
-
-- `orders.*` - matches `orders.created`, `orders.updated`, etc.
-- `user.*.login` - matches `user.123.login`, `user.456.login`, etc.
-- `*` - matches all topics
-
-### Event Persistence
-
-All events are persisted locally by the EventMesh server. This means:
-- Events are not lost if subscribers are offline
-- New subscribers can replay historical events
-- The server can restart without losing events (in production with persistent storage)
-
-### Authentication & Security
-
-- Each client must authenticate with a unique `client-id`
-- JWT tokens are used for subsequent API calls
-- Clients are isolated from each other
-- Admin operations require special privileges
-
-## Next Steps
-
-- See `examples/cli-usage/` for more advanced CLI workflows
-- See `examples/http-client/` for Go applications using the HTTP client library
-- See `examples/end-to-end/` for complete application examples
 
 ## Troubleshooting
 
-### Server Won't Start
-- Check if ports 8081, 8082, 8083 are available
-- Ensure you have the `--http-secret` flag set
-- Check logs for specific error messages
-
-### Authentication Fails
-- Verify the server URL is correct
-- Ensure the server is running and healthy
-- Check that you're using a unique `client-id`
-
-### Events Not Received
-- Verify you have an active subscription to the topic
-- Check that the topic pattern matches published topics
-- Ensure the subscriber is authenticated
-
-### Connection Issues
-- Check network connectivity to the server
-- Verify the server is accepting HTTP connections
-- Try the health check command first
+- If the script cannot find `bin/eventmesh`, run `make build`.
+- If ports are busy, override `HTTP_PORT`, `LISTEN_PORT`, or
+  `PEER_LISTEN_PORT`.
+- If authenticated commands fail, run `auth` again or provide `--token`.
+- If a stream receives nothing, publish to a topic that matches the stream topic
+  pattern.
