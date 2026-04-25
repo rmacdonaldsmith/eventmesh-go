@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -998,13 +999,35 @@ func (n *GRPCMeshNode) getInterestedPeers(topic string, allPeers []peerlinkpkg.P
 
 		// Check if this peer has subscriptions for the topic
 		if peerTopics, exists := n.peerSubscriptions[peerID]; exists {
-			if hasSubscriber, topicExists := peerTopics[topic]; topicExists && hasSubscriber {
-				interestedPeers = append(interestedPeers, peer)
+			for subscriptionPattern, hasSubscriber := range peerTopics {
+				if hasSubscriber && matchesPeerSubscriptionPattern(subscriptionPattern, topic) {
+					interestedPeers = append(interestedPeers, peer)
+					break
+				}
 			}
 		}
 	}
 
 	return interestedPeers
+}
+
+func matchesPeerSubscriptionPattern(pattern, topic string) bool {
+	if pattern == topic {
+		return true
+	}
+
+	patternParts := strings.Split(pattern, ".")
+	topicParts := strings.Split(topic, ".")
+	if len(patternParts) != len(topicParts) {
+		return false
+	}
+
+	for i, part := range patternParts {
+		if part != "*" && part != topicParts[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // Helper methods for subscription metadata management

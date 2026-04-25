@@ -684,7 +684,7 @@ func TestGRPCMeshNode_IncomingEventHandling(t *testing.T) {
 
 // TestGRPCMeshNode_SubscriptionEventHandling tests handling of subscription events from peers
 func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
-	config := NewConfig("subscription-event-node", "localhost:8097")
+	config := NewConfig("subscription-event-node", "localhost:0")
 	node, err := NewGRPCMeshNode(config)
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
@@ -719,6 +719,100 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 	node.processIncomingSubscriptionChange(ctx, unsubscriptionChange)
 
 	t.Logf("✅ Subscription event handling implemented (basic MVP version)")
+}
+
+func TestGRPCMeshNode_GetInterestedPeersMatchesWildcardSubscriptions(t *testing.T) {
+	config := NewConfig("publisher-node", "localhost:0")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+
+	interestedPeer := &simplePeerNode{id: "peer-with-orders", address: "localhost:9001", healthy: true}
+	uninterestedPeer := &simplePeerNode{id: "peer-with-users", address: "localhost:9002", healthy: true}
+	allPeers := []peerlink.PeerNode{interestedPeer, uninterestedPeer}
+
+	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
+		Action:   "subscribe",
+		ClientId: "remote-orders-client",
+		Topic:    "orders.*",
+		NodeId:   interestedPeer.ID(),
+	})
+	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
+		Action:   "subscribe",
+		ClientId: "remote-users-client",
+		Topic:    "users.*",
+		NodeId:   uninterestedPeer.ID(),
+	})
+
+	interestedPeers := node.getInterestedPeers("orders.created", allPeers)
+	if len(interestedPeers) != 1 {
+		t.Fatalf("Expected exactly 1 interested peer for orders.created, got %d", len(interestedPeers))
+	}
+	if interestedPeers[0].ID() != interestedPeer.ID() {
+		t.Fatalf("Expected interested peer %q, got %q", interestedPeer.ID(), interestedPeers[0].ID())
+	}
+}
+
+func TestGRPCMeshNode_GetInterestedPeersWildcardDoesNotMatchDifferentDepth(t *testing.T) {
+	config := NewConfig("publisher-node", "localhost:0")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+
+	peer := &simplePeerNode{id: "peer-with-orders", address: "localhost:9001", healthy: true}
+	allPeers := []peerlink.PeerNode{peer}
+
+	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
+		Action:   "subscribe",
+		ClientId: "remote-orders-client",
+		Topic:    "orders.*",
+		NodeId:   peer.ID(),
+	})
+
+	interestedPeers := node.getInterestedPeers("orders.eu.created", allPeers)
+	if len(interestedPeers) != 0 {
+		t.Fatalf("Expected no interested peers for orders.eu.created, got %d", len(interestedPeers))
+	}
+}
+
+func TestGRPCMeshNode_GetInterestedPeersWildcardUnsubscribeRemovesInterest(t *testing.T) {
+	config := NewConfig("publisher-node", "localhost:0")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	ctx := context.Background()
+
+	peer := &simplePeerNode{id: "peer-with-orders", address: "localhost:9001", healthy: true}
+	allPeers := []peerlink.PeerNode{peer}
+
+	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
+		Action:   "subscribe",
+		ClientId: "remote-orders-client",
+		Topic:    "orders.*",
+		NodeId:   peer.ID(),
+	})
+	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
+		Action:   "unsubscribe",
+		ClientId: "remote-orders-client",
+		Topic:    "orders.*",
+		NodeId:   peer.ID(),
+	})
+
+	interestedPeers := node.getInterestedPeers("orders.created", allPeers)
+	if len(interestedPeers) != 0 {
+		t.Fatalf("Expected no interested peers after unsubscribe, got %d", len(interestedPeers))
+	}
 }
 
 // Test client that simulates delivery failures
