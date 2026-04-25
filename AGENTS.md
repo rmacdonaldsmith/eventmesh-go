@@ -78,9 +78,13 @@ eventmesh-go/
 
 1. **TDD Loop:**
 
-   * **RED:** Write a failing test first.
+   * **RED:** Write or update a failing test first for behavior changes.
    * **GREEN:** Implement minimal code to pass it.
    * **REFACTOR:** Simplify while keeping all tests green.
+
+   Do not implement from prose alone when a meaningful test can express the
+   expected behavior. If the desired behavior is hard to test, capture the
+   missing test seam in Beads before or alongside the implementation.
 
 2. **Work in Small Batches:**
 
@@ -285,7 +289,7 @@ golangci-lint run  # Shows 43 minor style issues (non-critical)
 
 When assisting in this repository, **Codex should:**
 
-1. **Follow the TDD Workflow** — always generate tests before implementations.
+1. **Follow the TDD Workflow** — write or update a failing test before implementing behavior changes.
 2. **Propose incremental changes** — modify one function or module per iteration.
 3. **Explain design rationale** — add short docstrings summarizing intent.
 4. **Avoid assumptions** — ask for clarification when design is ambiguous.

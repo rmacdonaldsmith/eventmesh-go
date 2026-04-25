@@ -4,6 +4,10 @@ EventMesh is a Go event-streaming project for experimenting with local event
 persistence, topic-based routing, HTTP publishing, Server-Sent Events streaming,
 and peer-to-peer mesh propagation.
 
+The north star is a lightweight event mesh for observable, replayable,
+real-time application coordination: easy for humans, services, and AI agents to
+inspect, understand, validate, publish into, and debug safely.
+
 The codebase is functional as a development/MVP system. It is not yet a
 production broker: storage is in-memory, peer security is not mTLS yet, and some
 multi-node behavior is still being hardened.
@@ -149,6 +153,13 @@ env GOCACHE=/tmp/eventmesh-go-build-cache \
 Some tests open local loopback listeners. In restricted agent sandboxes those
 tests may need approved network/loopback permission rather than code changes.
 
+## Development Workflow
+
+EventMesh is developed in small TDD increments. For behavior changes, start
+with a failing test, make it pass, then refactor while keeping the suite green.
+See [AGENTS.md](AGENTS.md) for the full workflow and local verification loop
+used by humans and coding agents.
+
 ## Project Layout
 
 ```text
@@ -168,6 +179,8 @@ examples/               Runnable demo scripts
 
 ## Documentation Map
 
+- [docs/north-star.md](docs/north-star.md) - positioning and agent-friendly
+  product direction
 - [docs/design.md](docs/design.md) - current architecture and roadmap
 - [docs/discovery.md](docs/discovery.md) - future discovery design notes
 - [docs/benchmark.md](docs/benchmark.md) - benchmark notes and how to rerun
@@ -178,6 +191,7 @@ examples/               Runnable demo scripts
 ## Current Roadmap Themes
 
 - Persistent EventLog backend
+- Agent-friendly event metadata, discovery, validation, replay, and tooling
 - More reliable multi-node subscription propagation and delivery semantics
 - mTLS and stronger peer identity
 - Production metrics and operational endpoints

@@ -5,6 +5,18 @@ from planned production work. Older notes in this repository sometimes described
 RocksDB, mTLS, or a gRPC client SDK as MVP requirements; those are now roadmap
 items, not current behavior.
 
+## Product North Star
+
+EventMesh should grow toward a lightweight event mesh for observable,
+replayable, real-time application coordination. It is not trying to become a
+smaller Kafka. Its more distinctive path is to stay understandable and
+HTTP-native while becoming easy for humans, services, and AI agents to inspect,
+replay, validate, publish into, and debug safely.
+
+See [north-star.md](north-star.md) for the longer positioning and
+agent-friendly design direction. The sections below describe current behavior
+unless explicitly marked as roadmap work.
+
 ## Current System Shape
 
 EventMesh is currently a single Go process that can expose:
@@ -18,19 +30,19 @@ EventMesh is currently a single Go process that can expose:
 The server binary is `bin/eventmesh`; the CLI binary is `bin/eventmesh-cli`.
 
 ```text
-HTTP clients / CLI
-        |
-        v
-  internal/httpapi
-        |
-        v
-  internal/meshnode
-   |       |       |
-   v       v       v
-EventLog Routing  PeerLink
-        Table       |
-                   v
-              Mesh peers
+  HTTP clients / CLI
+           |
+           v
+    internal/httpapi
+           |
+           v
+   internal/meshnode
+   |       |        |
+   v       v        v
+EventLog Routing PeerLink
+          Table     |
+                    v
+                Mesh peers
 ```
 
 ## Core Components
@@ -213,6 +225,14 @@ Production-readiness work:
 - deployment examples
 - observability metrics
 
+Agent-friendly roadmap work:
+
+- self-describing event metadata and schema references
+- topic, schema, publisher, subscriber, and capability discovery APIs
+- draft/validate/publish flow for safer agent-initiated events
+- replay, search, and timeline views for context recovery
+- MCP tooling for agent workflows
+
 ## Design Principles
 
 - Persist locally before acknowledging publish.
@@ -221,3 +241,4 @@ Production-readiness work:
 - Prefer explicit client recovery over hidden server-side durable subscription
   state until persistence and ownership semantics are designed.
 - Keep agent and human workflows verifiable through local commands.
+- Prefer inspectable, ordinary APIs before agent-specific automation.
