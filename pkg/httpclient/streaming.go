@@ -19,7 +19,6 @@ type StreamClient struct {
 	errors                  chan error
 	done                    chan struct{}
 	cancel                  context.CancelFunc
-	response                *http.Response
 	temporarySubscriptionID string
 }
 
@@ -103,11 +102,6 @@ func (sc *StreamClient) Done() <-chan struct{} {
 // Close stops the streaming client and cleans up resources
 func (sc *StreamClient) Close() error {
 	sc.cancel()
-
-	// Close HTTP response if open
-	if sc.response != nil {
-		_ = sc.response.Body.Close() // Ignore close errors during cleanup
-	}
 
 	// Wait for streaming goroutine to finish
 	<-sc.done
@@ -213,10 +207,8 @@ func (sc *StreamClient) connectAndStream(ctx context.Context, config StreamConfi
 		return fmt.Errorf("failed to connect to stream: %w", err)
 	}
 
-	sc.response = resp
 	defer func() {
 		_ = resp.Body.Close() // Ignore close errors
-		sc.response = nil
 	}()
 
 	// Check response status
