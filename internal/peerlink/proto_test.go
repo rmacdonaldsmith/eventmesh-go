@@ -216,6 +216,31 @@ func TestDataControlPlaneSeparation(t *testing.T) {
 	}
 }
 
+func TestPeerLinkServiceUsesSingleBidirectionalStream(t *testing.T) {
+	service := peerlinkv1.PeerLink_ServiceDesc
+
+	if service.ServiceName != "peerlink.v1.PeerLink" {
+		t.Fatalf("expected PeerLink service name, got %q", service.ServiceName)
+	}
+	if len(service.Methods) != 0 {
+		t.Fatalf("expected no unary PeerLink RPCs, got %d", len(service.Methods))
+	}
+	if len(service.Streams) != 1 {
+		t.Fatalf("expected one physical PeerLink stream, got %d", len(service.Streams))
+	}
+
+	stream := service.Streams[0]
+	if stream.StreamName != "EventStream" {
+		t.Fatalf("expected EventStream to be the single physical stream, got %q", stream.StreamName)
+	}
+	if !stream.ClientStreams || !stream.ServerStreams {
+		t.Fatalf("expected EventStream to be bidirectional, got client=%t server=%t", stream.ClientStreams, stream.ServerStreams)
+	}
+	if stream.StreamName == "DataStream" || stream.StreamName == "ControlStream" {
+		t.Fatal("data/control planes should remain logical planes on the single physical stream")
+	}
+}
+
 // TestSubscriptionChangeValidation tests validation of subscription change messages
 func TestSubscriptionChangeValidation(t *testing.T) {
 	testCases := []struct {

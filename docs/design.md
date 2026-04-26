@@ -99,6 +99,14 @@ data-plane and control-plane send queues, and ready control-plane messages are
 selected before data-plane messages so subscription gossip and heartbeats are
 not starved by user event traffic.
 
+Architecture decision: EventMesh keeps one physical peer RPC stream for now:
+`PeerLink.EventStream(stream PeerMessage) returns (stream PeerMessage)`.
+Data and control separation is enforced through typed `PeerMessage` frames,
+focused Go interfaces, independent per-peer send queues, and control-first
+queue selection. Splitting the proto into separate `DataStream` and
+`ControlStream` RPCs is deferred until tests or operational experience show
+that independent physical transport is necessary.
+
 #### Peer Health State Model
 
 Peer health is local to the observing node. `Disconnected` means this node does
