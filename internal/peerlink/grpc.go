@@ -103,7 +103,8 @@ type GRPCPeerLink struct {
 	listener                net.Listener
 	started                 bool
 	connections             map[string]*connectionInfo                 // peerID -> connection info
-	sendQueues              map[string]chan PeerMessage                // peerID -> send queue
+	sendQueues              map[string]chan PeerMessage                // peerID -> data-plane send queue
+	controlQueues           map[string]chan PeerMessage                // peerID -> control-plane send queue
 	metrics                 map[string]*peerMetrics                    // peerID -> metrics
 	subscribers             map[chan *eventlog.Event]bool              // active ReceiveEvents channels
 	subscriptionSubscribers map[chan *peerlink.SubscriptionChange]bool // active ReceiveSubscriptionChanges channels
@@ -130,6 +131,7 @@ func NewGRPCPeerLink(config *Config) (*GRPCPeerLink, error) {
 		started:                 false,
 		connections:             make(map[string]*connectionInfo),
 		sendQueues:              make(map[string]chan PeerMessage),
+		controlQueues:           make(map[string]chan PeerMessage),
 		metrics:                 make(map[string]*peerMetrics),
 		subscribers:             make(map[chan *eventlog.Event]bool),
 		subscriptionSubscribers: make(map[chan *peerlink.SubscriptionChange]bool),
@@ -257,7 +259,8 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 		stream: stream,
 	}
 
-	sendQueue := g.sendQueues[peerID]
+	dataQueue := g.sendQueues[peerID]
+	controlQueue := g.controlQueues[peerID]
 	slog.Debug("EventStream registered peer for bidirectional communication",
 		"peer_id", peerID,
 		"local_node_id", g.config.NodeID)
@@ -348,7 +351,7 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 			// Receive goroutine finished (error or stream closed)
 			return err
 
-		case queuedMsg, ok := <-sendQueue:
+		case queuedMsg, ok := <-controlQueue:
 			if !ok {
 				// Send queue closed
 				return nil
@@ -356,6 +359,37 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 
 			if err := g.sendServerStreamMessage(peerID, queuedMsg, stream); err != nil {
 				return err
+			}
+
+		default:
+			select {
+			case <-ctx.Done():
+				// Stream closed
+				return ctx.Err()
+
+			case err := <-recvDone:
+				// Receive goroutine finished (error or stream closed)
+				return err
+
+			case queuedMsg, ok := <-controlQueue:
+				if !ok {
+					// Send queue closed
+					return nil
+				}
+
+				if err := g.sendServerStreamMessage(peerID, queuedMsg, stream); err != nil {
+					return err
+				}
+
+			case queuedMsg, ok := <-dataQueue:
+				if !ok {
+					// Send queue closed
+					return nil
+				}
+
+				if err := g.sendServerStreamMessage(peerID, queuedMsg, stream); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -788,6 +822,48 @@ func (g *GRPCPeerLink) getSendQueue(peerID string) chan PeerMessage {
 	return g.sendQueues[peerID]
 }
 
+// getControlQueue safely retrieves the control queue for a peer
+func (g *GRPCPeerLink) getControlQueue(peerID string) chan PeerMessage {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.controlQueues[peerID]
+}
+
+type queuedOutboundMessage struct {
+	msg   PeerMessage
+	queue chan PeerMessage
+}
+
+func (g *GRPCPeerLink) nextOutboundMessage(ctx context.Context, peerID string) (PeerMessage, bool) {
+	queued, ok, _ := g.nextOutboundMessageOrDone(ctx, peerID, nil)
+	if !ok {
+		return nil, false
+	}
+	return queued.msg, true
+}
+
+func (g *GRPCPeerLink) nextOutboundMessageOrDone(ctx context.Context, peerID string, recvDone <-chan error) (queuedOutboundMessage, bool, error) {
+	dataQueue := g.getSendQueue(peerID)
+	controlQueue := g.getControlQueue(peerID)
+
+	select {
+	case msg, ok := <-controlQueue:
+		return queuedOutboundMessage{msg: msg, queue: controlQueue}, ok, nil
+	default:
+	}
+
+	select {
+	case <-ctx.Done():
+		return queuedOutboundMessage{}, false, ctx.Err()
+	case err := <-recvDone:
+		return queuedOutboundMessage{}, false, err
+	case msg, ok := <-controlQueue:
+		return queuedOutboundMessage{msg: msg, queue: controlQueue}, ok, nil
+	case msg, ok := <-dataQueue:
+		return queuedOutboundMessage{msg: msg, queue: dataQueue}, ok, nil
+	}
+}
+
 // runBidirectionalStreamLoop runs the main event processing loop for a bidirectional stream
 // Returns true if the connection should be retried, false if it should terminate
 func (g *GRPCPeerLink) runBidirectionalStreamLoop(ctx context.Context, peerID string, stream grpc.BidiStreamingClient[peerlinkv1.PeerMessage, peerlinkv1.PeerMessage], sendQueue chan PeerMessage) bool {
@@ -796,31 +872,29 @@ func (g *GRPCPeerLink) runBidirectionalStreamLoop(ctx context.Context, peerID st
 
 	// Main loop: consume from queue and stream events
 	for {
-		select {
-		case <-ctx.Done():
-			// Connection cancelled
-			return false // Don't retry
-
-		case err := <-recvDone:
+		queued, ok, err := g.nextOutboundMessageOrDone(ctx, peerID, recvDone)
+		if err != nil {
+			if ctx.Err() != nil {
+				// Connection cancelled
+				return false // Don't retry
+			}
 			// Receive goroutine finished (error or stream closed)
 			slog.Warn("runBidirectionalStreamLoop receive goroutine finished",
 				"peer_id", peerID,
 				"local_node_id", g.config.NodeID,
 				"error", err)
 			return true // Retry connection
+		}
+		if !ok {
+			// Send queue closed
+			return false // Don't retry
+		}
 
-		case queuedMsg, ok := <-sendQueue:
-			if !ok {
-				// Send queue closed
-				return false // Don't retry
-			}
-
-			// Process outbound message
-			if err := g.processOutboundMessage(peerID, queuedMsg, stream); err != nil {
-				// Handle send failure
-				g.handleSendFailure(peerID, queuedMsg, sendQueue, err)
-				return true // Retry
-			}
+		// Process outbound message
+		if err := g.processOutboundMessage(peerID, queued.msg, stream); err != nil {
+			// Handle send failure
+			g.handleSendFailure(peerID, queued.msg, queued.queue, err)
+			return true // Retry connection
 		}
 	}
 }
@@ -872,6 +946,11 @@ func (g *GRPCPeerLink) Disconnect(ctx context.Context, peerID string) error {
 		close(queue)
 		delete(g.sendQueues, peerID)
 	}
+	if queue, exists := g.controlQueues[peerID]; exists {
+		close(queue)
+		delete(g.controlQueues, peerID)
+	}
+
 	// Set health state to Disconnected and keep metrics for observability
 	if metrics, exists := g.metrics[peerID]; exists {
 		oldState := metrics.healthState
@@ -937,8 +1016,8 @@ func (g *GRPCPeerLink) SendSubscriptionChange(ctx context.Context, peerID string
 		return errors.New("PeerLink is closed")
 	}
 
-	// Get the send queue for this peer
-	queue, queueExists := g.sendQueues[peerID]
+	// Get the control queue for this peer
+	queue, queueExists := g.controlQueues[peerID]
 	metrics, metricsExist := g.metrics[peerID]
 	g.mu.RUnlock()
 
@@ -1040,7 +1119,7 @@ func (g *GRPCPeerLink) SendHeartbeat(ctx context.Context, peerID string) error {
 		return errors.New("PeerLink is closed")
 	}
 
-	queue, queueExists := g.sendQueues[peerID]
+	queue, queueExists := g.controlQueues[peerID]
 	metrics, metricsExist := g.metrics[peerID]
 	g.mu.RUnlock()
 
@@ -1103,6 +1182,9 @@ func (g *GRPCPeerLink) GetPeerHealth(ctx context.Context, peerID string) (peerli
 func (g *GRPCPeerLink) registerPeer(peerID string) {
 	if _, exists := g.sendQueues[peerID]; !exists {
 		g.sendQueues[peerID] = make(chan PeerMessage, g.config.SendQueueSize)
+	}
+	if _, exists := g.controlQueues[peerID]; !exists {
+		g.controlQueues[peerID] = make(chan PeerMessage, g.config.SendQueueSize)
 	}
 	if _, exists := g.metrics[peerID]; !exists {
 		g.metrics[peerID] = &peerMetrics{
@@ -1357,7 +1439,11 @@ func (g *GRPCPeerLink) GetQueueDepth(peerID string) int {
 	defer g.mu.RUnlock()
 
 	if queue, exists := g.sendQueues[peerID]; exists {
-		return len(queue)
+		depth := len(queue)
+		if controlQueue, exists := g.controlQueues[peerID]; exists {
+			depth += len(controlQueue)
+		}
+		return depth
 	}
 	return 0
 }
@@ -1422,6 +1508,10 @@ func (g *GRPCPeerLink) GetAllPeerMetrics() []PeerMetrics {
 		if queue, exists := g.sendQueues[peerID]; exists {
 			queueDepth = len(queue)
 		}
+		if queue, exists := g.controlQueues[peerID]; exists {
+			queueDepth += len(queue)
+		}
+
 		result = append(result, PeerMetrics{
 			PeerID:               peerID,
 			QueueDepth:           queueDepth,

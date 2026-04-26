@@ -94,7 +94,10 @@ planes:
 - control plane: subscription-change messages between peers
 
 Heartbeats are control-plane messages. They should never be delivered as user
-events or mixed into the data-plane routing path.
+events or mixed into the data-plane routing path. Each peer has independent
+data-plane and control-plane send queues, and ready control-plane messages are
+selected before data-plane messages so subscription gossip and heartbeats are
+not starved by user event traffic.
 
 #### Peer Health State Model
 
