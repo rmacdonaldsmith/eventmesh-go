@@ -7,7 +7,17 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
-// PeerHealthState represents the health state of a peer
+// PeerHealthState represents this node's local view of a peer connection.
+//
+// State contract:
+//   - Healthy means the peer has recently proven liveness through a heartbeat,
+//     valid peer message, or successful reconnect handshake.
+//   - Unhealthy means the peer is suspected but may recover; keep retry and
+//     monitoring machinery alive, but avoid treating the peer as reliably
+//     routable.
+//   - Disconnected means this node has no active usable connection to the peer,
+//     usually after explicit disconnect/close, stream close, or reconnect
+//     exhaustion. A later successful reconnect handshake moves it to Healthy.
 type PeerHealthState int
 
 const (

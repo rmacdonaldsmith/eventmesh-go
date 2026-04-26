@@ -93,6 +93,50 @@ planes:
 - data plane: user events between peers
 - control plane: subscription-change messages between peers
 
+Heartbeats are control-plane messages. They should never be delivered as user
+events or mixed into the data-plane routing path.
+
+#### Peer Health State Model
+
+Peer health is local to the observing node. `Disconnected` means this node does
+not currently have an active usable connection to the peer; it does not prove
+the remote process is globally down. By default, heartbeats are sent every `5s`
+and a peer becomes `Unhealthy` after `3` missed heartbeat intervals (`15s`)
+without any heartbeat or other valid peer message.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Disconnected
+
+    Disconnected --> Healthy: reconnect handshake succeeds\nrefresh lastSeenAt\nreset miss/failure counters
+
+    Healthy --> Healthy: receive heartbeat or valid peer message\nrefresh lastSeenAt
+    Healthy --> Unhealthy: no heartbeat/message for timeout period\ne.g. 15s
+    Healthy --> Unhealthy: send failure
+    Healthy --> Disconnected: explicit Disconnect/Close\nor stream closes
+
+    Unhealthy --> Healthy: receive heartbeat or valid peer message\nrefresh lastSeenAt\nreset miss/failure counters
+    Unhealthy --> Unhealthy: timeout continues\nor additional send failures
+    Unhealthy --> Disconnected: explicit Disconnect/Close\nstream closes\nor reconnect exhausted
+```
+
+Agent-readable transition contract:
+
+| From | Signal | To | Required side effects |
+| ---- | ------ | -- | --------------------- |
+| `Disconnected` | reconnect handshake succeeds | `Healthy` | refresh `lastSeenAt`; reset missed-heartbeat and send-failure counters |
+| `Healthy` | receive heartbeat or valid peer message | `Healthy` | refresh `lastSeenAt` |
+| `Healthy` | no heartbeat or valid peer message within timeout window | `Unhealthy` | keep connection machinery alive; avoid treating peer as reliably routable |
+| `Healthy` | send failure | `Unhealthy` | increment send-failure counter |
+| `Healthy` | explicit disconnect, close, or stream close | `Disconnected` | stop active connection work for that peer |
+| `Unhealthy` | receive heartbeat or valid peer message | `Healthy` | refresh `lastSeenAt`; reset missed-heartbeat and send-failure counters |
+| `Unhealthy` | timeout continues or additional send failures | `Unhealthy` | continue retry/monitoring behavior |
+| `Unhealthy` | explicit disconnect, close, stream close, or reconnect exhaustion | `Disconnected` | stop active connection work for that peer |
+
+Implementation status: heartbeat send/receive, periodic heartbeat sending,
+missed-heartbeat timeout detection, `lastSeenAt`, missed-heartbeat counts, and
+send-failure counts are implemented.
+
 Current limitations:
 
 - mTLS is not implemented yet

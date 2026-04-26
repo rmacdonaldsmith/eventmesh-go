@@ -58,11 +58,23 @@ func (m *ControlPlaneMsg) SubscriptionChange() *peerlink.SubscriptionChange {
 	return m.subscriptionChange
 }
 
+// HeartbeatMsg represents a control-plane heartbeat message.
+type HeartbeatMsg struct {
+	peerID string
+	sentAt time.Time
+}
+
+func (m *HeartbeatMsg) PeerID() string        { return m.peerID }
+func (m *HeartbeatMsg) SentAt() time.Time     { return m.sentAt }
+func (m *HeartbeatMsg) SetSentAt(t time.Time) { m.sentAt = t }
+
 // peerMetrics tracks basic metrics per peer
 type peerMetrics struct {
-	dropsCount   int64                    // Number of dropped messages due to queue full
-	healthState  peerlink.PeerHealthState // Current health state
-	failureCount int                      // Number of consecutive failures
+	dropsCount           int64                    // Number of dropped messages due to queue full
+	healthState          peerlink.PeerHealthState // Current health state
+	failureCount         int                      // Number of consecutive failures
+	missedHeartbeatCount int                      // Number of consecutive missed heartbeat windows
+	lastSeenAt           time.Time                // Last heartbeat, valid peer message, or handshake
 }
 
 // inboundPeer represents a peer that connected to us (inbound connection)
@@ -97,6 +109,9 @@ type GRPCPeerLink struct {
 	subscriptionSubscribers map[chan *peerlink.SubscriptionChange]bool // active ReceiveSubscriptionChanges channels
 	outboundConns           map[string]*grpc.ClientConn                // peerID -> outbound gRPC connection
 	outboundCancel          map[string]context.CancelFunc              // peerID -> cancel func for connection goroutine
+	heartbeatCancel         context.CancelFunc
+	heartbeatToken          *struct{}
+	heartbeatsRunning       bool
 }
 
 // NewGRPCPeerLink creates a new GRPCPeerLink with the given configuration
@@ -174,16 +189,21 @@ func (g *GRPCPeerLink) Start(ctx context.Context) error {
 // Stop gracefully shuts down the gRPC server
 func (g *GRPCPeerLink) Stop(ctx context.Context) error {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-
 	if !g.started || g.grpcServer == nil {
+		g.mu.Unlock()
 		return nil // Not started or already stopped
 	}
+
+	grpcServer := g.grpcServer
+	g.grpcServer = nil
+	g.listener = nil
+	g.started = false
+	g.mu.Unlock()
 
 	// Graceful shutdown with context
 	done := make(chan struct{})
 	go func() {
-		g.grpcServer.GracefulStop()
+		grpcServer.GracefulStop()
 		close(done)
 	}()
 
@@ -192,13 +212,8 @@ func (g *GRPCPeerLink) Stop(ctx context.Context) error {
 		// Graceful shutdown completed
 	case <-ctx.Done():
 		// Context timeout - force shutdown
-		g.grpcServer.Stop()
+		grpcServer.Stop()
 	}
-
-	// Clean up references
-	g.grpcServer = nil
-	g.listener = nil
-	g.started = false
 
 	return nil
 }
@@ -284,6 +299,7 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 
 			// Handle received messages
 			if eventMsg := msg.GetEvent(); eventMsg != nil {
+				g.markPeerSeen(peerID)
 				// Data plane: Convert protobuf Event to EventRecord and distribute to subscribers
 				g.mu.Lock()
 				if !g.closed {
@@ -298,6 +314,7 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 				}
 				g.mu.Unlock()
 			} else if controlMsg := msg.GetControlPlane(); controlMsg != nil {
+				g.markPeerSeen(peerID)
 				// Control plane: Handle subscription changes and other control messages
 				if subChange := controlMsg.GetSubscriptionChange(); subChange != nil {
 					g.mu.Lock()
@@ -312,6 +329,8 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 					}
 					g.mu.Unlock()
 				}
+			} else if msg.GetHeartbeat() != nil {
+				g.markPeerSeen(peerID)
 			} else {
 				slog.Debug("EventStream received unhandled message type", "node_id", g.config.NodeID)
 			}
@@ -335,33 +354,44 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 				return nil
 			}
 
-			peerMsg, err := g.serializeMessage(queuedMsg)
-			if err != nil {
-				slog.Error("EventStream failed to serialize message",
-					"peer_id", peerID,
-					"error", err)
-				continue
-			}
-
-			// Send over gRPC stream
-			if err := stream.Send(peerMsg); err != nil {
-				switch m := queuedMsg.(type) {
-				case *DataPlaneMessage:
-					slog.Error("EventStream failed to send user event",
-						"topic", m.Event().Topic,
-						"peer_id", peerID,
-						"error", err)
-				case *ControlPlaneMsg:
-					slog.Error("EventStream failed to send subscription change",
-						"action", m.SubscriptionChange().Action,
-						"topic", m.SubscriptionChange().Topic,
-						"peer_id", peerID,
-						"error", err)
-				}
+			if err := g.sendServerStreamMessage(peerID, queuedMsg, stream); err != nil {
 				return err
 			}
 		}
 	}
+}
+
+func (g *GRPCPeerLink) sendServerStreamMessage(peerID string, queuedMsg PeerMessage, stream grpc.BidiStreamingServer[peerlinkv1.PeerMessage, peerlinkv1.PeerMessage]) error {
+	peerMsg, err := g.serializeMessage(queuedMsg)
+	if err != nil {
+		slog.Error("EventStream failed to serialize message",
+			"peer_id", peerID,
+			"error", err)
+		return nil
+	}
+
+	if err := stream.Send(peerMsg); err != nil {
+		switch m := queuedMsg.(type) {
+		case *DataPlaneMessage:
+			slog.Error("EventStream failed to send user event",
+				"topic", m.Event().Topic,
+				"peer_id", peerID,
+				"error", err)
+		case *ControlPlaneMsg:
+			slog.Error("EventStream failed to send subscription change",
+				"action", m.SubscriptionChange().Action,
+				"topic", m.SubscriptionChange().Topic,
+				"peer_id", peerID,
+				"error", err)
+		case *HeartbeatMsg:
+			slog.Error("EventStream failed to send heartbeat",
+				"peer_id", peerID,
+				"error", err)
+		}
+		return err
+	}
+
+	return nil
 }
 
 // Connect establishes a secure connection to the specified peer node
@@ -548,8 +578,8 @@ func (g *GRPCPeerLink) establishStreamWithHandshake(ctx context.Context, peerID 
 		"peer_id", peerID,
 		"local_node_id", g.config.NodeID)
 
-	// Mark peer as healthy after successful handshake
-	g.SetPeerHealth(peerID, peerlink.PeerHealthy)
+	// Mark peer as healthy after successful handshake.
+	g.markPeerSeen(peerID)
 
 	return stream, nil
 }
@@ -568,6 +598,7 @@ func (g *GRPCPeerLink) startReceiveGoroutine(ctx context.Context, peerID string,
 
 			// Handle received messages
 			if eventMsg := msg.GetEvent(); eventMsg != nil {
+				g.markPeerSeen(peerID)
 				// Data plane: Convert protobuf Event to EventRecord and distribute to subscribers
 				g.mu.Lock()
 				if !g.closed {
@@ -582,6 +613,7 @@ func (g *GRPCPeerLink) startReceiveGoroutine(ctx context.Context, peerID string,
 				}
 				g.mu.Unlock()
 			} else if controlMsg := msg.GetControlPlane(); controlMsg != nil {
+				g.markPeerSeen(peerID)
 				// Control plane: Handle subscription changes and other control messages
 				if subChange := controlMsg.GetSubscriptionChange(); subChange != nil {
 					g.mu.Lock()
@@ -596,6 +628,8 @@ func (g *GRPCPeerLink) startReceiveGoroutine(ctx context.Context, peerID string,
 					}
 					g.mu.Unlock()
 				}
+			} else if msg.GetHeartbeat() != nil {
+				g.markPeerSeen(peerID)
 			} else {
 				slog.Debug("startReceiveGoroutine received unhandled message type",
 					"peer_id", peerID,
@@ -645,6 +679,15 @@ func (g *GRPCPeerLink) serializeMessage(msg PeerMessage) (*peerlinkv1.PeerMessag
 			},
 		}, nil
 
+	case *HeartbeatMsg:
+		return &peerlinkv1.PeerMessage{
+			Kind: &peerlinkv1.PeerMessage_Heartbeat{
+				Heartbeat: &peerlinkv1.Heartbeat{
+					Timestamp: m.SentAt().UnixMilli(),
+				},
+			},
+		}, nil
+
 	default:
 		return nil, fmt.Errorf("unsupported message type: %T", msg)
 	}
@@ -679,6 +722,11 @@ func (g *GRPCPeerLink) processOutboundMessage(peerID string, msg PeerMessage, st
 				"action", m.SubscriptionChange().Action,
 				"topic", m.SubscriptionChange().Topic,
 				"error", err)
+		case *HeartbeatMsg:
+			slog.Error("failed to send heartbeat to peer",
+				"peer_id", peerID,
+				"local_node_id", g.config.NodeID,
+				"error", err)
 		}
 		return err
 	}
@@ -697,6 +745,8 @@ func (g *GRPCPeerLink) handleSendFailure(peerID string, msg PeerMessage, sendQue
 			topic = m.Event().Topic
 		case *ControlPlaneMsg:
 			topic = m.SubscriptionChange().Topic
+		case *HeartbeatMsg:
+			topic = "heartbeat"
 		default:
 			topic = "unknown"
 		}
@@ -717,6 +767,8 @@ func (g *GRPCPeerLink) handleSendFailure(peerID string, msg PeerMessage, sendQue
 			topic = m.Event().Topic
 		case *ControlPlaneMsg:
 			topic = m.SubscriptionChange().Topic
+		case *HeartbeatMsg:
+			topic = "heartbeat"
 		default:
 			topic = "unknown"
 		}
@@ -726,7 +778,7 @@ func (g *GRPCPeerLink) handleSendFailure(peerID string, msg PeerMessage, sendQue
 	}
 
 	// Mark peer unhealthy on send failure
-	g.SetPeerHealth(peerID, peerlink.PeerUnhealthy)
+	g.recordPeerSendFailure(peerID)
 }
 
 // getSendQueue safely retrieves the send queue for a peer
@@ -820,7 +872,6 @@ func (g *GRPCPeerLink) Disconnect(ctx context.Context, peerID string) error {
 		close(queue)
 		delete(g.sendQueues, peerID)
 	}
-
 	// Set health state to Disconnected and keep metrics for observability
 	if metrics, exists := g.metrics[peerID]; exists {
 		oldState := metrics.healthState
@@ -989,40 +1040,33 @@ func (g *GRPCPeerLink) SendHeartbeat(ctx context.Context, peerID string) error {
 		return errors.New("PeerLink is closed")
 	}
 
-	// Check if peer is connected
-	_, queueExists := g.sendQueues[peerID]
+	queue, queueExists := g.sendQueues[peerID]
+	metrics, metricsExist := g.metrics[peerID]
 	g.mu.RUnlock()
 
 	if !queueExists {
 		return errors.New("peer not connected")
 	}
 
-	// Create a heartbeat message and send it through the processOutboundMessage mechanism
-	// We can use the existing queue infrastructure by creating a special heartbeat message
-	// For now, let's send heartbeat directly to avoid complicating the queue system
-	g.mu.RLock()
-	connInfo, exists := g.connections[peerID]
-	g.mu.RUnlock()
-
-	if !exists {
-		return errors.New("peer connection not found")
+	msg := &HeartbeatMsg{
+		peerID: peerID,
+		sentAt: time.Now(),
 	}
 
-	// Create heartbeat message
-	heartbeatMsg := &peerlinkv1.PeerMessage{
-		Kind: &peerlinkv1.PeerMessage_Heartbeat{
-			Heartbeat: &peerlinkv1.Heartbeat{
-				Timestamp: time.Now().UnixMilli(),
-			},
-		},
-	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, g.config.SendTimeout)
+	defer cancel()
 
-	// Send directly through the server stream (heartbeats are server-initiated)
-	if connInfo.stream != nil {
-		return connInfo.stream.Send(heartbeatMsg)
+	select {
+	case queue <- msg:
+		return nil
+	case <-timeoutCtx.Done():
+		if metricsExist {
+			g.mu.Lock()
+			metrics.dropsCount++
+			g.mu.Unlock()
+		}
+		return errors.New("send queue full - heartbeat dropped")
 	}
-
-	return errors.New("no active stream for heartbeat")
 }
 
 // GetConnectedPeers returns all currently connected peer nodes
@@ -1062,9 +1106,11 @@ func (g *GRPCPeerLink) registerPeer(peerID string) {
 	}
 	if _, exists := g.metrics[peerID]; !exists {
 		g.metrics[peerID] = &peerMetrics{
-			dropsCount:   0,
-			healthState:  peerlink.PeerHealthy,
-			failureCount: 0,
+			dropsCount:           0,
+			healthState:          peerlink.PeerHealthy,
+			failureCount:         0,
+			missedHeartbeatCount: 0,
+			lastSeenAt:           time.Now(),
 		}
 	}
 }
@@ -1135,14 +1181,139 @@ func (g *GRPCPeerLink) SetPeerHealth(peerID string, newState peerlink.PeerHealth
 	}
 }
 
+func (g *GRPCPeerLink) markPeerSeen(peerID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if metrics, exists := g.metrics[peerID]; exists {
+		metrics.healthState = peerlink.PeerHealthy
+		metrics.failureCount = 0
+		metrics.missedHeartbeatCount = 0
+		metrics.lastSeenAt = time.Now()
+	}
+}
+
+func (g *GRPCPeerLink) recordPeerSendFailure(peerID string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if metrics, exists := g.metrics[peerID]; exists {
+		metrics.failureCount++
+		metrics.healthState = peerlink.PeerUnhealthy
+	}
+}
+
 // StartHeartbeats begins health monitoring for all connected peers
 func (g *GRPCPeerLink) StartHeartbeats(ctx context.Context) error {
-	return errors.New("not implemented")
+	if ctx == nil {
+		return errors.New("context cannot be nil")
+	}
+
+	g.mu.Lock()
+	if g.closed {
+		g.mu.Unlock()
+		return errors.New("PeerLink is closed")
+	}
+	if g.heartbeatsRunning {
+		g.mu.Unlock()
+		return nil
+	}
+
+	heartbeatCtx, cancel := context.WithCancel(ctx)
+	token := &struct{}{}
+	g.heartbeatCancel = cancel
+	g.heartbeatToken = token
+	g.heartbeatsRunning = true
+	g.mu.Unlock()
+
+	go g.runHeartbeatLoop(heartbeatCtx, token)
+	return nil
 }
 
 // StopHeartbeats stops health monitoring
 func (g *GRPCPeerLink) StopHeartbeats(ctx context.Context) error {
-	return errors.New("not implemented")
+	g.mu.Lock()
+	cancel := g.heartbeatCancel
+	g.heartbeatCancel = nil
+	g.heartbeatToken = nil
+	g.heartbeatsRunning = false
+	g.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+	return nil
+}
+
+func (g *GRPCPeerLink) runHeartbeatLoop(ctx context.Context, token *struct{}) {
+	defer g.clearHeartbeatLifecycle(token)
+
+	g.sendHeartbeatToConnectedPeers(ctx)
+
+	ticker := time.NewTicker(g.config.HeartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			g.sendHeartbeatToConnectedPeers(ctx)
+		}
+	}
+}
+
+func (g *GRPCPeerLink) clearHeartbeatLifecycle(token *struct{}) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if g.heartbeatToken == token {
+		g.heartbeatCancel = nil
+		g.heartbeatToken = nil
+		g.heartbeatsRunning = false
+	}
+}
+
+func (g *GRPCPeerLink) sendHeartbeatToConnectedPeers(ctx context.Context) {
+	g.markSilentPeersUnhealthy(time.Now())
+
+	peerIDs := g.connectedPeerIDs()
+	for _, peerID := range peerIDs {
+		if err := g.SendHeartbeat(ctx, peerID); err != nil {
+			g.recordPeerSendFailure(peerID)
+		}
+	}
+}
+
+func (g *GRPCPeerLink) markSilentPeersUnhealthy(now time.Time) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	timeout := g.heartbeatTimeout()
+	for _, metrics := range g.metrics {
+		if metrics.healthState == peerlink.PeerDisconnected || metrics.lastSeenAt.IsZero() {
+			continue
+		}
+		if now.Sub(metrics.lastSeenAt) >= timeout {
+			metrics.healthState = peerlink.PeerUnhealthy
+			metrics.missedHeartbeatCount = int(now.Sub(metrics.lastSeenAt) / g.config.HeartbeatInterval)
+		}
+	}
+}
+
+func (g *GRPCPeerLink) heartbeatTimeout() time.Duration {
+	return g.config.HeartbeatInterval * time.Duration(g.config.MissedHeartbeatLimit)
+}
+
+func (g *GRPCPeerLink) connectedPeerIDs() []string {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+
+	peerIDs := make([]string, 0, len(g.connections))
+	for peerID := range g.connections {
+		peerIDs = append(peerIDs, peerID)
+	}
+	return peerIDs
 }
 
 // Close closes the PeerLink and cleans up resources
@@ -1152,6 +1323,13 @@ func (g *GRPCPeerLink) Close() error {
 
 	if g.closed {
 		return nil // Already closed, safe to call multiple times
+	}
+
+	if g.heartbeatCancel != nil {
+		g.heartbeatCancel()
+		g.heartbeatCancel = nil
+		g.heartbeatToken = nil
+		g.heartbeatsRunning = false
 	}
 
 	// Stop the server if it's running
@@ -1224,11 +1402,13 @@ func (g *GRPCPeerLink) GetConnectedPeerSummary(ctx context.Context) ([]string, e
 
 // PeerMetrics represents metrics for a single peer
 type PeerMetrics struct {
-	PeerID       string                   `json:"peer_id"`
-	QueueDepth   int                      `json:"queue_depth"`
-	DropsCount   int64                    `json:"drops_count"`
-	HealthState  peerlink.PeerHealthState `json:"health_state"`
-	FailureCount int                      `json:"failure_count"`
+	PeerID               string                   `json:"peer_id"`
+	QueueDepth           int                      `json:"queue_depth"`
+	DropsCount           int64                    `json:"drops_count"`
+	HealthState          peerlink.PeerHealthState `json:"health_state"`
+	FailureCount         int                      `json:"failure_count"`
+	MissedHeartbeatCount int                      `json:"missed_heartbeat_count"`
+	LastSeenAt           time.Time                `json:"last_seen_at"`
 }
 
 // GetAllPeerMetrics returns metrics for all peers
@@ -1242,13 +1422,14 @@ func (g *GRPCPeerLink) GetAllPeerMetrics() []PeerMetrics {
 		if queue, exists := g.sendQueues[peerID]; exists {
 			queueDepth = len(queue)
 		}
-
 		result = append(result, PeerMetrics{
-			PeerID:       peerID,
-			QueueDepth:   queueDepth,
-			DropsCount:   metrics.dropsCount,
-			HealthState:  metrics.healthState,
-			FailureCount: metrics.failureCount,
+			PeerID:               peerID,
+			QueueDepth:           queueDepth,
+			DropsCount:           metrics.dropsCount,
+			HealthState:          metrics.healthState,
+			FailureCount:         metrics.failureCount,
+			MissedHeartbeatCount: metrics.missedHeartbeatCount,
+			LastSeenAt:           metrics.lastSeenAt,
 		})
 	}
 	return result

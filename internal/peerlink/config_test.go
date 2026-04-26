@@ -65,6 +65,9 @@ func TestConfig_SetDefaults(t *testing.T) {
 	if config.HeartbeatInterval <= 0 {
 		t.Errorf("Expected positive HeartbeatInterval, got %v", config.HeartbeatInterval)
 	}
+	if config.MissedHeartbeatLimit <= 0 {
+		t.Errorf("Expected positive MissedHeartbeatLimit, got %d", config.MissedHeartbeatLimit)
+	}
 	if config.MaxMessageSize <= 0 {
 		t.Errorf("Expected positive MaxMessageSize, got %d", config.MaxMessageSize)
 	}
@@ -79,17 +82,21 @@ func TestConfig_SetDefaults(t *testing.T) {
 	if config.HeartbeatInterval.Seconds() != 5.0 {
 		t.Errorf("Expected HeartbeatInterval default of 5s, got %v", config.HeartbeatInterval)
 	}
+	if config.MissedHeartbeatLimit != 3 {
+		t.Errorf("Expected MissedHeartbeatLimit default of 3, got %d", config.MissedHeartbeatLimit)
+	}
 }
 
 // TestConfig_SetDefaults_PreservesExistingValues tests that non-zero values are preserved
 func TestConfig_SetDefaults_PreservesExistingValues(t *testing.T) {
 	config := &Config{
-		NodeID:            "test-node",
-		ListenAddress:     "localhost:9090",
-		SendQueueSize:     200,
-		SendTimeout:       2 * time.Second,
-		HeartbeatInterval: 10 * time.Second,
-		MaxMessageSize:    2048,
+		NodeID:               "test-node",
+		ListenAddress:        "localhost:9090",
+		SendQueueSize:        200,
+		SendTimeout:          2 * time.Second,
+		HeartbeatInterval:    10 * time.Second,
+		MissedHeartbeatLimit: 5,
+		MaxMessageSize:       2048,
 	}
 	config.SetDefaults()
 
@@ -102,6 +109,9 @@ func TestConfig_SetDefaults_PreservesExistingValues(t *testing.T) {
 	}
 	if config.HeartbeatInterval != 10*time.Second {
 		t.Errorf("Expected existing HeartbeatInterval (10s) to be preserved, got %v", config.HeartbeatInterval)
+	}
+	if config.MissedHeartbeatLimit != 5 {
+		t.Errorf("Expected existing MissedHeartbeatLimit (5) to be preserved, got %d", config.MissedHeartbeatLimit)
 	}
 	if config.MaxMessageSize != 2048 {
 		t.Errorf("Expected existing MaxMessageSize (2048) to be preserved, got %d", config.MaxMessageSize)

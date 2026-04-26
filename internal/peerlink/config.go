@@ -7,12 +7,13 @@ import (
 
 // Config holds configuration for PeerLink component
 type Config struct {
-	NodeID            string
-	ListenAddress     string
-	SendQueueSize     int
-	SendTimeout       time.Duration
-	HeartbeatInterval time.Duration
-	MaxMessageSize    int
+	NodeID               string
+	ListenAddress        string
+	SendQueueSize        int
+	SendTimeout          time.Duration
+	HeartbeatInterval    time.Duration
+	MissedHeartbeatLimit int
+	MaxMessageSize       int
 }
 
 // Validate checks if the configuration is valid
@@ -36,6 +37,9 @@ func (c *Config) SetDefaults() {
 	}
 	if c.HeartbeatInterval <= 0 {
 		c.HeartbeatInterval = 5 * time.Second
+	}
+	if c.MissedHeartbeatLimit <= 0 {
+		c.MissedHeartbeatLimit = 3
 	}
 	if c.MaxMessageSize <= 0 {
 		c.MaxMessageSize = 1024 * 1024 // 1MB
