@@ -721,3 +721,53 @@ func TestStreamEvents(t *testing.T) {
 		cancel()
 	})
 }
+
+func TestStreamEventsRegistrationFailureReturnsErrorStatus(t *testing.T) {
+	config := meshnode.NewConfig("sse-registration-failure-node", "localhost:0")
+	node, err := meshnode.NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Failed to create mesh node: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Failed to start mesh node: %v", err)
+	}
+
+	auth := NewJWTAuth("sse-registration-failure-secret")
+	handlers := NewHandlers(node, auth)
+	token, _, err := auth.GenerateToken("registration-failure-client", false)
+	if err != nil {
+		t.Fatalf("Failed to generate token: %v", err)
+	}
+	claims, err := auth.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("Failed to validate token: %v", err)
+	}
+
+	client := NewHTTPClient(claims)
+	if err := node.Subscribe(ctx, client, "registration.failure"); err != nil {
+		t.Fatalf("Failed to create subscription: %v", err)
+	}
+	if err := node.Close(); err != nil {
+		t.Fatalf("Failed to close node: %v", err)
+	}
+
+	req, err := http.NewRequest("GET", "/api/v1/events/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "text/event-stream")
+	req = req.WithContext(context.WithValue(req.Context(), ClaimsKey, claims))
+
+	rr := httptest.NewRecorder()
+	handlers.StreamEvents(rr, req)
+
+	if status := rr.Code; status != http.StatusInternalServerError {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusInternalServerError, status, rr.Body.String())
+	}
+	if contentType := rr.Header().Get("Content-Type"); contentType == "text/event-stream" {
+		t.Fatalf("Expected error response not to commit SSE headers, got Content-Type %q", contentType)
+	}
+}

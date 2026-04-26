@@ -330,6 +330,29 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	acceptHeader := r.Header.Get("Accept")
+	shouldStream := acceptHeader == "text/event-stream" || r.URL.Query().Get("stream") == "true"
+
+	var client *HTTPClient
+	var topics []string
+	if shouldStream {
+		client = NewHTTPClient(claims)
+
+		ctx := r.Context()
+		existingSubscriptions, err := h.meshNode.GetClientSubscriptions(ctx, claims.ClientID)
+		if err != nil {
+			h.writeError(w, fmt.Sprintf("Failed to get client subscriptions: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		topics, err = h.registerSSEClient(ctx, client, existingSubscriptions)
+		if err != nil {
+			h.writeError(w, fmt.Sprintf("Failed to register SSE client: %v", err), http.StatusInternalServerError)
+			return
+		}
+		defer h.unregisterSSEClient(client, topics)
+	}
+
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -341,28 +364,7 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 
 	// Check if client expects streaming (has Accept: text/event-stream header)
 	// or if this is a test environment
-	acceptHeader := r.Header.Get("Accept")
-	if acceptHeader == "text/event-stream" || r.URL.Query().Get("stream") == "true" {
-		// Create HTTP client for MeshNode streaming
-		client := NewHTTPClient(claims)
-
-		// Register the HTTPClient as a subscriber for ALL of the client's existing subscriptions
-		ctx := r.Context()
-		existingSubscriptions, err := h.meshNode.GetClientSubscriptions(ctx, claims.ClientID)
-		if err != nil {
-			h.writeError(w, fmt.Sprintf("Failed to get client subscriptions: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		// Register the streaming HTTPClient for each existing subscription topic.
-		// This allows the MeshNode to deliver events to the SSE stream via HTTPClient.DeliverEvent()
-		topics, err := h.registerSSEClient(ctx, client, existingSubscriptions)
-		if err != nil {
-			h.writeError(w, fmt.Sprintf("Failed to register SSE client: %v", err), http.StatusInternalServerError)
-			return
-		}
-		defer h.unregisterSSEClient(client, topics)
-
+	if shouldStream {
 		// Send connection established message
 		w.Write([]byte(": SSE connection established for all topics\n\n"))
 
