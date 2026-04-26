@@ -152,11 +152,22 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to establish stream: %v", err)
 	}
-	defer stream.CloseSend()
 
 	// Start runBidirectionalStreamLoop in background
+	loopDone := make(chan bool, 1)
 	go func() {
-		client.runBidirectionalStreamLoop(testCtx, "server-node", stream, sendQueue)
+		loopDone <- client.runBidirectionalStreamLoop(testCtx, "server-node", stream, sendQueue)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-loopDone:
+		case <-time.After(2 * time.Second):
+			t.Error("runBidirectionalStreamLoop did not exit after context cancellation")
+		}
+		if err := stream.CloseSend(); err != nil {
+			t.Logf("CloseSend returned after loop shutdown: %v", err)
+		}
 	}()
 
 	// Give it a moment to start
