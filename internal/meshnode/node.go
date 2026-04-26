@@ -64,8 +64,9 @@ type GRPCMeshNode struct {
 	peerLink     peerlinkpkg.CompletePeerLink
 
 	// State management
-	started bool
-	closed  bool
+	started         bool
+	closed          bool
+	lifecycleCancel context.CancelFunc
 
 	// Client management (simplified for MVP - no authentication)
 	clients map[string]meshnode.Client
@@ -166,14 +167,18 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 		}
 	}
 
-	if err := n.peerLink.StartHeartbeats(ctx); err != nil {
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+
+	if err := n.peerLink.StartHeartbeats(lifecycleCtx); err != nil {
+		lifecycleCancel()
 		return fmt.Errorf("failed to start peer heartbeats: %w", err)
 	}
 
 	// Start listening for incoming peer events (including subscription events)
 	// This implements REQ-MNODE-003: Handle incoming peer subscription notifications
-	go n.handleIncomingPeerEvents(ctx)
+	go n.handleIncomingPeerEvents(lifecycleCtx)
 
+	n.lifecycleCancel = lifecycleCancel
 	n.started = true
 	slog.Info("mesh node ready",
 		"node_id", n.config.NodeID,
@@ -184,16 +189,33 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 // Stop gracefully shuts down the mesh node and all its services.
 func (n *GRPCMeshNode) Stop(ctx context.Context) error {
 	n.mu.Lock()
-	defer n.mu.Unlock()
-
 	if !n.started {
+		n.mu.Unlock()
 		return nil // Not started, idempotent
 	}
 
-	// For MVP: Components manage their own lifecycle
-	// In future phases, we'll add explicit lifecycle coordination
-
+	peerLink := n.peerLink
+	cancel := n.lifecycleCancel
+	n.lifecycleCancel = nil
 	n.started = false
+	n.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
+	if err := peerLink.StopHeartbeats(ctx); err != nil {
+		return fmt.Errorf("failed to stop peer heartbeats: %w", err)
+	}
+
+	if stopper, ok := peerLink.(interface {
+		Stop(context.Context) error
+	}); ok {
+		if err := stopper.Stop(ctx); err != nil {
+			return fmt.Errorf("failed to stop PeerLink: %w", err)
+		}
+	}
+
 	return nil
 }
 

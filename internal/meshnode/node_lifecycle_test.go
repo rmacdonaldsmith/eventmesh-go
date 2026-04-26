@@ -3,6 +3,7 @@ package meshnode
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -148,6 +149,40 @@ func TestGRPCMeshNode_StartOwnsHeartbeatLifecycle(t *testing.T) {
 	}
 }
 
+func TestGRPCMeshNode_StopOwnsPeerLifecycle(t *testing.T) {
+	config := NewConfig("stop-owner-node", "localhost:0")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	peerLink := newLifecycleSpyPeerLink()
+	node.peerLink = peerLink
+
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	eventCtx := peerLink.waitForEventContext(t)
+	changeCtx := peerLink.waitForChangeContext(t)
+
+	if err := node.Stop(ctx); err != nil {
+		t.Fatalf("Expected no error stopping node, got %v", err)
+	}
+
+	if peerLink.stopHeartbeatsCalls != 1 {
+		t.Fatalf("Expected Stop to stop heartbeats once, got %d", peerLink.stopHeartbeatsCalls)
+	}
+	if peerLink.stopCalls != 1 {
+		t.Fatalf("Expected Stop to stop PeerLink server once, got %d", peerLink.stopCalls)
+	}
+
+	assertContextCanceled(t, eventCtx)
+	assertContextCanceled(t, changeCtx)
+}
+
 // TestGRPCMeshNode_ComprehensiveHealthMonitoring tests the enhanced GetHealth implementation
 func TestGRPCMeshNode_ComprehensiveHealthMonitoring(t *testing.T) {
 	config := NewConfig("health-test-node", "localhost:9090")
@@ -272,10 +307,15 @@ func TestGRPCMeshNode_ComprehensiveHealthMonitoring(t *testing.T) {
 
 type lifecycleSpyPeerLink struct {
 	startHeartbeatsCalls int
+	stopHeartbeatsCalls  int
+	stopCalls            int
 	events               chan *eventlogpkg.Event
 	eventErrs            chan error
 	changes              chan *peerlinkpkg.SubscriptionChange
 	changeErrs           chan error
+	eventCtxs            chan context.Context
+	changeCtxs           chan context.Context
+	closeOnce            sync.Once
 }
 
 func newLifecycleSpyPeerLink() *lifecycleSpyPeerLink {
@@ -284,6 +324,8 @@ func newLifecycleSpyPeerLink() *lifecycleSpyPeerLink {
 		eventErrs:  make(chan error),
 		changes:    make(chan *peerlinkpkg.SubscriptionChange),
 		changeErrs: make(chan error),
+		eventCtxs:  make(chan context.Context, 1),
+		changeCtxs: make(chan context.Context, 1),
 	}
 }
 
@@ -292,6 +334,7 @@ func (l *lifecycleSpyPeerLink) SendEvent(ctx context.Context, peerID string, eve
 }
 
 func (l *lifecycleSpyPeerLink) ReceiveEvents(ctx context.Context) (<-chan *eventlogpkg.Event, <-chan error) {
+	l.eventCtxs <- ctx
 	return l.events, l.eventErrs
 }
 
@@ -300,6 +343,7 @@ func (l *lifecycleSpyPeerLink) SendSubscriptionChange(ctx context.Context, peerI
 }
 
 func (l *lifecycleSpyPeerLink) ReceiveSubscriptionChanges(ctx context.Context) (<-chan *peerlinkpkg.SubscriptionChange, <-chan error) {
+	l.changeCtxs <- ctx
 	return l.changes, l.changeErrs
 }
 
@@ -317,6 +361,12 @@ func (l *lifecycleSpyPeerLink) StartHeartbeats(ctx context.Context) error {
 }
 
 func (l *lifecycleSpyPeerLink) StopHeartbeats(ctx context.Context) error {
+	l.stopHeartbeatsCalls++
+	return nil
+}
+
+func (l *lifecycleSpyPeerLink) Stop(ctx context.Context) error {
+	l.stopCalls++
 	return nil
 }
 
@@ -333,11 +383,47 @@ func (l *lifecycleSpyPeerLink) GetConnectedPeers(ctx context.Context) ([]peerlin
 }
 
 func (l *lifecycleSpyPeerLink) Close() error {
-	close(l.events)
-	close(l.eventErrs)
-	close(l.changes)
-	close(l.changeErrs)
+	l.closeOnce.Do(func() {
+		close(l.events)
+		close(l.eventErrs)
+		close(l.changes)
+		close(l.changeErrs)
+	})
 	return nil
+}
+
+func (l *lifecycleSpyPeerLink) waitForEventContext(t *testing.T) context.Context {
+	t.Helper()
+
+	select {
+	case ctx := <-l.eventCtxs:
+		return ctx
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ReceiveEvents context")
+		return nil
+	}
+}
+
+func (l *lifecycleSpyPeerLink) waitForChangeContext(t *testing.T) context.Context {
+	t.Helper()
+
+	select {
+	case ctx := <-l.changeCtxs:
+		return ctx
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ReceiveSubscriptionChanges context")
+		return nil
+	}
+}
+
+func assertContextCanceled(t *testing.T, ctx context.Context) {
+	t.Helper()
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("expected lifecycle context to be canceled")
+	}
 }
 
 func TestGRPCMeshNode_GetHealthDoesNotMutateEventLog(t *testing.T) {
