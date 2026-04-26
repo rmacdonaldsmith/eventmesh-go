@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
+	peerlinkpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 )
 
 // TestGRPCMeshNode_StartStopClose tests the lifecycle methods
@@ -114,6 +117,34 @@ func TestGRPCMeshNode_StartAfterClose(t *testing.T) {
 	err = node.Start(ctx)
 	if err == nil {
 		t.Error("Expected error when starting closed node")
+	}
+}
+
+func TestGRPCMeshNode_StartOwnsHeartbeatLifecycle(t *testing.T) {
+	config := NewConfig("heartbeat-owner-node", "localhost:0")
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	peerLink := newLifecycleSpyPeerLink()
+	node.peerLink = peerLink
+
+	ctx := context.Background()
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	if peerLink.startHeartbeatsCalls != 1 {
+		t.Fatalf("Expected Start to start heartbeats once, got %d", peerLink.startHeartbeatsCalls)
+	}
+
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Expected idempotent Start to succeed, got %v", err)
+	}
+	if peerLink.startHeartbeatsCalls != 1 {
+		t.Fatalf("Expected idempotent Start not to start heartbeats again, got %d", peerLink.startHeartbeatsCalls)
 	}
 }
 
@@ -237,6 +268,76 @@ func TestGRPCMeshNode_ComprehensiveHealthMonitoring(t *testing.T) {
 	}
 
 	t.Logf("✅ Phase 4.5: Comprehensive health monitoring implemented and tested")
+}
+
+type lifecycleSpyPeerLink struct {
+	startHeartbeatsCalls int
+	events               chan *eventlogpkg.Event
+	eventErrs            chan error
+	changes              chan *peerlinkpkg.SubscriptionChange
+	changeErrs           chan error
+}
+
+func newLifecycleSpyPeerLink() *lifecycleSpyPeerLink {
+	return &lifecycleSpyPeerLink{
+		events:     make(chan *eventlogpkg.Event),
+		eventErrs:  make(chan error),
+		changes:    make(chan *peerlinkpkg.SubscriptionChange),
+		changeErrs: make(chan error),
+	}
+}
+
+func (l *lifecycleSpyPeerLink) SendEvent(ctx context.Context, peerID string, event *eventlogpkg.Event) error {
+	return nil
+}
+
+func (l *lifecycleSpyPeerLink) ReceiveEvents(ctx context.Context) (<-chan *eventlogpkg.Event, <-chan error) {
+	return l.events, l.eventErrs
+}
+
+func (l *lifecycleSpyPeerLink) SendSubscriptionChange(ctx context.Context, peerID string, change *peerlinkpkg.SubscriptionChange) error {
+	return nil
+}
+
+func (l *lifecycleSpyPeerLink) ReceiveSubscriptionChanges(ctx context.Context) (<-chan *peerlinkpkg.SubscriptionChange, <-chan error) {
+	return l.changes, l.changeErrs
+}
+
+func (l *lifecycleSpyPeerLink) SendHeartbeat(ctx context.Context, peerID string) error {
+	return nil
+}
+
+func (l *lifecycleSpyPeerLink) GetPeerHealth(ctx context.Context, peerID string) (peerlinkpkg.PeerHealthState, error) {
+	return peerlinkpkg.PeerHealthy, nil
+}
+
+func (l *lifecycleSpyPeerLink) StartHeartbeats(ctx context.Context) error {
+	l.startHeartbeatsCalls++
+	return nil
+}
+
+func (l *lifecycleSpyPeerLink) StopHeartbeats(ctx context.Context) error {
+	return nil
+}
+
+func (l *lifecycleSpyPeerLink) Connect(ctx context.Context, peer peerlinkpkg.PeerNode) error {
+	return nil
+}
+
+func (l *lifecycleSpyPeerLink) Disconnect(ctx context.Context, peerID string) error {
+	return nil
+}
+
+func (l *lifecycleSpyPeerLink) GetConnectedPeers(ctx context.Context) ([]peerlinkpkg.PeerNode, error) {
+	return nil, nil
+}
+
+func (l *lifecycleSpyPeerLink) Close() error {
+	close(l.events)
+	close(l.eventErrs)
+	close(l.changes)
+	close(l.changeErrs)
+	return nil
 }
 
 func TestGRPCMeshNode_GetHealthDoesNotMutateEventLog(t *testing.T) {

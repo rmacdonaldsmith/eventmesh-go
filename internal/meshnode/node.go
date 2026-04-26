@@ -166,6 +166,10 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 		}
 	}
 
+	if err := n.peerLink.StartHeartbeats(ctx); err != nil {
+		return fmt.Errorf("failed to start peer heartbeats: %w", err)
+	}
+
 	// Start listening for incoming peer events (including subscription events)
 	// This implements REQ-MNODE-003: Handle incoming peer subscription notifications
 	go n.handleIncomingPeerEvents(ctx)
