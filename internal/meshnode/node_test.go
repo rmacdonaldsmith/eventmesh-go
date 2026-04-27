@@ -31,8 +31,14 @@ func TestNewGRPCMeshNode(t *testing.T) {
 	if node.routingTable == nil {
 		t.Error("Expected RoutingTable to be initialized")
 	}
-	if node.peerLink == nil {
-		t.Error("Expected PeerLink to be initialized")
+	if node.dataPlanePeerLink == nil {
+		t.Error("Expected data-plane PeerLink to be initialized")
+	}
+	if node.controlPlanePeerLink == nil {
+		t.Error("Expected control-plane PeerLink to be initialized")
+	}
+	if node.peerConnections == nil {
+		t.Error("Expected peer connection manager to be initialized")
 	}
 
 	// Verify initial state
@@ -85,8 +91,14 @@ func TestNewGRPCMeshNode_WithPeerLinkConfig(t *testing.T) {
 	defer node.Close()
 
 	// Verify the PeerLink was created with custom config
-	if node.peerLink == nil {
-		t.Error("Expected PeerLink to be initialized with custom config")
+	if node.dataPlanePeerLink == nil {
+		t.Error("Expected data-plane PeerLink to be initialized with custom config")
+	}
+	if node.controlPlanePeerLink == nil {
+		t.Error("Expected control-plane PeerLink to be initialized with custom config")
+	}
+	if node.peerConnections == nil {
+		t.Error("Expected peer connection manager to be initialized with custom config")
 	}
 }
 

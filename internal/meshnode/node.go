@@ -61,9 +61,11 @@ type GRPCMeshNode struct {
 	config *Config
 
 	// Core components
-	eventLog     eventlogpkg.EventLog
-	routingTable routingtablepkg.RoutingTable
-	peerLink     peerlinkpkg.CompletePeerLink
+	eventLog             eventlogpkg.EventLog
+	routingTable         routingtablepkg.RoutingTable
+	dataPlanePeerLink    peerlinkpkg.DataPlanePeerLink
+	controlPlanePeerLink peerlinkpkg.ControlPlanePeerLink
+	peerConnections      peerlinkpkg.PeerConnectionManager
 
 	// State management
 	started         bool
@@ -80,6 +82,20 @@ type GRPCMeshNode struct {
 	// Peer subscription tracking for intelligent routing
 	peerSubscriptions   map[string]map[string]bool // peerNodeID -> topic -> hasSubscriber
 	peerSubscriptionsMu sync.RWMutex               // Protect peer subscriptions map
+}
+
+func (n *GRPCMeshNode) setPeerLink(peerLink peerlinkpkg.CompletePeerLink) {
+	n.dataPlanePeerLink = peerLink
+	n.controlPlanePeerLink = peerLink
+	n.peerConnections = peerLink
+}
+
+func (n *GRPCMeshNode) completePeerLink() peerlinkpkg.CompletePeerLink {
+	return composedPeerLink{
+		dataPlane:   n.dataPlanePeerLink,
+		control:     n.controlPlanePeerLink,
+		connections: n.peerConnections,
+	}
 }
 
 // NewGRPCMeshNode creates a new gRPC-based mesh node with the given configuration.
@@ -124,13 +140,13 @@ func NewGRPCMeshNode(config *Config) (*GRPCMeshNode, error) {
 		config:            config,
 		eventLog:          eventLog,
 		routingTable:      routingTable,
-		peerLink:          peerLink,
 		clients:           make(map[string]meshnode.Client),
 		subscriptions:     make(map[string]map[string]*meshnode.ClientSubscription),
 		peerSubscriptions: make(map[string]map[string]bool),
 		started:           false,
 		closed:            false,
 	}
+	node.setPeerLink(peerLink)
 
 	return node, nil
 }
@@ -154,7 +170,7 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 		"listen_address", n.config.ListenAddress)
 
 	// Start PeerLink to listen for incoming peer connections
-	if grpcPeerLink, ok := n.peerLink.(*peerlink.GRPCPeerLink); ok {
+	if grpcPeerLink, ok := n.peerConnections.(*peerlink.GRPCPeerLink); ok {
 		if err := grpcPeerLink.Start(ctx); err != nil {
 			return fmt.Errorf("failed to start PeerLink: %w", err)
 		}
@@ -171,7 +187,7 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 
 	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 
-	if err := n.peerLink.StartHeartbeats(lifecycleCtx); err != nil {
+	if err := n.controlPlanePeerLink.StartHeartbeats(lifecycleCtx); err != nil {
 		lifecycleCancel()
 		return fmt.Errorf("failed to start peer heartbeats: %w", err)
 	}
@@ -197,7 +213,8 @@ func (n *GRPCMeshNode) Stop(ctx context.Context) error {
 		return nil // Not started, idempotent
 	}
 
-	peerLink := n.peerLink
+	controlPlane := n.controlPlanePeerLink
+	peerConnections := n.peerConnections
 	cancel := n.lifecycleCancel
 	n.lifecycleCancel = nil
 	n.started = false
@@ -207,11 +224,11 @@ func (n *GRPCMeshNode) Stop(ctx context.Context) error {
 		cancel()
 	}
 
-	if err := peerLink.StopHeartbeats(ctx); err != nil {
+	if err := controlPlane.StopHeartbeats(ctx); err != nil {
 		return fmt.Errorf("failed to stop peer heartbeats: %w", err)
 	}
 
-	if stopper, ok := peerLink.(interface {
+	if stopper, ok := peerConnections.(interface {
 		Stop(context.Context) error
 	}); ok {
 		if err := stopper.Stop(ctx); err != nil {
@@ -244,7 +261,7 @@ func (n *GRPCMeshNode) Close() error {
 		return fmt.Errorf("failed to close RoutingTable: %w", err)
 	}
 
-	if err := n.peerLink.Close(); err != nil {
+	if err := n.peerConnections.Close(); err != nil {
 		return fmt.Errorf("failed to close PeerLink: %w", err)
 	}
 
@@ -337,7 +354,7 @@ func (n *GRPCMeshNode) deliverToLocalSubscribers(ctx context.Context, event *eve
 
 // forwardToPeers forwards an event to interested remote peers using intelligent routing
 func (n *GRPCMeshNode) forwardToPeers(ctx context.Context, event *eventlogpkg.Event, result *DeliveryResult) {
-	connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
+	connectedPeers, err := n.peerConnections.GetConnectedPeers(ctx)
 	if err != nil {
 		// Log peer connectivity issue but don't fail the publish (local delivery succeeded)
 		slog.Warn("failed to get connected peers for forwarding",
@@ -358,7 +375,7 @@ func (n *GRPCMeshNode) forwardToPeers(ctx context.Context, event *eventlogpkg.Ev
 		default:
 		}
 
-		err := n.peerLink.SendEvent(ctx, peer.ID(), event)
+		err := n.dataPlanePeerLink.SendEvent(ctx, peer.ID(), event)
 		if err != nil {
 			result.PeerFailures++
 			result.Errors = append(result.Errors, err)
@@ -633,7 +650,7 @@ func (n *GRPCMeshNode) GetRoutingTable() routingtablepkg.RoutingTable {
 func (n *GRPCMeshNode) GetPeerLink() peerlinkpkg.CompletePeerLink {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	return n.peerLink
+	return n.completePeerLink()
 }
 
 // GetNodeID returns this node's unique identifier in the mesh.
@@ -660,7 +677,7 @@ func (n *GRPCMeshNode) GetConnectedClients(ctx context.Context) ([]meshnode.Clie
 func (n *GRPCMeshNode) GetConnectedPeers(ctx context.Context) ([]peerlinkpkg.PeerNode, error) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
-	return n.peerLink.GetConnectedPeers(ctx)
+	return n.peerConnections.GetConnectedPeers(ctx)
 }
 
 // GetHealth returns the overall health status of this mesh node.
@@ -723,9 +740,9 @@ func (n *GRPCMeshNode) GetHealth(ctx context.Context) (meshnode.HealthStatus, er
 		peerLinkHealthy = false
 		healthMessages = append(healthMessages, "PeerLink unhealthy: node is closed")
 		peers = []peerlinkpkg.PeerNode{}
-	} else if n.peerLink != nil {
+	} else if n.peerConnections != nil {
 		var err error
-		peers, err = n.peerLink.GetConnectedPeers(ctx)
+		peers, err = n.peerConnections.GetConnectedPeers(ctx)
 		if err != nil {
 			peerLinkHealthy = false
 			healthMessages = append(healthMessages, fmt.Sprintf("PeerLink unhealthy: %v", err))
@@ -772,7 +789,7 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 	}
 
 	// Get connected peers
-	connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
+	connectedPeers, err := n.peerConnections.GetConnectedPeers(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get connected peers: %w", err)
 	}
@@ -801,7 +818,7 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 
 	// Send to all connected peers using control plane
 	for _, peer := range connectedPeers {
-		err := n.peerLink.SendSubscriptionChange(ctx, peer.ID(), subscriptionChange)
+		err := n.controlPlanePeerLink.SendSubscriptionChange(ctx, peer.ID(), subscriptionChange)
 		if err != nil {
 			failureCount++
 			errors = append(errors, fmt.Errorf("failed to send to peer %s: %w", peer.ID(), err))
@@ -846,7 +863,7 @@ func (n *GRPCMeshNode) resyncSubscriptionsToNewPeers(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
+			connectedPeers, err := n.peerConnections.GetConnectedPeers(ctx)
 			if err != nil {
 				slog.Debug("subscription resync skipped: failed to get connected peers",
 					"node_id", n.config.NodeID,
@@ -890,7 +907,7 @@ func (n *GRPCMeshNode) syncLocalSubscriptionsToPeer(ctx context.Context, peerID 
 			Topic:    subscription.Topic,
 			NodeId:   n.config.NodeID,
 		}
-		if err := n.peerLink.SendSubscriptionChange(ctx, peerID, change); err != nil {
+		if err := n.controlPlanePeerLink.SendSubscriptionChange(ctx, peerID, change); err != nil {
 			return fmt.Errorf("failed to send subscription %s to peer %s: %w", subscription.ID, peerID, err)
 		}
 	}
@@ -921,7 +938,7 @@ func (n *GRPCMeshNode) handleIncomingPeerEvents(ctx context.Context) {
 // handleIncomingDataPlaneEvents processes user events from peer nodes
 func (n *GRPCMeshNode) handleIncomingDataPlaneEvents(ctx context.Context) {
 	// Get event channel from PeerLink data plane
-	eventChan, errChan := n.peerLink.ReceiveEvents(ctx)
+	eventChan, errChan := n.dataPlanePeerLink.ReceiveEvents(ctx)
 
 	for {
 		select {
@@ -956,7 +973,7 @@ func (n *GRPCMeshNode) handleIncomingDataPlaneEvents(ctx context.Context) {
 // handleIncomingControlPlaneMessages processes subscription changes from peer nodes
 func (n *GRPCMeshNode) handleIncomingControlPlaneMessages(ctx context.Context) {
 	// Get subscription change channel from PeerLink control plane
-	changeChan, errChan := n.peerLink.ReceiveSubscriptionChanges(ctx)
+	changeChan, errChan := n.controlPlanePeerLink.ReceiveSubscriptionChanges(ctx)
 
 	for {
 		select {
@@ -1267,7 +1284,7 @@ func (n *GRPCMeshNode) runDiscovery(ctx context.Context) error {
 			"peer_id", peer.ID())
 
 		// Attempt to connect to the peer
-		err := n.peerLink.Connect(ctx, peer)
+		err := n.peerConnections.Connect(ctx, peer)
 		if err != nil {
 			slog.Warn("failed to connect to discovered peer",
 				"node_id", n.config.NodeID,

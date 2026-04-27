@@ -31,7 +31,7 @@ func TestGRPCMeshNode_PeerFailureDoesNotBlockHealthyPeerForwarding(t *testing.T)
 		&simplePeerNode{id: failedPeerID, address: "failed-peer", healthy: true},
 	)
 	peerLink.failSendsTo(failedPeerID, errors.New("simulated partition"))
-	node.peerLink = peerLink
+	node.setPeerLink(peerLink)
 	defer node.Close()
 
 	if err := node.Start(ctx); err != nil {

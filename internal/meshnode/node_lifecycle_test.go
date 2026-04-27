@@ -130,7 +130,7 @@ func TestGRPCMeshNode_StartOwnsHeartbeatLifecycle(t *testing.T) {
 	defer node.Close()
 
 	peerLink := newLifecycleSpyPeerLink()
-	node.peerLink = peerLink
+	node.setPeerLink(peerLink)
 
 	ctx := context.Background()
 	if err := node.Start(ctx); err != nil {
@@ -158,7 +158,7 @@ func TestGRPCMeshNode_StopOwnsPeerLifecycle(t *testing.T) {
 	defer node.Close()
 
 	peerLink := newLifecycleSpyPeerLink()
-	node.peerLink = peerLink
+	node.setPeerLink(peerLink)
 
 	ctx := context.Background()
 	if err := node.Start(ctx); err != nil {
