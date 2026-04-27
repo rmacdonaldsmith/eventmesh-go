@@ -11,6 +11,7 @@ type Config struct {
 	ListenAddress        string
 	SendQueueSize        int
 	SendTimeout          time.Duration
+	MaxSendAttempts      int
 	HeartbeatInterval    time.Duration
 	MissedHeartbeatLimit int
 	MaxMessageSize       int
@@ -34,6 +35,9 @@ func (c *Config) SetDefaults() {
 	}
 	if c.SendTimeout <= 0 {
 		c.SendTimeout = 1 * time.Second
+	}
+	if c.MaxSendAttempts <= 0 {
+		c.MaxSendAttempts = 3
 	}
 	if c.HeartbeatInterval <= 0 {
 		c.HeartbeatInterval = 5 * time.Second

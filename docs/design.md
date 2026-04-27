@@ -234,6 +234,12 @@ events are not silently lost when local persistence succeeds, but they should
 not assume exactly-once cross-node delivery unless a test is specifically
 checking duplicate suppression behavior.
 
+PeerLink retries failed sends for a bounded number of attempts
+(`MaxSendAttempts`, default `3`). A message that exhausts its retry budget, or
+cannot be requeued because the bounded peer queue is full, is counted as a drop
+and the peer is marked `Unhealthy`. The publishing node's local EventLog remains
+the durable source for later explicit replay or catch-up.
+
 ### Subscriber Contract
 
 Live subscriber delivery over SSE or in-memory client channels is best-effort

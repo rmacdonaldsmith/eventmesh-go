@@ -30,18 +30,28 @@ type PeerMessage interface {
 	SentAt() time.Time
 	// SetSentAt updates the sent timestamp
 	SetSentAt(time.Time)
+	// SendAttempts returns how many failed send attempts this message has seen.
+	SendAttempts() int
+	// IncrementSendAttempts increments and returns the failed send attempt count.
+	IncrementSendAttempts() int
 }
 
 // DataPlaneMessage represents a user event message
 type DataPlaneMessage struct {
-	peerID string
-	event  *eventlog.Event
-	sentAt time.Time
+	peerID       string
+	event        *eventlog.Event
+	sentAt       time.Time
+	sendAttempts int
 }
 
-func (m *DataPlaneMessage) PeerID() string         { return m.peerID }
-func (m *DataPlaneMessage) SentAt() time.Time      { return m.sentAt }
-func (m *DataPlaneMessage) SetSentAt(t time.Time)  { m.sentAt = t }
+func (m *DataPlaneMessage) PeerID() string        { return m.peerID }
+func (m *DataPlaneMessage) SentAt() time.Time     { return m.sentAt }
+func (m *DataPlaneMessage) SetSentAt(t time.Time) { m.sentAt = t }
+func (m *DataPlaneMessage) SendAttempts() int     { return m.sendAttempts }
+func (m *DataPlaneMessage) IncrementSendAttempts() int {
+	m.sendAttempts++
+	return m.sendAttempts
+}
 func (m *DataPlaneMessage) Event() *eventlog.Event { return m.event }
 
 // ControlPlaneMsg represents a subscription change message
@@ -49,24 +59,36 @@ type ControlPlaneMsg struct {
 	peerID             string
 	subscriptionChange *peerlink.SubscriptionChange
 	sentAt             time.Time
+	sendAttempts       int
 }
 
 func (m *ControlPlaneMsg) PeerID() string        { return m.peerID }
 func (m *ControlPlaneMsg) SentAt() time.Time     { return m.sentAt }
 func (m *ControlPlaneMsg) SetSentAt(t time.Time) { m.sentAt = t }
+func (m *ControlPlaneMsg) SendAttempts() int     { return m.sendAttempts }
+func (m *ControlPlaneMsg) IncrementSendAttempts() int {
+	m.sendAttempts++
+	return m.sendAttempts
+}
 func (m *ControlPlaneMsg) SubscriptionChange() *peerlink.SubscriptionChange {
 	return m.subscriptionChange
 }
 
 // HeartbeatMsg represents a control-plane heartbeat message.
 type HeartbeatMsg struct {
-	peerID string
-	sentAt time.Time
+	peerID       string
+	sentAt       time.Time
+	sendAttempts int
 }
 
 func (m *HeartbeatMsg) PeerID() string        { return m.peerID }
 func (m *HeartbeatMsg) SentAt() time.Time     { return m.sentAt }
 func (m *HeartbeatMsg) SetSentAt(t time.Time) { m.sentAt = t }
+func (m *HeartbeatMsg) SendAttempts() int     { return m.sendAttempts }
+func (m *HeartbeatMsg) IncrementSendAttempts() int {
+	m.sendAttempts++
+	return m.sendAttempts
+}
 
 // peerMetrics tracks basic metrics per peer
 type peerMetrics struct {
@@ -775,49 +797,61 @@ func (g *GRPCPeerLink) processOutboundMessage(peerID string, msg PeerMessage, st
 
 // handleSendFailure handles message send failures by attempting to requeue or dropping the message
 func (g *GRPCPeerLink) handleSendFailure(peerID string, msg PeerMessage, sendQueue chan PeerMessage, err error) {
+	attempts := msg.IncrementSendAttempts()
+	if attempts > g.config.MaxSendAttempts {
+		g.dropFailedMessage(peerID, msg, "max send attempts exceeded")
+		g.recordPeerSendFailure(peerID)
+		return
+	}
+
 	// Put the message back in the queue if possible (bounded queue, might drop)
 	select {
 	case sendQueue <- msg:
-		var topic string
-		switch m := msg.(type) {
-		case *DataPlaneMessage:
-			topic = m.Event().Topic
-		case *ControlPlaneMsg:
-			topic = m.SubscriptionChange().Topic
-		case *HeartbeatMsg:
-			topic = "heartbeat"
-		default:
-			topic = "unknown"
-		}
 		slog.Debug("requeued failed message",
 			"peer_id", peerID,
-			"topic", topic)
+			"topic", messageTopic(msg),
+			"attempts", attempts,
+			"max_attempts", g.config.MaxSendAttempts)
 	default:
-		// Queue full, message will be dropped
-		g.mu.Lock()
-		if metrics, exists := g.metrics[peerID]; exists {
-			metrics.dropsCount++
-		}
-		g.mu.Unlock()
-
-		var topic string
-		switch m := msg.(type) {
-		case *DataPlaneMessage:
-			topic = m.Event().Topic
-		case *ControlPlaneMsg:
-			topic = m.SubscriptionChange().Topic
-		case *HeartbeatMsg:
-			topic = "heartbeat"
-		default:
-			topic = "unknown"
-		}
-		slog.Warn("dropped message due to full queue on retry",
-			"peer_id", peerID,
-			"topic", topic)
+		g.dropFailedMessage(peerID, msg, "queue full on retry")
 	}
 
 	// Mark peer unhealthy on send failure
 	g.recordPeerSendFailure(peerID)
+}
+
+func (g *GRPCPeerLink) dropFailedMessage(peerID string, msg PeerMessage, reason string) {
+	g.mu.Lock()
+	if metrics, exists := g.metrics[peerID]; exists {
+		metrics.dropsCount++
+	}
+	g.mu.Unlock()
+
+	slog.Warn("dropped failed message",
+		"peer_id", peerID,
+		"topic", messageTopic(msg),
+		"attempts", msg.SendAttempts(),
+		"max_attempts", g.config.MaxSendAttempts,
+		"reason", reason)
+}
+
+func messageTopic(msg PeerMessage) string {
+	switch m := msg.(type) {
+	case *DataPlaneMessage:
+		if m.Event() == nil {
+			return "unknown"
+		}
+		return m.Event().Topic
+	case *ControlPlaneMsg:
+		if m.SubscriptionChange() == nil {
+			return "unknown"
+		}
+		return m.SubscriptionChange().Topic
+	case *HeartbeatMsg:
+		return "heartbeat"
+	default:
+		return "unknown"
+	}
 }
 
 // getSendQueue safely retrieves the send queue for a peer

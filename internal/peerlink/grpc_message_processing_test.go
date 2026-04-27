@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
+	peerlinkpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -145,9 +146,10 @@ func TestGRPCPeerLink_ProcessOutboundMessage(t *testing.T) {
 // TestGRPCPeerLink_HandleSendFailure tests send failure handling and requeueing
 func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 	clientConfig := &Config{
-		NodeID:        "client-node",
-		ListenAddress: "localhost:0",
-		SendQueueSize: 10, // Small queue for testing
+		NodeID:          "client-node",
+		ListenAddress:   "localhost:0",
+		SendQueueSize:   10,
+		MaxSendAttempts: 2,
 	}
 	client, err := NewGRPCPeerLink(clientConfig)
 	if err != nil {
@@ -183,6 +185,41 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 	case <-time.After(1 * time.Second):
 		t.Error("Message was not requeued within timeout")
 	}
+	if testMsg.SendAttempts() != 1 {
+		t.Fatalf("Expected failed message to record 1 send attempt, got %d", testMsg.SendAttempts())
+	}
+	healthState, err := client.GetPeerHealth(context.Background(), "test-peer")
+	if err != nil {
+		t.Fatalf("Expected peer health lookup to succeed: %v", err)
+	}
+	if healthState != peerlinkpkg.PeerUnhealthy {
+		t.Fatalf("Expected failed send to mark peer Unhealthy, got %s", healthState)
+	}
+
+	// A message is dropped after its configured retry budget is exhausted.
+	boundedEvent := eventlog.NewEvent("bounded-retry", []byte("payload"))
+	boundedMsg := &DataPlaneMessage{
+		peerID: "test-peer",
+		event:  boundedEvent,
+		sentAt: time.Now(),
+	}
+	initialDrops := client.GetDropsCount("test-peer")
+	client.handleSendFailure("test-peer", boundedMsg, sendQueue, testError)
+	<-sendQueue
+	client.handleSendFailure("test-peer", boundedMsg, sendQueue, testError)
+	<-sendQueue
+	client.handleSendFailure("test-peer", boundedMsg, sendQueue, testError)
+	if boundedMsg.SendAttempts() != 3 {
+		t.Fatalf("Expected bounded message to record 3 failed attempts, got %d", boundedMsg.SendAttempts())
+	}
+	if finalDrops := client.GetDropsCount("test-peer"); finalDrops != initialDrops+1 {
+		t.Fatalf("Expected drops count to increase after max attempts, got initial=%d final=%d", initialDrops, finalDrops)
+	}
+	select {
+	case droppedMsg := <-sendQueue:
+		t.Fatalf("Expected message to be dropped after max attempts, but queue received %#v", droppedMsg)
+	default:
+	}
 
 	// Test drops counter increase when queue is full
 	// Fill the queue first
@@ -202,7 +239,7 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 	}
 
 	// Now handleSendFailure should increment drops count
-	initialDrops := client.GetDropsCount("test-peer")
+	initialDrops = client.GetDropsCount("test-peer")
 	client.handleSendFailure("test-peer", testMsg, sendQueue, testError)
 	finalDrops := client.GetDropsCount("test-peer")
 

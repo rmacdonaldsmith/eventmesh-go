@@ -62,6 +62,9 @@ func TestConfig_SetDefaults(t *testing.T) {
 	if config.SendTimeout <= 0 {
 		t.Errorf("Expected positive SendTimeout, got %v", config.SendTimeout)
 	}
+	if config.MaxSendAttempts <= 0 {
+		t.Errorf("Expected positive MaxSendAttempts, got %d", config.MaxSendAttempts)
+	}
 	if config.HeartbeatInterval <= 0 {
 		t.Errorf("Expected positive HeartbeatInterval, got %v", config.HeartbeatInterval)
 	}
@@ -79,6 +82,9 @@ func TestConfig_SetDefaults(t *testing.T) {
 	if config.SendTimeout.Seconds() != 1.0 {
 		t.Errorf("Expected SendTimeout default of 1s, got %v", config.SendTimeout)
 	}
+	if config.MaxSendAttempts != 3 {
+		t.Errorf("Expected MaxSendAttempts default of 3, got %d", config.MaxSendAttempts)
+	}
 	if config.HeartbeatInterval.Seconds() != 5.0 {
 		t.Errorf("Expected HeartbeatInterval default of 5s, got %v", config.HeartbeatInterval)
 	}
@@ -94,6 +100,7 @@ func TestConfig_SetDefaults_PreservesExistingValues(t *testing.T) {
 		ListenAddress:        "localhost:9090",
 		SendQueueSize:        200,
 		SendTimeout:          2 * time.Second,
+		MaxSendAttempts:      5,
 		HeartbeatInterval:    10 * time.Second,
 		MissedHeartbeatLimit: 5,
 		MaxMessageSize:       2048,
@@ -106,6 +113,9 @@ func TestConfig_SetDefaults_PreservesExistingValues(t *testing.T) {
 	}
 	if config.SendTimeout != 2*time.Second {
 		t.Errorf("Expected existing SendTimeout (2s) to be preserved, got %v", config.SendTimeout)
+	}
+	if config.MaxSendAttempts != 5 {
+		t.Errorf("Expected existing MaxSendAttempts (5) to be preserved, got %d", config.MaxSendAttempts)
 	}
 	if config.HeartbeatInterval != 10*time.Second {
 		t.Errorf("Expected existing HeartbeatInterval (10s) to be preserved, got %v", config.HeartbeatInterval)
