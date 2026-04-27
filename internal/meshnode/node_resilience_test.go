@@ -3,10 +3,15 @@ package meshnode
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
+	"net"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	internalpeerlink "github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 	peerlinkpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 )
@@ -75,6 +80,87 @@ func TestGRPCMeshNode_PeerFailureDoesNotBlockHealthyPeerForwarding(t *testing.T)
 	}
 }
 
+func TestGRPCMeshNode_BackpressuredPeerReportsDropAfterLocalPersistence(t *testing.T) {
+	restoreLogs := discardSlogForTest()
+	defer restoreLogs()
+
+	ctx := context.Background()
+	topic := "orders.partition.backpressure"
+	peerID := "backpressured-peer"
+
+	unreachableAddress := reserveAndCloseLocalAddress(t)
+	node, err := NewGRPCMeshNode(NewConfig("backpressure-publisher", "127.0.0.1:0").
+		WithPeerLinkConfig(&internalpeerlink.Config{
+			NodeID:          "backpressure-publisher",
+			ListenAddress:   "127.0.0.1:0",
+			SendQueueSize:   1,
+			SendTimeout:     10 * time.Millisecond,
+			MaxSendAttempts: 1,
+		}))
+	if err != nil {
+		t.Fatalf("Failed to create mesh node: %v", err)
+	}
+	defer node.Close()
+
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Failed to start mesh node: %v", err)
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := node.Stop(stopCtx); err != nil {
+			t.Fatalf("Failed to stop mesh node: %v", err)
+		}
+	}()
+
+	if err := node.GetPeerLink().Connect(ctx, &simplePeerNode{
+		id:      peerID,
+		address: unreachableAddress,
+		healthy: true,
+	}); err != nil {
+		t.Fatalf("Failed to connect unreachable peer: %v", err)
+	}
+	node.processIncomingSubscriptionChange(ctx, &peerlinkpkg.SubscriptionChange{
+		Action:   "subscribe",
+		ClientId: "backpressured-subscriber",
+		Topic:    topic,
+		NodeId:   peerID,
+	})
+
+	publisher := NewTrustedClient("backpressure-publisher-client")
+	firstPayload := []byte(`{"backpressure":"queued"}`)
+	if _, err := node.PublishEventWithResult(ctx, publisher, eventlog.NewEvent(topic, firstPayload)); err != nil {
+		t.Fatalf("Expected first event to fill the peer queue without error, got %v", err)
+	}
+
+	secondPayload := []byte(`{"backpressure":"dropped"}`)
+	_, err = node.PublishEventWithResult(ctx, publisher, eventlog.NewEvent(topic, secondPayload))
+	if err == nil {
+		t.Fatal("Expected saturated peer queue to report a publish delivery failure")
+	}
+	if !strings.Contains(err.Error(), "peer failures") {
+		t.Fatalf("Expected peer failure error, got %v", err)
+	}
+
+	persistedEvents := requireEventLogCount(t, ctx, node, topic, 2)
+	if string(persistedEvents[0].Payload) != string(firstPayload) {
+		t.Fatalf("Expected first payload %s, got %s", firstPayload, persistedEvents[0].Payload)
+	}
+	if string(persistedEvents[1].Payload) != string(secondPayload) {
+		t.Fatalf("Expected second payload %s, got %s", secondPayload, persistedEvents[1].Payload)
+	}
+
+	dropCounter, ok := node.GetPeerLink().(interface {
+		GetDropsCount(peerID string) int64
+	})
+	if !ok {
+		t.Fatal("Expected PeerLink to expose drop metrics")
+	}
+	if drops := dropCounter.GetDropsCount(peerID); drops != 1 {
+		t.Fatalf("Expected 1 drop for saturated peer queue, got %d", drops)
+	}
+}
+
 type partitionPeerLink struct {
 	mu              sync.Mutex
 	peers           []peerlinkpkg.PeerNode
@@ -87,6 +173,28 @@ type partitionPeerLink struct {
 	closeOnce       sync.Once
 	heartbeatsStart int
 	heartbeatsStop  int
+}
+
+func reserveAndCloseLocalAddress(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to reserve local address: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("Failed to close reserved local address: %v", err)
+	}
+	return address
+}
+
+func discardSlogForTest() func() {
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return func() {
+		slog.SetDefault(previous)
+	}
 }
 
 func newPartitionPeerLink(peers ...peerlinkpkg.PeerNode) *partitionPeerLink {
