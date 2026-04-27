@@ -21,6 +21,8 @@ import (
 const (
 	// MaxEventPayloadSize is the maximum allowed payload size in bytes (1MB)
 	MaxEventPayloadSize = 1024 * 1024
+
+	peerSubscriptionResyncInterval = 100 * time.Millisecond
 )
 
 // DeliveryResult tracks the results of event delivery attempts
@@ -177,6 +179,7 @@ func (n *GRPCMeshNode) Start(ctx context.Context) error {
 	// Start listening for incoming peer events (including subscription events)
 	// This implements REQ-MNODE-003: Handle incoming peer subscription notifications
 	go n.handleIncomingPeerEvents(lifecycleCtx)
+	go n.resyncSubscriptionsToNewPeers(lifecycleCtx)
 
 	n.lifecycleCancel = lifecycleCancel
 	n.started = true
@@ -831,6 +834,80 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 	// Partial failures are logged but don't fail the operation
 	// The subscription is still valid locally
 	return nil
+}
+
+func (n *GRPCMeshNode) resyncSubscriptionsToNewPeers(ctx context.Context) {
+	seenPeers := make(map[string]bool)
+	ticker := time.NewTicker(peerSubscriptionResyncInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			connectedPeers, err := n.peerLink.GetConnectedPeers(ctx)
+			if err != nil {
+				slog.Debug("subscription resync skipped: failed to get connected peers",
+					"node_id", n.config.NodeID,
+					"error", err)
+				continue
+			}
+
+			currentPeers := make(map[string]bool, len(connectedPeers))
+			for _, peer := range connectedPeers {
+				peerID := peer.ID()
+				currentPeers[peerID] = true
+				if seenPeers[peerID] {
+					continue
+				}
+
+				if err := n.syncLocalSubscriptionsToPeer(ctx, peerID); err != nil {
+					slog.Warn("failed to resync subscriptions to peer",
+						"node_id", n.config.NodeID,
+						"peer_id", peerID,
+						"error", err)
+					continue
+				}
+				seenPeers[peerID] = true
+			}
+
+			for peerID := range seenPeers {
+				if !currentPeers[peerID] {
+					delete(seenPeers, peerID)
+				}
+			}
+		}
+	}
+}
+
+func (n *GRPCMeshNode) syncLocalSubscriptionsToPeer(ctx context.Context, peerID string) error {
+	subscriptions := n.localSubscriptionSnapshot()
+	for _, subscription := range subscriptions {
+		change := &peerlinkpkg.SubscriptionChange{
+			Action:   "subscribe",
+			ClientId: subscription.ClientID,
+			Topic:    subscription.Topic,
+			NodeId:   n.config.NodeID,
+		}
+		if err := n.peerLink.SendSubscriptionChange(ctx, peerID, change); err != nil {
+			return fmt.Errorf("failed to send subscription %s to peer %s: %w", subscription.ID, peerID, err)
+		}
+	}
+	return nil
+}
+
+func (n *GRPCMeshNode) localSubscriptionSnapshot() []meshnode.ClientSubscription {
+	n.subscriptionsMu.RLock()
+	defer n.subscriptionsMu.RUnlock()
+
+	var subscriptions []meshnode.ClientSubscription
+	for _, clientSubscriptions := range n.subscriptions {
+		for _, subscription := range clientSubscriptions {
+			subscriptions = append(subscriptions, *subscription)
+		}
+	}
+	return subscriptions
 }
 
 // handleIncomingPeerEvents processes events received from peer nodes

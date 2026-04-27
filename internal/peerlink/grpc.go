@@ -283,6 +283,9 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 	// Ensure cleanup on stream close
 	defer func() {
 		g.mu.Lock()
+		if conn, exists := g.connections[peerID]; exists && conn.stream == stream {
+			delete(g.connections, peerID)
+		}
 		if metrics, exists := g.metrics[peerID]; exists {
 			metrics.healthState = peerlink.PeerDisconnected
 		}
@@ -306,14 +309,7 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 				// Data plane: Convert protobuf Event to EventRecord and distribute to subscribers
 				g.mu.Lock()
 				if !g.closed {
-					receivedEvent := &eventlog.Event{
-						Topic:     eventMsg.Topic,
-						Payload:   eventMsg.Payload,
-						Headers:   eventMsg.Headers,
-						Offset:    eventMsg.Offset,
-						Timestamp: time.Now(),
-					}
-					g.distributeEvent(receivedEvent)
+					g.distributeEvent(eventFromProto(eventMsg))
 				}
 				g.mu.Unlock()
 			} else if controlMsg := msg.GetControlPlane(); controlMsg != nil {
@@ -636,14 +632,7 @@ func (g *GRPCPeerLink) startReceiveGoroutine(ctx context.Context, peerID string,
 				// Data plane: Convert protobuf Event to EventRecord and distribute to subscribers
 				g.mu.Lock()
 				if !g.closed {
-					receivedEvent := &eventlog.Event{
-						Topic:     eventMsg.Topic,
-						Payload:   eventMsg.Payload,
-						Headers:   eventMsg.Headers,
-						Offset:    eventMsg.Offset,
-						Timestamp: time.Now(),
-					}
-					g.distributeEvent(receivedEvent)
+					g.distributeEvent(eventFromProto(eventMsg))
 				}
 				g.mu.Unlock()
 			} else if controlMsg := msg.GetControlPlane(); controlMsg != nil {
@@ -672,6 +661,22 @@ func (g *GRPCPeerLink) startReceiveGoroutine(ctx context.Context, peerID string,
 		}
 	}()
 	return recvDone
+}
+
+func eventFromProto(eventMsg *peerlinkv1.Event) *eventlog.Event {
+	payload := append([]byte(nil), eventMsg.Payload...)
+	headers := make(map[string]string, len(eventMsg.Headers))
+	for key, value := range eventMsg.Headers {
+		headers[key] = value
+	}
+
+	return &eventlog.Event{
+		Topic:     eventMsg.Topic,
+		Payload:   payload,
+		Headers:   headers,
+		Offset:    eventMsg.Offset,
+		Timestamp: time.Now(),
+	}
 }
 
 // serializeMessage converts a PeerMessage to a protobuf PeerMessage

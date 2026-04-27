@@ -205,6 +205,12 @@ The Go HTTP client and CLI provide a convenience on top of this model:
 SSE stream attachment is connection-scoped and does not create extra
 subscription metadata.
 
+When a peer connects or reconnects, MeshNode resends its current local
+subscription metadata to that peer through the control plane. This rebuilds
+routing interest after network healing. It does not replay user events that were
+published while the peer was disconnected; catch-up and replay remain explicit
+EventLog read concerns.
+
 ## Delivery Guarantees
 
 EventMesh is designed around local-first durability and at-least-once,

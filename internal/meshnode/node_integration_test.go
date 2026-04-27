@@ -554,6 +554,64 @@ func TestSubscriptionGossipEndToEnd(t *testing.T) {
 	waitForNoInterestedPeer(t, ctx, nodeA, topic, nodeB.GetNodeID())
 }
 
+func TestSubscriptionInterestRebuildsAfterReconnect(t *testing.T) {
+	ctx := context.Background()
+	publisherNode := newStartedIntegrationNode(t, ctx, "resilience-publisher")
+	subscriberNode := newStartedIntegrationNode(t, ctx, "resilience-subscriber")
+
+	connectMeshNodes(t, ctx, publisherNode, subscriberNode)
+
+	if err := publisherNode.GetPeerLink().Disconnect(ctx, subscriberNode.GetNodeID()); err != nil {
+		t.Fatalf("Failed to disconnect publisher from subscriber: %v", err)
+	}
+	waitForMeshNodeCondition(t, 2*time.Second, func() bool {
+		return !meshNodeHasConnectedPeer(t, ctx, publisherNode, subscriberNode.GetNodeID())
+	}, "publisher to remove subscriber from connected peers")
+	waitForMeshNodeCondition(t, 2*time.Second, func() bool {
+		return !meshNodeHasConnectedPeer(t, ctx, subscriberNode, publisherNode.GetNodeID())
+	}, "subscriber to observe publisher disconnect")
+
+	subscriber := NewTrustedClient("resilience-subscriber-client")
+	topic := "orders.resilience.reconnect"
+	if err := subscriberNode.Subscribe(ctx, subscriber, topic); err != nil {
+		t.Fatalf("Failed to subscribe while disconnected: %v", err)
+	}
+
+	downPublisher := NewTrustedClient("resilience-publisher-client-down")
+	downPayload := []byte(`{"phase":"down"}`)
+	downEvent := eventlog.NewEvent(topic, downPayload)
+	if err := publisherNode.PublishEvent(ctx, downPublisher, downEvent); err != nil {
+		t.Fatalf("Expected local publish while peer disconnected to succeed, got %v", err)
+	}
+	requireEventLogCount(t, ctx, publisherNode, topic, 1)
+	requireEventLogCount(t, ctx, subscriberNode, topic, 0)
+	if received := subscriber.GetReceivedEvents(); len(received) != 0 {
+		t.Fatalf("Expected disconnected subscriber to receive no events, got %d", len(received))
+	}
+
+	connectMeshNodes(t, ctx, publisherNode, subscriberNode)
+	waitForInterestedPeer(t, ctx, publisherNode, topic, subscriberNode.GetNodeID())
+
+	upPublisher := NewTrustedClient("resilience-publisher-client-up")
+	upPayload := []byte(`{"phase":"healed"}`)
+	upEvent := eventlog.NewEvent(topic, upPayload)
+	if err := publisherNode.PublishEvent(ctx, upPublisher, upEvent); err != nil {
+		t.Fatalf("Failed to publish after reconnect: %v", err)
+	}
+
+	waitForReceivedEvent(t, subscriber, topic, upPayload)
+	requireEventLogCount(t, ctx, publisherNode, topic, 2)
+	requireEventLogCount(t, ctx, subscriberNode, topic, 1)
+
+	receivedEvents := subscriber.GetReceivedEvents()
+	if len(receivedEvents) != 1 {
+		t.Fatalf("Expected subscriber to receive exactly one post-heal live event, got %d", len(receivedEvents))
+	}
+	if string(receivedEvents[0].Payload) != string(upPayload) {
+		t.Fatalf("Expected subscriber to receive post-heal payload %s, got %s", upPayload, receivedEvents[0].Payload)
+	}
+}
+
 // TestIntelligentRoutingBasedOnSubscriptions tests that events are only routed to nodes with interested subscribers
 // This implements the core efficiency feature of EventMesh: subscription-based intelligent routing
 func TestIntelligentRoutingBasedOnSubscriptions(t *testing.T) {

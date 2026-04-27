@@ -2,6 +2,7 @@ package meshnode
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
@@ -18,7 +19,8 @@ type TrustedClient struct {
 	id          string
 	connectedAt time.Time            // When this client connected
 	eventChan   chan *eventlog.Event // Channel for receiving events
-	eventBuffer []*eventlog.Event    // Buffer for testing (synchronous delivery)
+	mu          sync.Mutex
+	eventBuffer []*eventlog.Event // Buffer for testing (synchronous delivery)
 }
 
 // NewTrustedClient creates a new trusted client with the given ID.
@@ -60,12 +62,15 @@ func (c *TrustedClient) DeliverEvent(event *eventlog.Event) error {
 		return fmt.Errorf("cannot deliver nil event to client %s", c.id)
 	}
 
-	// For testing, add to buffer (synchronous)
-	c.eventBuffer = append(c.eventBuffer, event)
+	eventCopy := event.Copy()
+
+	c.mu.Lock()
+	c.eventBuffer = append(c.eventBuffer, eventCopy)
+	c.mu.Unlock()
 
 	// Try to send to channel (asynchronous, non-blocking)
 	select {
-	case c.eventChan <- event:
+	case c.eventChan <- eventCopy:
 		// Event delivered successfully
 		return nil
 	default:
@@ -76,7 +81,14 @@ func (c *TrustedClient) DeliverEvent(event *eventlog.Event) error {
 
 // GetReceivedEvents returns all events received by this client (for testing)
 func (c *TrustedClient) GetReceivedEvents() []*eventlog.Event {
-	return append([]*eventlog.Event{}, c.eventBuffer...) // Return copy
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	events := make([]*eventlog.Event, 0, len(c.eventBuffer))
+	for _, event := range c.eventBuffer {
+		events = append(events, event.Copy())
+	}
+	return events
 }
 
 // GetEventChannel returns the channel for receiving events (for production use)
