@@ -41,8 +41,20 @@ unless the code and tests prove the behavior today.
 1. **Local persistence first** – events are written before being forwarded.
 2. **Smart propagation** – subscriptions shared across peers for efficiency.
 3. **Interface-driven design** – public contracts defined before implementations.
-4. **Eventual consistency** – delivery guarantees are at-least-once.
+4. **Eventual consistency** – delivery guarantees are local-first and
+   at-least-once, not exactly-once.
 5. **Observability built-in** – metrics, health checks, structured logging.
+
+**Delivery guarantee contract:**
+
+* A successful publish means the event was appended to the local EventLog before
+  local subscriber delivery or peer forwarding.
+* Peer-to-peer mesh delivery is at-least-once and duplicate-tolerant. Retries,
+  reconnects, and future replay/resync flows may produce duplicates.
+* Live SSE/client delivery is best-effort while connected. Durable catch-up uses
+  topic replay from the EventLog by offset.
+* Do not write tests or docs that imply exactly-once delivery unless the feature
+  is explicitly designed and implemented later.
 
 ---
 

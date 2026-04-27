@@ -205,6 +205,43 @@ The Go HTTP client and CLI provide a convenience on top of this model:
 SSE stream attachment is connection-scoped and does not create extra
 subscription metadata.
 
+## Delivery Guarantees
+
+EventMesh is designed around local-first durability and at-least-once,
+duplicate-tolerant delivery. It does not currently provide, or try to provide,
+exactly-once delivery.
+
+### Publisher Contract
+
+When `PublishEvent` or `PublishEventWithResult` succeeds, the event has been
+appended to the local node's EventLog. Local persistence happens before local
+subscriber delivery and before forwarding to peers. Peer forwarding can still
+partially fail after local persistence succeeds, so API and test behavior should
+not treat remote delivery as part of the local durability guarantee.
+
+### Mesh Delivery Contract
+
+Node-to-node delivery is at-least-once. A peer may see duplicate events during
+send retries, reconnects, topology changes, and future replay or resync flows.
+Receivers should therefore be duplicate-tolerant. Tests should assert that
+events are not silently lost when local persistence succeeds, but they should
+not assume exactly-once cross-node delivery unless a test is specifically
+checking duplicate suppression behavior.
+
+### Subscriber Contract
+
+Live subscriber delivery over SSE or in-memory client channels is best-effort
+while the client is connected. A disconnected client should use replay by topic
+and offset to catch up from the EventLog. Durable subscriber offsets,
+acknowledgements, and server-side resume semantics are future design work.
+
+### Non-Goal: Exactly-Once
+
+Exactly-once delivery is intentionally not a current goal. It would require
+stable event identities, idempotency keys, durable acknowledgements, subscriber
+offset tracking, deduplication storage, and transactional boundaries across
+components that EventMesh does not yet have.
+
 ## Publish Flow
 
 ```text

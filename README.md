@@ -12,6 +12,24 @@ The codebase is functional as a development/MVP system. It is not yet a
 production broker: storage is in-memory, peer security is not mTLS yet, and some
 multi-node behavior is still being hardened.
 
+## Delivery Guarantees
+
+EventMesh does not claim exactly-once delivery. The current design target is
+local-first durability with at-least-once, duplicate-tolerant delivery across
+the mesh.
+
+- **Publishers:** a successful publish means the event was appended to the
+  local node's EventLog before local delivery or peer forwarding.
+- **Peer-to-peer mesh:** node-to-node delivery is at-least-once. Retries,
+  reconnects, and future replay/resync flows may produce duplicates, so
+  receivers must tolerate duplicate event IDs or payloads.
+- **Live subscribers:** active SSE/client streams are best-effort while
+  connected. Durable catch-up should use topic replay from the EventLog by
+  offset.
+- **Exactly-once:** not a current goal. Supporting it would require durable
+  acknowledgements, subscriber offsets, idempotency/deduplication storage, and
+  stronger transactional boundaries.
+
 ## Current Capabilities
 
 - HTTP API for publishing, reading, subscribing, and streaming events
