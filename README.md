@@ -42,6 +42,12 @@ the mesh.
   subscription-change gossip
 - Local verification loop through `make`
 
+PeerLink currently separates data-plane user events from control-plane
+subscription gossip logically through typed `PeerMessage` frames, separate
+interfaces, independent queues, and per-plane metrics. Both planes are still
+multiplexed over one physical gRPC `EventStream`; separate physical data and
+control streams are future work if tests or operations show they are needed.
+
 ## Quick Start
 
 Requirements:

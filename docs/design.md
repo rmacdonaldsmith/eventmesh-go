@@ -101,11 +101,12 @@ not starved by user event traffic.
 
 Architecture decision: EventMesh keeps one physical peer RPC stream for now:
 `PeerLink.EventStream(stream PeerMessage) returns (stream PeerMessage)`.
-Data and control separation is enforced through typed `PeerMessage` frames,
-focused Go interfaces, independent per-peer send queues, and control-first
-queue selection. Splitting the proto into separate `DataStream` and
-`ControlStream` RPCs is deferred until tests or operational experience show
-that independent physical transport is necessary.
+The separation between data plane and control plane is logical, not physical.
+Both planes are multiplexed over `EventStream`, while separation is enforced
+through typed `PeerMessage` frames, focused Go interfaces, independent per-peer
+send queues, and control-first queue selection. Splitting the proto into
+separate `DataStream` and `ControlStream` RPCs is deferred until tests or
+operational experience show that independent physical transport is necessary.
 
 PeerLink metrics expose both aggregate peer counters and per-plane counters.
 Queue depth, accepted queued messages, drops, and send failures are reported

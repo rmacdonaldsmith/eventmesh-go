@@ -5,13 +5,16 @@ package peerlink.v1;
 option go_package = "github.com/rmacdonaldsmith/eventmesh-go/proto/peerlink/v1;peerlinkv1";
 
 // Top-level streaming service.
-// Each peer establishes a single long-lived bidirectional stream.
+// Each peer establishes a single long-lived bidirectional stream. Data-plane
+// and control-plane frames are logically separated inside PeerMessage, but they
+// are currently multiplexed over this one physical stream.
 service PeerLink {
   rpc EventStream(stream PeerMessage) returns (stream PeerMessage);
 }
 
 // Wrapper message for all frame types.
-// Separates data plane (user events) from control plane (subscription gossip) communication.
+// Provides logical separation between data-plane user events and control-plane
+// coordination messages while sharing one EventStream transport.
 message PeerMessage {
   oneof kind {
     Handshake handshake = 1;
@@ -52,7 +55,8 @@ message Heartbeat {
 }
 
 // Control plane message wrapper for subscription gossip and other mesh coordination.
-// Separates control plane communication from user event data plane.
+// Control-plane frames are never user events, even though they share the same
+// physical EventStream as data-plane frames.
 message ControlPlaneMessage {
   oneof kind {
     SubscriptionChange subscription_change = 1;  // Subscription gossip between nodes
