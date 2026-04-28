@@ -68,7 +68,6 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_ContextCancellation(t *testing.
 	}
 	defer stream.CloseSend()
 
-	// Test runBidirectionalStreamLoop - this function doesn't exist yet, so test will fail
 	result := make(chan bool, 1)
 	go func() {
 		shouldRetry := client.runBidirectionalStreamLoop(testCtx, "server-node", stream, sendQueue)
@@ -87,7 +86,6 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_ContextCancellation(t *testing.
 		if shouldRetry {
 			t.Errorf("Expected runBidirectionalStreamLoop to return false (don't retry) on context cancellation, got true")
 		}
-		t.Log("✅ runBidirectionalStreamLoop correctly returned false on context cancellation")
 	case <-time.After(3 * time.Second):
 		t.Error("runBidirectionalStreamLoop did not return within timeout")
 	}
@@ -189,7 +187,6 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 		if string(receivedEvent.Payload) != "hello from server" {
 			t.Errorf("Expected payload 'hello from server', got '%s'", string(receivedEvent.Payload))
 		}
-		t.Log("✅ runBidirectionalStreamLoop correctly processed received event")
 	case err := <-errChan:
 		t.Fatalf("Receive error: %v", err)
 	case <-time.After(2 * time.Second):
@@ -206,7 +203,6 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 	// Let the stream loop process the outbound event
 	time.Sleep(100 * time.Millisecond)
 
-	t.Log("✅ runBidirectionalStreamLoop test setup complete")
 }
 
 // TestGRPCPeerLink_GetSendQueue tests the helper function for getting send queues
@@ -227,12 +223,9 @@ func TestGRPCPeerLink_GetSendQueue(t *testing.T) {
 	expectedQueue := client.sendQueues["test-peer"]
 	client.mu.Unlock()
 
-	// Test getSendQueue - this function doesn't exist yet, so test will fail
 	actualQueue := client.getSendQueue("test-peer")
 
 	if actualQueue != expectedQueue {
 		t.Errorf("Expected getSendQueue to return the registered queue")
 	}
-
-	t.Log("✅ getSendQueue test setup complete")
 }

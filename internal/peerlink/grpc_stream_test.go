@@ -120,19 +120,4 @@ func TestGRPCPeerLink_AttemptStreamConnection_HandshakeFailure(t *testing.T) {
 	if !shouldRetry {
 		t.Errorf("Expected attemptStreamConnection to return true (retry) on connection failure, got false")
 	}
-
-	t.Log("✅ attemptStreamConnection correctly returned true (retry) on connection failure")
-}
-
-// TestGRPCPeerLink_AttemptStreamConnection_BehaviorCaptured tests the key behaviors we want to preserve
-func TestGRPCPeerLink_AttemptStreamConnection_BehaviorCaptured(t *testing.T) {
-	t.Log("✅ Core attemptStreamConnection behaviors captured:")
-	t.Log("  - Returns false (don't retry) on context cancellation")
-	t.Log("  - Returns true (retry) on connection/handshake failures")
-	t.Log("  - Sets peer health to healthy after successful handshake")
-	t.Log("  - Handles bidirectional stream communication")
-	t.Log("  - Processes events from send queue and distributes received events")
-
-	// This test documents the behaviors we've captured with the other tests
-	// Additional behavioral tests can be added as needed during refactoring
 }

@@ -72,7 +72,6 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 	}
 	defer stream.CloseSend()
 
-	// Test startReceiveGoroutine - this function doesn't exist yet, so test will fail
 	recvDone := client.startReceiveGoroutine(testCtx, "server-node", stream)
 
 	// Send a test event from server to client to verify receive goroutine works
@@ -91,7 +90,6 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 		if string(receivedEvent.Payload) != "hello from server" {
 			t.Errorf("Expected payload 'hello from server', got '%s'", string(receivedEvent.Payload))
 		}
-		t.Log("✅ startReceiveGoroutine working: received event from peer")
 	case err := <-errChan:
 		t.Fatalf("Receive error: %v", err)
 	case <-time.After(2 * time.Second):
@@ -105,7 +103,6 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 		if err == nil {
 			t.Error("Expected error from receive goroutine on context cancellation")
 		}
-		t.Log("✅ startReceiveGoroutine correctly finished with error on context cancellation")
 	case <-time.After(2 * time.Second):
 		t.Error("Receive goroutine did not finish within timeout")
 	}
@@ -113,7 +110,6 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 
 // TestGRPCPeerLink_ProcessOutboundMessage tests message processing and sending
 func TestGRPCPeerLink_ProcessOutboundMessage(t *testing.T) {
-	// This test will fail because processOutboundMessage doesn't exist yet
 	clientConfig := &Config{
 		NodeID:        "client-node",
 		ListenAddress: "localhost:0",
@@ -132,15 +128,12 @@ func TestGRPCPeerLink_ProcessOutboundMessage(t *testing.T) {
 		sentAt: time.Now(),
 	}
 
-	// Test processOutboundMessage - this function doesn't exist yet, so test will fail
-	err = client.processOutboundMessage("test-peer", testMsg, nil) // nil stream for now
+	err = client.processOutboundMessage("test-peer", testMsg, nil)
 
 	// We expect this to fail gracefully for nil stream
 	if err == nil {
 		t.Error("Expected error for nil stream")
 	}
-
-	t.Log("✅ processOutboundMessage test setup complete (function doesn't exist yet)")
 }
 
 // TestGRPCPeerLink_HandleSendFailure tests send failure handling and requeueing
@@ -171,7 +164,6 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 		sentAt: time.Now(),
 	}
 
-	// Test handleSendFailure - this function doesn't exist yet, so test will fail
 	testError := grpc.ErrServerStopped
 	client.handleSendFailure("test-peer", testMsg, sendQueue, testError)
 
@@ -181,7 +173,6 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 		if dataMsg, ok := requeuedMsg.(*DataPlaneMessage); !ok || dataMsg.Event().Topic != "test-topic" {
 			t.Errorf("Expected requeued topic 'test-topic', got wrong message type or topic")
 		}
-		t.Log("✅ handleSendFailure correctly requeued message")
 	case <-time.After(1 * time.Second):
 		t.Error("Message was not requeued within timeout")
 	}
@@ -247,5 +238,4 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 		t.Errorf("Expected drops count to increase, got initial=%d final=%d", initialDrops, finalDrops)
 	}
 
-	t.Log("✅ handleSendFailure correctly incremented drops counter when queue full")
 }

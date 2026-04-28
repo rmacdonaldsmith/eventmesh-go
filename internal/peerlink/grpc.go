@@ -257,7 +257,6 @@ func (g *GRPCPeerLink) Stop(ctx context.Context) error {
 
 // EventStream implements the PeerLink gRPC service handler
 func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.PeerMessage, peerlinkv1.PeerMessage]) error {
-	// Basic EventStream implementation for MVP
 	ctx := stream.Context()
 
 	// Wait for handshake message
@@ -1014,12 +1013,8 @@ func (g *GRPCPeerLink) Disconnect(ctx context.Context, peerID string) error {
 
 	// Set health state to Disconnected and keep metrics for observability
 	if metrics, exists := g.metrics[peerID]; exists {
-		oldState := metrics.healthState
-		if oldState != peerlink.PeerDisconnected {
+		if metrics.healthState != peerlink.PeerDisconnected {
 			metrics.healthState = peerlink.PeerDisconnected
-			// Basic logging of state transitions
-			// TODO: Replace with proper logger when available
-			// fmt.Printf("Peer %s health transition: %s -> %s\n", peerID, oldState, PeerDisconnected)
 		}
 	}
 
@@ -1298,12 +1293,8 @@ func (g *GRPCPeerLink) SetPeerHealth(peerID string, newState peerlink.PeerHealth
 	defer g.mu.Unlock()
 
 	if metrics, exists := g.metrics[peerID]; exists {
-		oldState := metrics.healthState
-		if oldState != newState {
+		if metrics.healthState != newState {
 			metrics.healthState = newState
-			// Basic logging of state transitions
-			// TODO: Replace with proper logger when available
-			// fmt.Printf("Peer %s health transition: %s -> %s\n", peerID, oldState, newState)
 		}
 	}
 }

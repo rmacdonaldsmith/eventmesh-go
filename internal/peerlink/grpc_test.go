@@ -237,7 +237,7 @@ func TestGRPCPeerLink_ConnectGetPeers(t *testing.T) {
 	}
 }
 
-// TestGRPCPeerLink_SendEvent tests stub event routing functionality
+// TestGRPCPeerLink_SendEvent tests outbound event queueing for connected peers.
 func TestGRPCPeerLink_SendEvent(t *testing.T) {
 	config := &Config{
 		NodeID:        "test-node",
@@ -274,13 +274,12 @@ func TestGRPCPeerLink_SendEvent(t *testing.T) {
 
 	// Test sending to non-existent peer
 	err = peerLink.SendEvent(ctx, "non-existent-peer", nil)
-	// Should fail for non-connected peers (improved behavior in Phase 3.3)
 	if err == nil {
 		t.Error("Expected error when sending to non-connected peer, got nil")
 	}
 }
 
-// TestGRPCPeerLink_ReceiveEvents tests stub event receiving functionality
+// TestGRPCPeerLink_ReceiveEvents verifies that subscribers get live receive channels.
 func TestGRPCPeerLink_ReceiveEvents(t *testing.T) {
 	config := &Config{
 		NodeID:        "test-node",
@@ -762,11 +761,7 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 		t.Errorf("Expected queue depth 1, got %d", queueDepth)
 	}
 
-	// TODO: This test will fail until we implement EventStream properly
-	// The EventStream should consume from the queue and send over gRPC
-
-	// Try to create a gRPC client connection to test EventStream
-	// This will fail because EventStream is not implemented yet
+	// Create a gRPC client connection to test EventStream.
 	conn, err := grpc.NewClient(peerLink.listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC client: %v", err)
@@ -775,7 +770,6 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 
 	client := peerlinkv1.NewPeerLinkClient(conn)
 
-	// Try to establish EventStream - this should eventually work but will fail now
 	stream, err := client.EventStream(ctx)
 	if err != nil {
 		t.Fatalf("Failed to create EventStream: %v", err)
@@ -814,8 +808,6 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 		if responseHandshake.ProtocolVersion != 100 {
 			t.Errorf("Expected protocol version 100, got %d", responseHandshake.ProtocolVersion)
 		}
-		t.Logf("Handshake successful: node=%s, version=%d",
-			responseHandshake.NodeId, responseHandshake.ProtocolVersion)
 	}
 
 	// Now test that the EventStream consumes from send queues
