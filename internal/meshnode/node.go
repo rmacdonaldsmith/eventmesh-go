@@ -110,9 +110,19 @@ func NewGRPCMeshNode(config *Config) (*GRPCMeshNode, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Create EventLog component
-	// For MVP, use in-memory implementation
-	eventLog := eventlog.NewInMemoryEventLog()
+	var nodeEventLog eventlogpkg.EventLog
+	if config.EventLogFactory != nil {
+		var err error
+		nodeEventLog, err = config.EventLogFactory()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create EventLog: %w", err)
+		}
+		if nodeEventLog == nil {
+			return nil, fmt.Errorf("failed to create EventLog: factory returned nil")
+		}
+	} else {
+		nodeEventLog = eventlog.NewInMemoryEventLog()
+	}
 
 	// Create RoutingTable component
 	// For MVP, use in-memory implementation
@@ -138,7 +148,7 @@ func NewGRPCMeshNode(config *Config) (*GRPCMeshNode, error) {
 
 	node := &GRPCMeshNode{
 		config:            config,
-		eventLog:          eventLog,
+		eventLog:          nodeEventLog,
 		routingTable:      routingTable,
 		clients:           make(map[string]meshnode.Client),
 		subscriptions:     make(map[string]map[string]*meshnode.ClientSubscription),

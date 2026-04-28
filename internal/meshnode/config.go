@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
+	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
 // BootstrapConfig represents configuration for node discovery and bootstrapping
@@ -13,6 +14,9 @@ type BootstrapConfig struct {
 	// Format: ["host:port", "host2:port2", ...]
 	SeedNodes []string
 }
+
+// EventLogFactory creates the EventLog used by a MeshNode.
+type EventLogFactory func() (eventlogpkg.EventLog, error)
 
 var (
 	// ErrEmptyNodeID is returned when node ID is empty
@@ -33,6 +37,10 @@ type Config struct {
 	// EventLog configuration - will be passed to EventLog component
 	EventLogConfig interface{}
 
+	// EventLogFactory creates the node's EventLog. If nil, the node uses the
+	// default in-memory implementation.
+	EventLogFactory EventLogFactory
+
 	// RoutingTable configuration - will be passed to RoutingTable component
 	RoutingTableConfig interface{}
 
@@ -50,6 +58,7 @@ func NewConfig(nodeID, listenAddress string) *Config {
 		ListenAddress: listenAddress,
 		// Use nil configs for components - they'll create their own defaults
 		EventLogConfig:     nil,
+		EventLogFactory:    nil,
 		RoutingTableConfig: nil,
 		PeerLinkConfig:     nil,
 		BootstrapConfig:    nil,
@@ -78,6 +87,12 @@ func (c *Config) Validate() error {
 // WithEventLogConfig sets the EventLog configuration
 func (c *Config) WithEventLogConfig(config interface{}) *Config {
 	c.EventLogConfig = config
+	return c
+}
+
+// WithEventLogFactory sets the factory used to create the EventLog component.
+func (c *Config) WithEventLogFactory(factory EventLogFactory) *Config {
+	c.EventLogFactory = factory
 	return c
 }
 

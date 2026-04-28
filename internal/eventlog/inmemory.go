@@ -150,6 +150,11 @@ func (log *InMemoryEventLog) ReplayEvents(ctx context.Context, topic string, sta
 		defer close(eventChan)
 		defer close(errChan)
 
+		if err := log.checkContext(ctx); err != nil {
+			errChan <- err
+			return
+		}
+
 		if topic == "" {
 			errChan <- ErrEmptyTopic
 			return
@@ -161,7 +166,13 @@ func (log *InMemoryEventLog) ReplayEvents(ctx context.Context, topic string, sta
 		}
 
 		log.mu.RLock()
+		if log.closed {
+			log.mu.RUnlock()
+			errChan <- errors.New("event log is closed")
+			return
+		}
 		events, exists := log.eventsByTopic[topic]
+		events = append([]*eventlog.Event(nil), events...)
 		log.mu.RUnlock()
 
 		if !exists || len(events) == 0 {
@@ -189,6 +200,17 @@ func (log *InMemoryEventLog) ReplayEvents(ctx context.Context, topic string, sta
 
 // Compact performs log compaction (no-op for in-memory implementation).
 func (log *InMemoryEventLog) Compact(ctx context.Context) error {
+	if err := log.checkContext(ctx); err != nil {
+		return err
+	}
+
+	log.mu.RLock()
+	defer log.mu.RUnlock()
+
+	if log.closed {
+		return errors.New("event log is closed")
+	}
+
 	// No-op for in-memory implementation
 	return nil
 }

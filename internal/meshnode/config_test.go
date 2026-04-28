@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
+	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
 // TestConfig_NewConfig tests creating new configuration with defaults
@@ -18,6 +19,9 @@ func TestConfig_NewConfig(t *testing.T) {
 	}
 	if config.EventLogConfig != nil {
 		t.Errorf("Expected EventLogConfig to be nil, got %v", config.EventLogConfig)
+	}
+	if config.EventLogFactory != nil {
+		t.Error("Expected EventLogFactory to be nil")
 	}
 	if config.RoutingTableConfig != nil {
 		t.Errorf("Expected RoutingTableConfig to be nil, got %v", config.RoutingTableConfig)
@@ -85,6 +89,14 @@ func TestConfig_WithMethods(t *testing.T) {
 	config = config.WithEventLogConfig(eventLogConfig)
 	if config.EventLogConfig != eventLogConfig {
 		t.Errorf("Expected EventLogConfig to be set, got %v", config.EventLogConfig)
+	}
+
+	eventLogFactory := func() (eventlogpkg.EventLog, error) {
+		return nil, nil
+	}
+	config = config.WithEventLogFactory(eventLogFactory)
+	if config.EventLogFactory == nil {
+		t.Error("Expected EventLogFactory to be set")
 	}
 
 	// Test WithRoutingTableConfig

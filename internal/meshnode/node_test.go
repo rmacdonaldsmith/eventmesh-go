@@ -2,9 +2,13 @@ package meshnode
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
+	eventlogimpl "github.com/rmacdonaldsmith/eventmesh-go/internal/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
+	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
 // TestNewGRPCMeshNode tests creating a new GRPCMeshNode
@@ -99,6 +103,49 @@ func TestNewGRPCMeshNode_WithPeerLinkConfig(t *testing.T) {
 	}
 	if node.peerConnections == nil {
 		t.Error("Expected peer connection manager to be initialized with custom config")
+	}
+}
+
+func TestNewGRPCMeshNode_WithEventLogFactory(t *testing.T) {
+	customLog := eventlogimpl.NewInMemoryEventLog()
+	config := NewConfig("test-node", "localhost:8080").WithEventLogFactory(func() (eventlogpkg.EventLog, error) {
+		return customLog, nil
+	})
+
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node with EventLog factory, got %v", err)
+	}
+	defer node.Close()
+
+	if node.GetEventLog() != customLog {
+		t.Fatal("Expected mesh node to use EventLog returned by factory")
+	}
+}
+
+func TestNewGRPCMeshNode_EventLogFactoryFailure(t *testing.T) {
+	factoryErr := errors.New("open durable log")
+	config := NewConfig("test-node", "localhost:8080").WithEventLogFactory(func() (eventlogpkg.EventLog, error) {
+		return nil, factoryErr
+	})
+
+	_, err := NewGRPCMeshNode(config)
+	if !errors.Is(err, factoryErr) {
+		t.Fatalf("Expected factory error, got %v", err)
+	}
+}
+
+func TestNewGRPCMeshNode_EventLogFactoryNil(t *testing.T) {
+	config := NewConfig("test-node", "localhost:8080").WithEventLogFactory(func() (eventlogpkg.EventLog, error) {
+		return nil, nil
+	})
+
+	_, err := NewGRPCMeshNode(config)
+	if err == nil {
+		t.Fatal("Expected error when EventLog factory returns nil")
+	}
+	if !strings.Contains(err.Error(), "factory returned nil") {
+		t.Fatalf("Expected nil factory result error, got %v", err)
 	}
 }
 
