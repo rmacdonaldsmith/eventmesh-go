@@ -12,9 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	eventlogimpl "github.com/rmacdonaldsmith/eventmesh-go/internal/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/httpapi"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/meshnode"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
+	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 )
 
 const (
@@ -28,17 +30,19 @@ func main() {
 
 	// Command-line flags
 	var (
-		nodeID      = flag.String("node-id", getDefaultNodeID(), "Unique node identifier")
-		listenAddr  = flag.String("listen", ":8080", "Listen address for client connections")
-		peerAddr    = flag.String("peer-listen", ":9090", "Listen address for peer connections")
-		connectPeer = flag.String("connect-peer", "", "Address of peer node to connect to (optional)")
-		enableHTTP  = flag.Bool("http", false, "Enable HTTP API server")
-		httpPort    = flag.String("http-port", "8081", "Port for HTTP API server")
-		noAuth      = flag.Bool("no-auth", false, "Disable authentication for development (INSECURE - development only)")
-		showVersion = flag.Bool("version", false, "Show version and exit")
-		showHealth  = flag.Bool("health", false, "Show health status and exit")
-		seedNodes   = flag.String("seed-nodes", "", "Comma-separated list of seed node addresses (e.g., \"node1:8080,node2:8080\")")
-		logLevel    = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+		nodeID          = flag.String("node-id", getDefaultNodeID(), "Unique node identifier")
+		listenAddr      = flag.String("listen", ":8080", "Listen address for client connections")
+		peerAddr        = flag.String("peer-listen", ":9090", "Listen address for peer connections")
+		connectPeer     = flag.String("connect-peer", "", "Address of peer node to connect to (optional)")
+		enableHTTP      = flag.Bool("http", false, "Enable HTTP API server")
+		httpPort        = flag.String("http-port", "8081", "Port for HTTP API server")
+		noAuth          = flag.Bool("no-auth", false, "Disable authentication for development (INSECURE - development only)")
+		showVersion     = flag.Bool("version", false, "Show version and exit")
+		showHealth      = flag.Bool("health", false, "Show health status and exit")
+		seedNodes       = flag.String("seed-nodes", "", "Comma-separated list of seed node addresses (e.g., \"node1:8080,node2:8080\")")
+		logLevel        = flag.String("log-level", "info", "Log level (debug, info, warn, error)")
+		eventLogBackend = flag.String("eventlog-backend", "memory", "EventLog backend (memory, pebble)")
+		eventLogPath    = flag.String("eventlog-path", "", "Directory for Pebble EventLog storage")
 	)
 	flag.Parse()
 
@@ -90,6 +94,9 @@ func main() {
 	config := meshnode.NewConfig(*nodeID, *listenAddr).
 		WithPeerLinkConfig(peerLinkConfig).
 		WithBootstrapConfig(bootstrapConfig)
+	if err := applyEventLogConfig(config, *eventLogBackend, *eventLogPath); err != nil {
+		log.Fatalf("❌ Invalid EventLog configuration: %v", err)
+	}
 
 	// Validate configuration
 	if err := config.Validate(); err != nil {
@@ -183,6 +190,23 @@ func main() {
 	slog.Info("node stopped",
 		"app", appName,
 		"node_id", *nodeID)
+}
+
+func applyEventLogConfig(config *meshnode.Config, backend, path string) error {
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case "", "memory", "inmemory", "in-memory":
+		return nil
+	case "pebble":
+		if strings.TrimSpace(path) == "" {
+			return fmt.Errorf("--eventlog-path is required when --eventlog-backend=pebble")
+		}
+		config.WithEventLogFactory(func() (eventlogpkg.EventLog, error) {
+			return eventlogimpl.NewPebbleEventLog(path)
+		})
+		return nil
+	default:
+		return fmt.Errorf("unknown EventLog backend %q", backend)
+	}
 }
 
 // setupLogging configures the global slog logger with the specified level

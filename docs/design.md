@@ -61,7 +61,7 @@ EventLog Routing PeerLink
 
 ### EventLog
 
-The current EventLog implementation is in-memory. It provides:
+EventLog provides:
 
 - append-only event storage by topic
 - per-topic offsets
@@ -69,8 +69,23 @@ The current EventLog implementation is in-memory. It provides:
 - replay channels for topic replay
 - statistics for health checks
 
-Current limitation: events do not survive process restart. Persistent storage is
-tracked as roadmap work.
+The default backend is in-memory. A Pebble-backed durable backend is also
+available for local durable storage. It stores complete event records with
+protobuf encoding, uses length-prefixed binary keys for topic isolation and
+ordered offset scans, commits appends with Pebble sync writes, and serializes
+append offset assignment with a single writer lock for the initial
+implementation.
+
+Run the server with durable storage:
+
+```bash
+./bin/eventmesh --eventlog-backend pebble --eventlog-path ./data/eventlog
+```
+
+Current limitation: durable subscriber offsets and peer replay/resume are not
+implemented yet, so the durable EventLog supports local append/read/replay
+survival across process restarts but does not by itself make live subscribers or
+peers durable consumers.
 
 ### RoutingTable
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -50,6 +51,52 @@ func TestHTTPIntegration(t *testing.T) {
 	if version, ok := apiInfo["version"].(string); !ok || version == "" {
 		t.Errorf("Expected non-empty version, got %v", apiInfo["version"])
 	}
+}
+
+func TestApplyEventLogConfig(t *testing.T) {
+	t.Run("memory_backend_leaves_default_factory", func(t *testing.T) {
+		config := meshnode.NewConfig("test-node", "localhost:0")
+		if err := applyEventLogConfig(config, "memory", ""); err != nil {
+			t.Fatalf("applyEventLogConfig failed: %v", err)
+		}
+		if config.EventLogFactory != nil {
+			t.Fatal("Expected memory backend to leave EventLogFactory unset")
+		}
+	})
+
+	t.Run("pebble_backend_sets_factory", func(t *testing.T) {
+		config := meshnode.NewConfig("test-node", "localhost:0")
+		if err := applyEventLogConfig(config, "pebble", t.TempDir()); err != nil {
+			t.Fatalf("applyEventLogConfig failed: %v", err)
+		}
+		if config.EventLogFactory == nil {
+			t.Fatal("Expected Pebble backend to set EventLogFactory")
+		}
+
+		log, err := config.EventLogFactory()
+		if err != nil {
+			t.Fatalf("EventLogFactory failed: %v", err)
+		}
+		defer log.Close()
+
+		if _, err := log.AppendEvent(context.Background(), "test.topic", nil); err == nil {
+			t.Fatal("Expected created EventLog to reject nil event")
+		}
+	})
+
+	t.Run("pebble_backend_requires_path", func(t *testing.T) {
+		config := meshnode.NewConfig("test-node", "localhost:0")
+		if err := applyEventLogConfig(config, "pebble", ""); err == nil {
+			t.Fatal("Expected missing Pebble path to fail")
+		}
+	})
+
+	t.Run("unknown_backend_fails", func(t *testing.T) {
+		config := meshnode.NewConfig("test-node", "localhost:0")
+		if err := applyEventLogConfig(config, "unknown", ""); err == nil {
+			t.Fatal("Expected unknown backend to fail")
+		}
+	})
 }
 
 // TestVersionFlag tests the --version flag

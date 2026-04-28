@@ -30,7 +30,7 @@ unless the code and tests prove the behavior today.
 
 | Component        | Purpose                                                | Status         |
 | ---------------- | ------------------------------------------------------ | -------------- |
-| **EventLog**     | In-memory append-only event storage with replay        | ✅ MVP implemented |
+| **EventLog**     | Append-only event storage with in-memory and Pebble backends | ✅ MVP implemented |
 | **MeshNode**     | Core orchestration: clients, routes, lifecycle         | ✅ MVP implemented |
 | **RoutingTable** | Topic subscriptions with single-segment wildcards      | ✅ Implemented  |
 | **PeerLink**     | gRPC peer communication layer                          | 🚧 In progress |

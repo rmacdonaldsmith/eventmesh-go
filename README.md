@@ -36,6 +36,7 @@ the mesh.
 - CLI for day-to-day development workflows
 - JWT-based client identity, plus explicit `--no-auth` development mode
 - In-memory append-only event log with per-topic offsets and replay
+- Optional Pebble-backed durable EventLog for local restart survival
 - In-memory routing table with single-segment wildcard matching, such as
   `orders.*`
 - gRPC PeerLink implementation for peer connections, event forwarding, and
@@ -72,6 +73,14 @@ Start a development server without authentication:
 
 ```bash
 ./bin/eventmesh --http --no-auth --node-id dev-node
+```
+
+Use Pebble for local durable event storage:
+
+```bash
+./bin/eventmesh --http --no-auth --node-id dev-node \
+  --eventlog-backend pebble \
+  --eventlog-path ./data/eventlog
 ```
 
 In another terminal, publish and read events:
@@ -189,7 +198,7 @@ used by humans and coding agents.
 ```text
 cmd/eventmesh/          Server binary
 cmd/eventmesh-cli/      CLI binary
-internal/eventlog/      In-memory EventLog implementation
+internal/eventlog/      In-memory and Pebble EventLog implementations
 internal/httpapi/       HTTP handlers, auth, middleware, SSE
 internal/meshnode/      Node orchestration and routing decisions
 internal/peerlink/      gRPC peer communication
