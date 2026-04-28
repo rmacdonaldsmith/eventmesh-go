@@ -302,7 +302,7 @@ func TestGRPCMeshNode_ComprehensiveHealthMonitoring(t *testing.T) {
 		t.Errorf("Expected health message to mention node is closed, got '%s'", health.Message)
 	}
 
-	t.Logf("✅ Phase 4.5: Comprehensive health monitoring implemented and tested")
+	t.Logf("Comprehensive health monitoring implemented and tested")
 }
 
 type lifecycleSpyPeerLink struct {

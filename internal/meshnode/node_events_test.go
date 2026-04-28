@@ -599,9 +599,8 @@ func TestGRPCMeshNode_SubscriptionPropagation(t *testing.T) {
 		t.Errorf("Expected 1 local subscriber, got %d", len(localSubscribers))
 	}
 
-	// For MVP: We verify that the subscription propagation mechanism exists
-	// In a full implementation, we would verify that subscription events were sent to peers
-	// For now, we verify the local subscription works and the propagation method doesn't error
+	// This focused test verifies local subscription state and the no-peer
+	// propagation path. Real peer propagation is covered by networking tests.
 
 	// Test unsubscribe propagation as well
 	err = node.Unsubscribe(ctx, subscriber, topic)

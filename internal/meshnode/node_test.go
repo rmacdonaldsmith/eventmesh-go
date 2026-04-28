@@ -142,8 +142,8 @@ func TestGRPCMeshNode_InterfaceCompliance(t *testing.T) {
 	}
 }
 
-// TestGRPCMeshNode_StubMethods tests the stub implementations
-func TestGRPCMeshNode_StubMethods(t *testing.T) {
+// TestGRPCMeshNode_InvalidRequests checks validation failures for missing inputs.
+func TestGRPCMeshNode_InvalidRequests(t *testing.T) {
 	config := NewConfig("test-node", "localhost:8083")
 	node, err := NewGRPCMeshNode(config)
 	if err != nil {
@@ -153,25 +153,22 @@ func TestGRPCMeshNode_StubMethods(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Test PublishEvent stub
 	err = node.PublishEvent(ctx, nil, nil)
 	if err == nil {
-		t.Error("Expected error from PublishEvent stub")
+		t.Error("Expected error from PublishEvent with missing client and event")
 	}
 
-	// Test Subscribe stub
 	err = node.Subscribe(ctx, nil, "test-topic")
 	if err == nil {
-		t.Error("Expected error from Subscribe stub")
+		t.Error("Expected error from Subscribe with missing client")
 	}
 
-	// Test Unsubscribe stub
 	err = node.Unsubscribe(ctx, nil, "test-topic")
 	if err == nil {
-		t.Error("Expected error from Unsubscribe stub")
+		t.Error("Expected error from Unsubscribe with missing client")
 	}
 
-	// Note: AuthenticateClient is no longer a stub - tested separately
+	// AuthenticateClient has separate behavior-focused coverage.
 }
 
 // TestGRPCMeshNode_AuthenticateClient tests the AuthenticateClient implementation

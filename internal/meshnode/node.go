@@ -463,9 +463,6 @@ func (n *GRPCMeshNode) PublishEventWithResult(ctx context.Context, client meshno
 
 // Subscribe registers a client's interest in a topic pattern.
 // Implements REQ-MNODE-003: propagates subscription to peer nodes.
-//
-// For Phase 4.2: Implements local subscription only
-// For Phase 4.3: Will add peer propagation
 func (n *GRPCMeshNode) Subscribe(ctx context.Context, client meshnode.Client, topic string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -515,8 +512,7 @@ func (n *GRPCMeshNode) Subscribe(ctx context.Context, client meshnode.Client, to
 		"subscription_id", subscriptionID,
 		"node_id", n.config.NodeID)
 
-	// Propagate subscription to peer nodes (REQ-MNODE-003)
-	// For MVP: Use special subscription events via existing PeerLink infrastructure
+	// Propagate subscription interest to peers over the control plane.
 	err = n.propagateSubscriptionChange(ctx, "subscribe", client.ID(), topic)
 	if err != nil {
 		slog.Warn("failed to propagate subscription to peers",
@@ -536,9 +532,6 @@ func (n *GRPCMeshNode) Subscribe(ctx context.Context, client meshnode.Client, to
 
 // Unsubscribe removes a client's subscription to a topic pattern.
 // Updates local routing table and notifies peer nodes.
-//
-// For Phase 4.3: Implements local unsubscription
-// Future: Will add peer propagation in subsequent tasks
 func (n *GRPCMeshNode) Unsubscribe(ctx context.Context, client meshnode.Client, topic string) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -573,12 +566,10 @@ func (n *GRPCMeshNode) Unsubscribe(ctx context.Context, client meshnode.Client, 
 		"topic", topic,
 		"node_id", n.config.NodeID)
 
-	// Remove from local client tracking if this was the last subscription
-	// For MVP: Keep client in tracking (simple approach)
-	// In production, we'd track subscription counts and remove if zero
+	// Keep client tracking for now; subscription metadata owns the active
+	// subscription set used by the HTTP API.
 
-	// Propagate unsubscription to peer nodes (REQ-MNODE-003)
-	// For MVP: Use special subscription events via existing PeerLink infrastructure
+	// Propagate subscription removal to peers over the control plane.
 	err = n.propagateSubscriptionChange(ctx, "unsubscribe", client.ID(), topic)
 	if err != nil {
 		slog.Warn("failed to propagate unsubscription to peers",
@@ -660,8 +651,7 @@ func (n *GRPCMeshNode) GetNodeID() string {
 	return n.config.NodeID
 }
 
-// GetConnectedClients returns all currently connected clients.
-// FOR MVP: This is a stub implementation that will be completed in Phase 4.4
+// GetConnectedClients returns clients currently known to this node.
 func (n *GRPCMeshNode) GetConnectedClients(ctx context.Context) ([]meshnode.Client, error) {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -776,9 +766,8 @@ func (n *GRPCMeshNode) GetHealth(ctx context.Context) (meshnode.HealthStatus, er
 	}, nil
 }
 
-// propagateSubscriptionChange sends subscription changes to all connected peers
-// Uses structured events for reliable peer subscription synchronization
-// This implements REQ-MNODE-003: Subscription Propagation
+// propagateSubscriptionChange sends subscription interest changes to connected
+// peers over the PeerLink control plane.
 func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, clientID, topic string) error {
 	// Validate input parameters
 	if action == "" || clientID == "" || topic == "" {
@@ -927,10 +916,9 @@ func (n *GRPCMeshNode) localSubscriptionSnapshot() []meshnode.ClientSubscription
 	return subscriptions
 }
 
-// handleIncomingPeerEvents processes events received from peer nodes
-// Now handles data plane (user events) and control plane (subscription changes) separately
+// handleIncomingPeerEvents starts independent data-plane and control-plane
+// consumers for messages received from peers.
 func (n *GRPCMeshNode) handleIncomingPeerEvents(ctx context.Context) {
-	// Start separate goroutines for data plane and control plane
 	go n.handleIncomingDataPlaneEvents(ctx)
 	go n.handleIncomingControlPlaneMessages(ctx)
 }
@@ -1005,8 +993,7 @@ func (n *GRPCMeshNode) handleIncomingControlPlaneMessages(ctx context.Context) {
 	}
 }
 
-// processIncomingUserEvent handles a single incoming user event from a peer
-// This is now pure data plane processing - no subscription filtering needed
+// processIncomingUserEvent handles a data-plane event received from a peer.
 func (n *GRPCMeshNode) processIncomingUserEvent(ctx context.Context, event *eventlogpkg.Event) {
 	topic := event.Topic
 
