@@ -90,13 +90,26 @@ func (m *HeartbeatMsg) IncrementSendAttempts() int {
 	return m.sendAttempts
 }
 
+type peerMessagePlane int
+
+const (
+	dataPlaneMessage peerMessagePlane = iota
+	controlPlaneMessage
+)
+
 // peerMetrics tracks basic metrics per peer
 type peerMetrics struct {
-	dropsCount           int64                    // Number of dropped messages due to queue full
-	healthState          peerlink.PeerHealthState // Current health state
-	failureCount         int                      // Number of consecutive failures
-	missedHeartbeatCount int                      // Number of consecutive missed heartbeat windows
-	lastSeenAt           time.Time                // Last heartbeat, valid peer message, or handshake
+	dropsCount               int64                    // Number of dropped messages due to queue full
+	dataPlaneDropsCount      int64                    // Number of dropped data-plane messages
+	controlPlaneDropsCount   int64                    // Number of dropped control-plane messages
+	dataPlaneQueuedCount     int64                    // Number of accepted data-plane messages
+	controlPlaneQueuedCount  int64                    // Number of accepted control-plane messages
+	dataPlaneFailureCount    int64                    // Number of data-plane send failures
+	controlPlaneFailureCount int64                    // Number of control-plane send failures
+	healthState              peerlink.PeerHealthState // Current health state
+	failureCount             int                      // Number of consecutive failures
+	missedHeartbeatCount     int                      // Number of consecutive missed heartbeat windows
+	lastSeenAt               time.Time                // Last heartbeat, valid peer message, or handshake
 }
 
 // inboundPeer represents a peer that connected to us (inbound connection)
@@ -797,6 +810,8 @@ func (g *GRPCPeerLink) processOutboundMessage(peerID string, msg PeerMessage, st
 
 // handleSendFailure handles message send failures by attempting to requeue or dropping the message
 func (g *GRPCPeerLink) handleSendFailure(peerID string, msg PeerMessage, sendQueue chan PeerMessage, err error) {
+	g.recordPlaneSendFailure(peerID, planeForMessage(msg))
+
 	attempts := msg.IncrementSendAttempts()
 	if attempts > g.config.MaxSendAttempts {
 		g.dropFailedMessage(peerID, msg, "max send attempts exceeded")
@@ -821,11 +836,7 @@ func (g *GRPCPeerLink) handleSendFailure(peerID string, msg PeerMessage, sendQue
 }
 
 func (g *GRPCPeerLink) dropFailedMessage(peerID string, msg PeerMessage, reason string) {
-	g.mu.Lock()
-	if metrics, exists := g.metrics[peerID]; exists {
-		metrics.dropsCount++
-	}
-	g.mu.Unlock()
+	g.recordPlaneDrop(peerID, planeForMessage(msg))
 
 	slog.Warn("dropped failed message",
 		"peer_id", peerID,
@@ -851,6 +862,17 @@ func messageTopic(msg PeerMessage) string {
 		return "heartbeat"
 	default:
 		return "unknown"
+	}
+}
+
+func planeForMessage(msg PeerMessage) peerMessagePlane {
+	switch msg.(type) {
+	case *DataPlaneMessage:
+		return dataPlaneMessage
+	case *ControlPlaneMsg, *HeartbeatMsg:
+		return controlPlaneMessage
+	default:
+		return controlPlaneMessage
 	}
 }
 
@@ -1014,7 +1036,6 @@ func (g *GRPCPeerLink) SendEvent(ctx context.Context, peerID string, event *even
 
 	// Get the send queue for this peer
 	queue, queueExists := g.sendQueues[peerID]
-	metrics, metricsExist := g.metrics[peerID]
 	g.mu.RUnlock()
 
 	if !queueExists {
@@ -1034,15 +1055,10 @@ func (g *GRPCPeerLink) SendEvent(ctx context.Context, peerID string, event *even
 
 	select {
 	case queue <- msg:
-		// Successfully queued
+		g.recordPlaneQueued(peerID, dataPlaneMessage)
 		return nil
 	case <-timeoutCtx.Done():
-		// Queue is full and timeout expired - increment drops counter
-		if metricsExist {
-			g.mu.Lock()
-			metrics.dropsCount++
-			g.mu.Unlock()
-		}
+		g.recordPlaneDrop(peerID, dataPlaneMessage)
 		return errors.New("send queue full - message dropped")
 	}
 }
@@ -1057,7 +1073,6 @@ func (g *GRPCPeerLink) SendSubscriptionChange(ctx context.Context, peerID string
 
 	// Get the control queue for this peer
 	queue, queueExists := g.controlQueues[peerID]
-	metrics, metricsExist := g.metrics[peerID]
 	g.mu.RUnlock()
 
 	if !queueExists {
@@ -1077,15 +1092,10 @@ func (g *GRPCPeerLink) SendSubscriptionChange(ctx context.Context, peerID string
 
 	select {
 	case queue <- msg:
-		// Successfully queued
+		g.recordPlaneQueued(peerID, controlPlaneMessage)
 		return nil
 	case <-timeoutCtx.Done():
-		// Queue is full and timeout expired - increment drops counter
-		if metricsExist {
-			g.mu.Lock()
-			metrics.dropsCount++
-			g.mu.Unlock()
-		}
+		g.recordPlaneDrop(peerID, controlPlaneMessage)
 		return errors.New("send queue full - subscription change dropped")
 	}
 }
@@ -1159,7 +1169,6 @@ func (g *GRPCPeerLink) SendHeartbeat(ctx context.Context, peerID string) error {
 	}
 
 	queue, queueExists := g.controlQueues[peerID]
-	metrics, metricsExist := g.metrics[peerID]
 	g.mu.RUnlock()
 
 	if !queueExists {
@@ -1176,13 +1185,10 @@ func (g *GRPCPeerLink) SendHeartbeat(ctx context.Context, peerID string) error {
 
 	select {
 	case queue <- msg:
+		g.recordPlaneQueued(peerID, controlPlaneMessage)
 		return nil
 	case <-timeoutCtx.Done():
-		if metricsExist {
-			g.mu.Lock()
-			metrics.dropsCount++
-			g.mu.Unlock()
-		}
+		g.recordPlaneDrop(peerID, controlPlaneMessage)
 		return errors.New("send queue full - heartbeat dropped")
 	}
 }
@@ -1314,6 +1320,49 @@ func (g *GRPCPeerLink) markPeerSeen(peerID string) {
 	}
 }
 
+func (g *GRPCPeerLink) recordPlaneQueued(peerID string, plane peerMessagePlane) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if metrics, exists := g.metrics[peerID]; exists {
+		switch plane {
+		case dataPlaneMessage:
+			metrics.dataPlaneQueuedCount++
+		case controlPlaneMessage:
+			metrics.controlPlaneQueuedCount++
+		}
+	}
+}
+
+func (g *GRPCPeerLink) recordPlaneDrop(peerID string, plane peerMessagePlane) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if metrics, exists := g.metrics[peerID]; exists {
+		metrics.dropsCount++
+		switch plane {
+		case dataPlaneMessage:
+			metrics.dataPlaneDropsCount++
+		case controlPlaneMessage:
+			metrics.controlPlaneDropsCount++
+		}
+	}
+}
+
+func (g *GRPCPeerLink) recordPlaneSendFailure(peerID string, plane peerMessagePlane) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	if metrics, exists := g.metrics[peerID]; exists {
+		switch plane {
+		case dataPlaneMessage:
+			metrics.dataPlaneFailureCount++
+		case controlPlaneMessage:
+			metrics.controlPlaneFailureCount++
+		}
+	}
+}
+
 func (g *GRPCPeerLink) recordPeerSendFailure(peerID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -1401,6 +1450,7 @@ func (g *GRPCPeerLink) sendHeartbeatToConnectedPeers(ctx context.Context) {
 	peerIDs := g.connectedPeerIDs()
 	for _, peerID := range peerIDs {
 		if err := g.SendHeartbeat(ctx, peerID); err != nil {
+			g.recordPlaneSendFailure(peerID, controlPlaneMessage)
 			g.recordPeerSendFailure(peerID)
 		}
 	}
@@ -1527,13 +1577,21 @@ func (g *GRPCPeerLink) GetConnectedPeerSummary(ctx context.Context) ([]string, e
 
 // PeerMetrics represents metrics for a single peer
 type PeerMetrics struct {
-	PeerID               string                   `json:"peer_id"`
-	QueueDepth           int                      `json:"queue_depth"`
-	DropsCount           int64                    `json:"drops_count"`
-	HealthState          peerlink.PeerHealthState `json:"health_state"`
-	FailureCount         int                      `json:"failure_count"`
-	MissedHeartbeatCount int                      `json:"missed_heartbeat_count"`
-	LastSeenAt           time.Time                `json:"last_seen_at"`
+	PeerID                   string                   `json:"peer_id"`
+	QueueDepth               int                      `json:"queue_depth"`
+	DataPlaneQueueDepth      int                      `json:"data_plane_queue_depth"`
+	ControlPlaneQueueDepth   int                      `json:"control_plane_queue_depth"`
+	DropsCount               int64                    `json:"drops_count"`
+	DataPlaneDropsCount      int64                    `json:"data_plane_drops_count"`
+	ControlPlaneDropsCount   int64                    `json:"control_plane_drops_count"`
+	DataPlaneQueuedCount     int64                    `json:"data_plane_queued_count"`
+	ControlPlaneQueuedCount  int64                    `json:"control_plane_queued_count"`
+	DataPlaneFailureCount    int64                    `json:"data_plane_failure_count"`
+	ControlPlaneFailureCount int64                    `json:"control_plane_failure_count"`
+	HealthState              peerlink.PeerHealthState `json:"health_state"`
+	FailureCount             int                      `json:"failure_count"`
+	MissedHeartbeatCount     int                      `json:"missed_heartbeat_count"`
+	LastSeenAt               time.Time                `json:"last_seen_at"`
 }
 
 // GetAllPeerMetrics returns metrics for all peers
@@ -1543,22 +1601,32 @@ func (g *GRPCPeerLink) GetAllPeerMetrics() []PeerMetrics {
 
 	result := make([]PeerMetrics, 0, len(g.metrics))
 	for peerID, metrics := range g.metrics {
-		queueDepth := 0
+		dataPlaneQueueDepth := 0
 		if queue, exists := g.sendQueues[peerID]; exists {
-			queueDepth = len(queue)
+			dataPlaneQueueDepth = len(queue)
 		}
+		controlPlaneQueueDepth := 0
 		if queue, exists := g.controlQueues[peerID]; exists {
-			queueDepth += len(queue)
+			controlPlaneQueueDepth = len(queue)
 		}
+		queueDepth := dataPlaneQueueDepth + controlPlaneQueueDepth
 
 		result = append(result, PeerMetrics{
-			PeerID:               peerID,
-			QueueDepth:           queueDepth,
-			DropsCount:           metrics.dropsCount,
-			HealthState:          metrics.healthState,
-			FailureCount:         metrics.failureCount,
-			MissedHeartbeatCount: metrics.missedHeartbeatCount,
-			LastSeenAt:           metrics.lastSeenAt,
+			PeerID:                   peerID,
+			QueueDepth:               queueDepth,
+			DataPlaneQueueDepth:      dataPlaneQueueDepth,
+			ControlPlaneQueueDepth:   controlPlaneQueueDepth,
+			DropsCount:               metrics.dropsCount,
+			DataPlaneDropsCount:      metrics.dataPlaneDropsCount,
+			ControlPlaneDropsCount:   metrics.controlPlaneDropsCount,
+			DataPlaneQueuedCount:     metrics.dataPlaneQueuedCount,
+			ControlPlaneQueuedCount:  metrics.controlPlaneQueuedCount,
+			DataPlaneFailureCount:    metrics.dataPlaneFailureCount,
+			ControlPlaneFailureCount: metrics.controlPlaneFailureCount,
+			HealthState:              metrics.healthState,
+			FailureCount:             metrics.failureCount,
+			MissedHeartbeatCount:     metrics.missedHeartbeatCount,
+			LastSeenAt:               metrics.lastSeenAt,
 		})
 	}
 	return result

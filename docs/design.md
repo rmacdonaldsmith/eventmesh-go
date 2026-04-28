@@ -107,6 +107,11 @@ queue selection. Splitting the proto into separate `DataStream` and
 `ControlStream` RPCs is deferred until tests or operational experience show
 that independent physical transport is necessary.
 
+PeerLink metrics expose both aggregate peer counters and per-plane counters.
+Queue depth, accepted queued messages, drops, and send failures are reported
+separately for data-plane and control-plane traffic so operators can distinguish
+user-event backpressure from subscription/heartbeat pressure.
+
 #### Peer Health State Model
 
 Peer health is local to the observing node. `Disconnected` means this node does

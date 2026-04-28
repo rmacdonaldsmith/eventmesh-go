@@ -551,6 +551,88 @@ func TestGRPCPeerLink_Metrics(t *testing.T) {
 	}
 }
 
+func TestGRPCPeerLink_PlaneMetrics(t *testing.T) {
+	config := &Config{
+		NodeID:        "test-node",
+		ListenAddress: "localhost:0",
+		SendQueueSize: 1,
+		SendTimeout:   10 * time.Millisecond,
+	}
+	peerLink, err := NewGRPCPeerLink(config)
+	if err != nil {
+		t.Fatalf("Failed to create GRPCPeerLink: %v", err)
+	}
+
+	peerLink.mu.Lock()
+	peerLink.registerPeer("test-peer")
+	peerLink.mu.Unlock()
+
+	if err := peerLink.SendEvent(context.Background(), "test-peer", eventlog.NewEvent("data", []byte("one"))); err != nil {
+		t.Fatalf("Failed to queue data-plane event: %v", err)
+	}
+	change := &peerlink.SubscriptionChange{
+		Action:   "subscribe",
+		ClientId: "client-1",
+		Topic:    "data",
+		NodeId:   "node-1",
+	}
+	if err := peerLink.SendSubscriptionChange(context.Background(), "test-peer", change); err != nil {
+		t.Fatalf("Failed to queue control-plane subscription change: %v", err)
+	}
+
+	if err := peerLink.SendEvent(context.Background(), "test-peer", eventlog.NewEvent("data", []byte("two"))); err == nil {
+		t.Fatal("Expected full data-plane queue to drop event")
+	}
+	if err := peerLink.SendHeartbeat(context.Background(), "test-peer"); err == nil {
+		t.Fatal("Expected full control-plane queue to drop heartbeat")
+	}
+
+	metrics := requirePeerMetrics(t, peerLink.GetAllPeerMetrics(), "test-peer")
+	if metrics.QueueDepth != 2 {
+		t.Fatalf("Expected aggregate queue depth 2, got %d", metrics.QueueDepth)
+	}
+	if metrics.DataPlaneQueueDepth != 1 {
+		t.Fatalf("Expected data-plane queue depth 1, got %d", metrics.DataPlaneQueueDepth)
+	}
+	if metrics.ControlPlaneQueueDepth != 1 {
+		t.Fatalf("Expected control-plane queue depth 1, got %d", metrics.ControlPlaneQueueDepth)
+	}
+	if metrics.DropsCount != 2 {
+		t.Fatalf("Expected aggregate drops count 2, got %d", metrics.DropsCount)
+	}
+	if metrics.DataPlaneDropsCount != 1 {
+		t.Fatalf("Expected data-plane drops count 1, got %d", metrics.DataPlaneDropsCount)
+	}
+	if metrics.ControlPlaneDropsCount != 1 {
+		t.Fatalf("Expected control-plane drops count 1, got %d", metrics.ControlPlaneDropsCount)
+	}
+	if metrics.DataPlaneQueuedCount != 1 {
+		t.Fatalf("Expected data-plane queued count 1, got %d", metrics.DataPlaneQueuedCount)
+	}
+	if metrics.ControlPlaneQueuedCount != 1 {
+		t.Fatalf("Expected control-plane queued count 1, got %d", metrics.ControlPlaneQueuedCount)
+	}
+
+	peerLink.handleSendFailure("test-peer", &DataPlaneMessage{
+		peerID: "test-peer",
+		event:  eventlog.NewEvent("data", []byte("failed")),
+		sentAt: time.Now(),
+	}, peerLink.sendQueues["test-peer"], nil)
+	peerLink.handleSendFailure("test-peer", &ControlPlaneMsg{
+		peerID:             "test-peer",
+		subscriptionChange: change,
+		sentAt:             time.Now(),
+	}, peerLink.controlQueues["test-peer"], nil)
+
+	metrics = requirePeerMetrics(t, peerLink.GetAllPeerMetrics(), "test-peer")
+	if metrics.DataPlaneFailureCount != 1 {
+		t.Fatalf("Expected data-plane failure count 1, got %d", metrics.DataPlaneFailureCount)
+	}
+	if metrics.ControlPlaneFailureCount != 1 {
+		t.Fatalf("Expected control-plane failure count 1, got %d", metrics.ControlPlaneFailureCount)
+	}
+}
+
 // TestGRPCPeerLink_GetAllPeerMetrics tests the aggregate metrics functionality
 func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
 	config := &Config{
@@ -599,20 +681,10 @@ func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
 		t.Fatalf("Expected 2 metrics, got %d", len(metrics))
 	}
 
-	// Find metrics for each peer
-	var peer1Metrics, peer2Metrics *PeerMetrics
-	for i := range metrics {
-		if metrics[i].PeerID == "peer1" {
-			peer1Metrics = &metrics[i]
-		} else if metrics[i].PeerID == "peer2" {
-			peer2Metrics = &metrics[i]
-		}
-	}
+	peer1Metrics := requirePeerMetrics(t, metrics, "peer1")
+	peer2Metrics := requirePeerMetrics(t, metrics, "peer2")
 
 	// Verify peer1 metrics
-	if peer1Metrics == nil {
-		t.Fatal("peer1 metrics not found")
-	}
 	if peer1Metrics.QueueDepth != 1 {
 		t.Errorf("Expected peer1 queue depth 1, got %d", peer1Metrics.QueueDepth)
 	}
@@ -624,9 +696,6 @@ func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
 	}
 
 	// Verify peer2 metrics
-	if peer2Metrics == nil {
-		t.Fatal("peer2 metrics not found")
-	}
 	if peer2Metrics.QueueDepth != 0 {
 		t.Errorf("Expected peer2 queue depth 0, got %d", peer2Metrics.QueueDepth)
 	}
@@ -636,6 +705,18 @@ func TestGRPCPeerLink_GetAllPeerMetrics(t *testing.T) {
 	if peer2Metrics.DropsCount != 0 {
 		t.Errorf("Expected peer2 drops count 0, got %d", peer2Metrics.DropsCount)
 	}
+}
+
+func requirePeerMetrics(t *testing.T, metrics []PeerMetrics, peerID string) *PeerMetrics {
+	t.Helper()
+
+	for i := range metrics {
+		if metrics[i].PeerID == peerID {
+			return &metrics[i]
+		}
+	}
+	t.Fatalf("%s metrics not found", peerID)
+	return nil
 }
 
 // TestGRPCPeerLink_EventStreamBasic tests basic EventStream functionality
