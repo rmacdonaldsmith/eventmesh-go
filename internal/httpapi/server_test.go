@@ -1,6 +1,9 @@
 package httpapi
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -56,20 +59,16 @@ func TestPackageStructure(t *testing.T) {
 		t.Error("Expected client to be authenticated")
 	}
 
-	// Test that our types can be created
-	var authReq AuthRequest
-	var authResp AuthResponse
-	var pubReq PublishRequest
-	var pubResp PublishResponse
-
-	// Basic field access test
-	authReq.ClientID = "test"
-	authResp.ClientID = "test"
-	pubReq.Topic = "test.topic"
-	pubResp.EventID = "test-event-123"
-
-	// If we reach here, all types are properly defined
-	t.Log("✅ Package structure verification complete")
+	authReq := AuthRequest{ClientID: "test"}
+	authResp := AuthResponse{ClientID: "test"}
+	pubReq := PublishRequest{Topic: "test.topic"}
+	pubResp := PublishResponse{EventID: "test-event-123"}
+	if authReq.ClientID != authResp.ClientID {
+		t.Errorf("Expected auth request/response client IDs to match")
+	}
+	if pubReq.Topic == "" || pubResp.EventID == "" {
+		t.Errorf("Expected publish request/response fields to be assignable")
+	}
 }
 
 // TestErrorHelpers tests centralized error handling
@@ -80,13 +79,29 @@ func TestErrorHelpers(t *testing.T) {
 
 	handlers := setup.Server.handlers
 
-	// Test writeError consistency across handlers and middleware
-	// This test will initially fail until we consolidate the error handling
 	t.Run("handlers_writeError", func(t *testing.T) {
-		// This should not panic and should produce consistent error format
-		// We'll verify the error format is standardized
-		if handlers == nil {
-			t.Error("Expected handlers to be created")
+		rr := httptest.NewRecorder()
+		handlers.writeError(rr, "custom validation failed", http.StatusBadRequest)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("Expected status %d, got %d", http.StatusBadRequest, rr.Code)
+		}
+		if contentType := rr.Header().Get("Content-Type"); contentType != "application/json" {
+			t.Fatalf("Expected JSON content type, got %q", contentType)
+		}
+
+		var response ErrorResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+			t.Fatalf("Failed to parse error response: %v", err)
+		}
+		if response.Error != http.StatusText(http.StatusBadRequest) {
+			t.Errorf("Expected error %q, got %q", http.StatusText(http.StatusBadRequest), response.Error)
+		}
+		if response.Message != "custom validation failed" {
+			t.Errorf("Expected custom message, got %q", response.Message)
+		}
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("Expected code %d, got %d", http.StatusBadRequest, response.Code)
 		}
 	})
 }

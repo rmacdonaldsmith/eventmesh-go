@@ -75,8 +75,6 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_Success(t *testing.T) {
 		t.Errorf("Expected peer to be healthy after successful handshake, got: %s", health)
 	}
 
-	t.Log("✅ establishStreamWithHandshake succeeded and peer marked as healthy")
-
 	// Clean up stream
 	_ = stream.CloseSend()
 }
@@ -117,8 +115,6 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_ConnectionFailure(t *testing.
 		t.Errorf("Expected nil stream on failure, got non-nil stream")
 		_ = stream.CloseSend()
 	}
-
-	t.Log("✅ establishStreamWithHandshake correctly failed on connection error")
 }
 
 // TestGRPCPeerLink_EstablishStreamWithHandshake_HandshakeFailure tests handshake-specific failures
@@ -157,6 +153,4 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_HandshakeFailure(t *testing.T
 		t.Errorf("Expected nil stream on handshake failure, got non-nil stream")
 		_ = stream.CloseSend()
 	}
-
-	t.Log("✅ establishStreamWithHandshake correctly failed on handshake error")
 }

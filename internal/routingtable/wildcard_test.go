@@ -7,8 +7,7 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
 
-// TestInMemoryRoutingTable_WildcardMatching tests wildcard pattern matching
-// Phase 2 implementation of REQ-RT-001
+// TestInMemoryRoutingTable_WildcardMatching tests wildcard pattern matching.
 func TestInMemoryRoutingTable_WildcardMatching(t *testing.T) {
 
 	rt := NewInMemoryRoutingTable()
@@ -50,8 +49,7 @@ func TestInMemoryRoutingTable_WildcardMatching(t *testing.T) {
 	}
 }
 
-// TestInMemoryRoutingTable_WildcardPrecedence tests precedence between exact and wildcard matches
-// Phase 2 implementation of REQ-RT-001
+// TestInMemoryRoutingTable_WildcardPrecedence tests exact and wildcard matches together.
 func TestInMemoryRoutingTable_WildcardPrecedence(t *testing.T) {
 
 	rt := NewInMemoryRoutingTable()
@@ -102,8 +100,7 @@ func TestInMemoryRoutingTable_WildcardPrecedence(t *testing.T) {
 	}
 }
 
-// TestInMemoryRoutingTable_ComplexWildcardPatterns tests various wildcard patterns
-// Phase 2 implementation of REQ-RT-001
+// TestInMemoryRoutingTable_ComplexWildcardPatterns tests supported single-segment wildcard patterns.
 func TestInMemoryRoutingTable_ComplexWildcardPatterns(t *testing.T) {
 
 	rt := NewInMemoryRoutingTable()

@@ -27,14 +27,10 @@ func TestInMemoryRoutingTable_ContextCancellation(t *testing.T) {
 	// Cancel the context immediately
 	cancel()
 
-	// The operation should complete quickly since it doesn't respect cancellation yet
-	// but this test validates that operations handle cancelled contexts gracefully
 	select {
 	case err := <-done:
-		// For current implementation, this should succeed even with cancelled context
-		// since Subscribe doesn't check ctx.Done() - this is expected for Phase 1
 		if err != nil {
-			t.Logf("Subscribe returned error (this is acceptable): %v", err)
+			t.Fatalf("Subscribe with canceled context failed: %v", err)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Subscribe operation did not complete within reasonable time")
@@ -54,17 +50,14 @@ func TestInMemoryRoutingTable_ContextTimeout(t *testing.T) {
 	// Wait for the context to timeout
 	<-ctx.Done()
 
-	// Now try operations with the timed-out context
 	err := rt.Subscribe(ctx, "orders.created", subscriber)
-	// For current implementation, this should succeed even with timed-out context
-	// since Subscribe doesn't check ctx.Done() - this is expected for Phase 1
 	if err != nil {
-		t.Logf("Subscribe with timed-out context returned error (this is acceptable): %v", err)
+		t.Fatalf("Subscribe with timed-out context failed: %v", err)
 	}
 
 	_, err = rt.GetSubscribers(ctx, "orders.created")
 	if err != nil {
-		t.Logf("GetSubscribers with timed-out context returned error (this is acceptable): %v", err)
+		t.Fatalf("GetSubscribers with timed-out context failed: %v", err)
 	}
 }
 
@@ -78,21 +71,19 @@ func TestInMemoryRoutingTable_ContextDeadline(t *testing.T) {
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-1*time.Hour))
 	defer cancel()
 
-	// Operations should handle expired contexts gracefully
 	err := rt.Subscribe(ctx, "orders.created", subscriber)
-	// For current Phase 1 implementation, this may succeed since we don't check context state
 	if err != nil {
-		t.Logf("Subscribe with expired deadline returned error (this is acceptable): %v", err)
+		t.Fatalf("Subscribe with expired deadline failed: %v", err)
 	}
 
 	_, err = rt.GetSubscribers(ctx, "orders.created")
 	if err != nil {
-		t.Logf("GetSubscribers with expired deadline returned error (this is acceptable): %v", err)
+		t.Fatalf("GetSubscribers with expired deadline failed: %v", err)
 	}
 
 	err = rt.Unsubscribe(ctx, "orders.created", subscriber.ID())
 	if err != nil {
-		t.Logf("Unsubscribe with expired deadline returned error (this is acceptable): %v", err)
+		t.Fatalf("Unsubscribe with expired deadline failed: %v", err)
 	}
 }
 
@@ -116,7 +107,7 @@ func TestInMemoryRoutingTable_LongRunningOperationWithCancellation(t *testing.T)
 			subscriber := routingtable.NewLocalSubscriber(fmt.Sprintf("client-%d", id))
 			err := rt.Subscribe(ctx, fmt.Sprintf("topic-%d", id), subscriber)
 			if err != nil {
-				t.Logf("Subscribe operation %d failed (acceptable): %v", id, err)
+				t.Errorf("Subscribe operation %d failed: %v", id, err)
 			}
 			done <- true
 		}(i)
@@ -151,7 +142,6 @@ func TestInMemoryRoutingTable_LongRunningOperationWithCancellation(t *testing.T)
 		t.Errorf("Topic count %d is outside expected range [0, %d]", count, numOperations)
 	}
 
-	t.Logf("Completed all operations. Final topic count: %d", count)
 }
 
 // TestInMemoryRoutingTable_ContextValues tests that operations work with context values

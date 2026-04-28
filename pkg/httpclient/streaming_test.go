@@ -430,8 +430,7 @@ func TestStreamClient_Reconnection(t *testing.T) {
 				assert.Contains(t, eventsToSend, event.EventID)
 				receivedEvents++
 			case err := <-streamClient.Errors():
-				// Additional errors are OK during reconnection
-				t.Logf("Received error during reconnection: %v", err)
+				assert.Error(t, err)
 			case <-timeout:
 				t.Fatalf("Timeout waiting for events after reconnection. Received %d/%d events", receivedEvents, len(eventsToSend))
 			}
@@ -483,28 +482,29 @@ func TestStreamClient_Reconnection(t *testing.T) {
 					if strings.Contains(errorMsg, "max reconnect attempts") || strings.Contains(errorMsg, "exceeded") {
 						maxReconnectError = true
 					}
-					t.Logf("Received error %d: %v", errorCount, err)
 				}
 			case <-streamClient.Done():
-				// Stream ended - this is the main success condition
 				streamEnded = true
-				t.Log("Stream ended as expected")
 			case <-time.After(2 * time.Second):
-				t.Log("Test timeout - checking results")
-				streamEnded = true
+				t.Fatal("Timed out waiting for stream to end after max reconnect attempts")
 			}
 		}
 
-		// The main requirement is that the stream should end after max attempts
-		// The specific error message format is less important than the behavior
+		for err := range streamClient.Errors() {
+			if err == nil {
+				continue
+			}
+			errorCount++
+			errorMsg := err.Error()
+			if strings.Contains(errorMsg, "max reconnect attempts") || strings.Contains(errorMsg, "exceeded") {
+				maxReconnectError = true
+			}
+		}
+
 		assert.True(t, streamEnded, "Stream should end after max reconnect attempts")
 		assert.Greater(t, errorCount, 0, "Should receive at least one error")
+		assert.True(t, maxReconnectError, "Should report max reconnect attempts exceeded")
 		assert.LessOrEqual(t, connectionAttempts, streamConfig.MaxReconnectAttempts+1, "Should not exceed max reconnect attempts")
-
-		// It's OK if we don't get the exact error message, as long as the stream behaves correctly
-		if !maxReconnectError {
-			t.Logf("Note: Didn't receive exact 'max reconnect attempts' error, but stream ended correctly with %d errors", errorCount)
-		}
 	})
 }
 
@@ -652,9 +652,8 @@ func TestStreamClient_EventChannelBuffering(t *testing.T) {
 				assert.Contains(t, event.EventID, "overflow-event-")
 				receivedEvents++
 			case err := <-streamClient.Errors():
-				t.Logf("Received error (may be expected): %v", err)
+				assert.Error(t, err)
 			case <-time.After(1 * time.Second):
-				t.Logf("Received %d events before timeout", receivedEvents)
 				goto done
 			}
 		}

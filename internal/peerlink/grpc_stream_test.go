@@ -73,7 +73,6 @@ func TestGRPCPeerLink_AttemptStreamConnection_Success(t *testing.T) {
 		if shouldRetry {
 			t.Errorf("Expected attemptStreamConnection to return false (don't retry) on context timeout, got true")
 		}
-		t.Log("✅ attemptStreamConnection completed successfully and returned false on context timeout")
 	case <-time.After(3 * time.Second):
 		t.Error("attemptStreamConnection did not return within timeout")
 	}

@@ -351,7 +351,6 @@ func TestGRPCMeshNode_PublishFlow_Complete(t *testing.T) {
 		}
 	}
 
-	t.Logf("✅ Complete publish flow verified: persistence -> local delivery")
 }
 
 // TestGRPCMeshNode_PublishFlow_ErrorHandling tests error handling in publish flow
@@ -439,9 +438,7 @@ func TestGRPCMeshNode_PersistenceBeforeForwarding(t *testing.T) {
 		if persistedEvent.Topic != "persistence.test" {
 			t.Errorf("Expected persisted topic 'persistence.test', got '%s'", persistedEvent.Topic)
 		}
-		if persistedEvent.Offset == initialOffset {
-			t.Logf("✅ REQ-MNODE-002 verified: Event persisted locally with offset %d", persistedEvent.Offset)
-		} else {
+		if persistedEvent.Offset != initialOffset {
 			t.Errorf("Expected event offset %d, got %d", initialOffset, persistedEvent.Offset)
 		}
 	}
@@ -617,7 +614,6 @@ func TestGRPCMeshNode_SubscriptionPropagation(t *testing.T) {
 		t.Errorf("Expected 0 local subscribers after unsubscribe, got %d", len(localSubscribers))
 	}
 
-	t.Logf("✅ REQ-MNODE-003: Subscription propagation logic implemented (peer propagation via PeerLink)")
 }
 
 // TestGRPCMeshNode_IncomingEventHandling tests handling of events received from peer nodes
@@ -678,7 +674,6 @@ func TestGRPCMeshNode_IncomingEventHandling(t *testing.T) {
 		}
 	}
 
-	t.Logf("✅ Incoming peer event handling working: persist + deliver to local subscribers")
 }
 
 // TestGRPCMeshNode_SubscriptionEventHandling tests handling of subscription events from peers
@@ -704,10 +699,15 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 		NodeId:   "peer-node-1",
 	}
 
-	// Process the subscription change (simulate receiving from peer)
 	node.processIncomingSubscriptionChange(ctx, subscriptionChange)
 
-	// Test unsubscription as well
+	node.peerSubscriptionsMu.RLock()
+	subscribed := node.peerSubscriptions["peer-node-1"]["orders.*"]
+	node.peerSubscriptionsMu.RUnlock()
+	if !subscribed {
+		t.Fatalf("Expected peer-node-1 to be subscribed to orders.*")
+	}
+
 	unsubscriptionChange := &peerlink.SubscriptionChange{
 		Action:   "unsubscribe",
 		ClientId: "peer-client-1",
@@ -717,7 +717,12 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 
 	node.processIncomingSubscriptionChange(ctx, unsubscriptionChange)
 
-	t.Logf("✅ Subscription event handling implemented (basic MVP version)")
+	node.peerSubscriptionsMu.RLock()
+	subscribed = node.peerSubscriptions["peer-node-1"]["orders.*"]
+	node.peerSubscriptionsMu.RUnlock()
+	if subscribed {
+		t.Fatalf("Expected peer-node-1 subscription to orders.* to be removed")
+	}
 }
 
 func TestGRPCMeshNode_GetInterestedPeersMatchesWildcardSubscriptions(t *testing.T) {
