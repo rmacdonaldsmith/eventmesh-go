@@ -576,8 +576,7 @@ func (n *GRPCMeshNode) Unsubscribe(ctx context.Context, client meshnode.Client, 
 		"topic", topic,
 		"node_id", n.config.NodeID)
 
-	// Keep client tracking for now; subscription metadata owns the active
-	// subscription set used by the HTTP API.
+	n.removeSubscriptionMetadataByTopic(client.ID(), topic)
 
 	// Propagate subscription removal to peers over the control plane.
 	err = n.propagateSubscriptionChange(ctx, "unsubscribe", client.ID(), topic)
@@ -1223,8 +1222,7 @@ func (n *GRPCMeshNode) UnsubscribeByID(ctx context.Context, clientID, subscripti
 		return fmt.Errorf("failed to unsubscribe: %w", err)
 	}
 
-	// Remove subscription metadata
-	return n.removeSubscriptionMetadata(clientID, subscriptionID)
+	return nil
 }
 
 // removeSubscriptionMetadata removes a subscription from the metadata store
@@ -1250,6 +1248,26 @@ func (n *GRPCMeshNode) removeSubscriptionMetadata(clientID, subscriptionID strin
 	}
 
 	return nil
+}
+
+func (n *GRPCMeshNode) removeSubscriptionMetadataByTopic(clientID, topic string) {
+	n.subscriptionsMu.Lock()
+	defer n.subscriptionsMu.Unlock()
+
+	clientSubs := n.subscriptions[clientID]
+	if clientSubs == nil {
+		return
+	}
+
+	for subscriptionID, subscription := range clientSubs {
+		if subscription.Topic == topic {
+			delete(clientSubs, subscriptionID)
+		}
+	}
+
+	if len(clientSubs) == 0 {
+		delete(n.subscriptions, clientID)
+	}
 }
 
 // runDiscovery performs node discovery and connects to discovered peers

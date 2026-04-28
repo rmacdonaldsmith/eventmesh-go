@@ -478,6 +478,16 @@ func TestGRPCMeshNode_Unsubscribe(t *testing.T) {
 	if len(subscribers) != 1 {
 		t.Errorf("Expected 1 subscriber after subscribe, got %d", len(subscribers))
 	}
+	subscriptions, err := node.GetClientSubscriptions(ctx, subscriber.ID())
+	if err != nil {
+		t.Fatalf("Expected no error getting client subscriptions, got %v", err)
+	}
+	if len(subscriptions) != 1 {
+		t.Fatalf("Expected 1 subscription metadata entry after subscribe, got %d", len(subscriptions))
+	}
+	if snapshot := node.localSubscriptionSnapshot(); len(snapshot) != 1 {
+		t.Fatalf("Expected subscription resync snapshot to include subscription, got %d entries", len(snapshot))
+	}
 
 	// Now unsubscribe
 	err = node.Unsubscribe(ctx, subscriber, topic)
@@ -492,6 +502,16 @@ func TestGRPCMeshNode_Unsubscribe(t *testing.T) {
 	}
 	if len(subscribers) != 0 {
 		t.Errorf("Expected 0 subscribers after unsubscribe, got %d", len(subscribers))
+	}
+	subscriptions, err = node.GetClientSubscriptions(ctx, subscriber.ID())
+	if err != nil {
+		t.Fatalf("Expected no error getting client subscriptions after unsubscribe, got %v", err)
+	}
+	if len(subscriptions) != 0 {
+		t.Fatalf("Expected 0 subscription metadata entries after unsubscribe, got %d", len(subscriptions))
+	}
+	if snapshot := node.localSubscriptionSnapshot(); len(snapshot) != 0 {
+		t.Fatalf("Expected subscription resync snapshot to exclude unsubscribed topic, got %d entries", len(snapshot))
 	}
 
 	// Test that events are no longer delivered
