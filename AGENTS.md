@@ -51,6 +51,9 @@ unless the code and tests prove the behavior today.
   local subscriber delivery or peer forwarding.
 * Peer-to-peer mesh delivery is at-least-once and duplicate-tolerant. Retries,
   reconnects, and future replay/resync flows may produce duplicates.
+* A node that receives a user event from a peer appends it locally before
+  delivering it to local subscribers. If append fails, do not deliver it from
+  that inbound peer path.
 * Live SSE/client delivery is best-effort while connected. Durable catch-up uses
   topic replay from the EventLog by offset.
 * Do not write tests or docs that imply exactly-once delivery unless the feature

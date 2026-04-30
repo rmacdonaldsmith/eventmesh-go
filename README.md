@@ -22,7 +22,9 @@ the mesh.
   local node's EventLog before local delivery or peer forwarding.
 - **Peer-to-peer mesh:** node-to-node delivery is at-least-once. Retries,
   reconnects, and future replay/resync flows may produce duplicates, so
-  receivers must tolerate duplicate event IDs or payloads.
+  receivers must tolerate duplicate event IDs or payloads. A receiving node
+  appends an inbound peer event to its local EventLog before local subscriber
+  delivery; append failure skips that delivery path.
 - **Live subscribers:** active SSE/client streams are best-effort while
   connected. Durable catch-up should use topic replay from the EventLog by
   offset.

@@ -255,6 +255,10 @@ events are not silently lost when local persistence succeeds, but they should
 not assume exactly-once cross-node delivery unless a test is specifically
 checking duplicate suppression behavior.
 
+When a node accepts a user event from a peer, it appends that event to its local
+EventLog before delivering it to local subscribers. If the local append fails,
+the event is not delivered to local subscribers from that inbound peer path.
+
 PeerLink retries failed sends for a bounded number of attempts
 (`MaxSendAttempts`, default `3`). A message that exhausts its retry budget, or
 cannot be requeued because the bounded peer queue is full, is counted as a drop

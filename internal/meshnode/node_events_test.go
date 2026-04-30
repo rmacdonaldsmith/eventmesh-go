@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	eventlogimpl "github.com/rmacdonaldsmith/eventmesh-go/internal/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 )
@@ -696,6 +698,88 @@ func TestGRPCMeshNode_IncomingEventHandling(t *testing.T) {
 
 }
 
+func TestGRPCMeshNode_IncomingPeerEventPersistsBeforeDelivery(t *testing.T) {
+	ctx := context.Background()
+	topic := "incoming.persistence"
+	var calls []string
+	record := func(call string) {
+		calls = append(calls, call)
+	}
+
+	recordingLog := &recordingEventLog{
+		delegate: eventlogimpl.NewInMemoryEventLog(),
+		record:   record,
+	}
+	config := NewConfig("incoming-persistence-node", "localhost:0").WithEventLogFactory(func() (eventlog.EventLog, error) {
+		return recordingLog, nil
+	})
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	subscriber := &recordingClient{
+		TrustedClient: NewTrustedClient("local-subscriber"),
+		record:        record,
+	}
+	if err := node.Subscribe(ctx, subscriber, topic); err != nil {
+		t.Fatalf("Expected no error subscribing local client, got %v", err)
+	}
+
+	node.processIncomingUserEvent(ctx, eventlog.NewEvent(topic, []byte("from-peer")))
+
+	expectedCalls := []string{"append", "deliver"}
+	if !reflect.DeepEqual(calls, expectedCalls) {
+		t.Fatalf("Expected incoming peer event calls %v, got %v", expectedCalls, calls)
+	}
+
+	receivedEvents := subscriber.GetReceivedEvents()
+	if len(receivedEvents) != 1 {
+		t.Fatalf("Expected subscriber to receive 1 event, got %d", len(receivedEvents))
+	}
+	if receivedEvents[0].Offset != 0 {
+		t.Fatalf("Expected delivered event to use persisted offset 0, got %d", receivedEvents[0].Offset)
+	}
+}
+
+func TestGRPCMeshNode_IncomingPeerEventAppendFailureSkipsDelivery(t *testing.T) {
+	ctx := context.Background()
+	topic := "incoming.persistence.failure"
+	appendErr := errors.New("append failed")
+
+	config := NewConfig("incoming-persistence-failure-node", "localhost:0").WithEventLogFactory(func() (eventlog.EventLog, error) {
+		return &recordingEventLog{
+			delegate:  eventlogimpl.NewInMemoryEventLog(),
+			appendErr: appendErr,
+		}, nil
+	})
+	node, err := NewGRPCMeshNode(config)
+	if err != nil {
+		t.Fatalf("Expected no error creating mesh node, got %v", err)
+	}
+	defer node.Close()
+
+	if err := node.Start(ctx); err != nil {
+		t.Fatalf("Expected no error starting node, got %v", err)
+	}
+
+	subscriber := NewTrustedClient("local-subscriber")
+	if err := node.Subscribe(ctx, subscriber, topic); err != nil {
+		t.Fatalf("Expected no error subscribing local client, got %v", err)
+	}
+
+	node.processIncomingUserEvent(ctx, eventlog.NewEvent(topic, []byte("from-peer")))
+
+	if receivedEvents := subscriber.GetReceivedEvents(); len(receivedEvents) != 0 {
+		t.Fatalf("Expected append failure to skip local delivery, got %d events", len(receivedEvents))
+	}
+}
+
 // TestGRPCMeshNode_SubscriptionEventHandling tests handling of subscription events from peers
 func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 	config := NewConfig("subscription-event-node", "localhost:0")
@@ -837,6 +921,58 @@ func TestGRPCMeshNode_GetInterestedPeersWildcardUnsubscribeRemovesInterest(t *te
 	if len(interestedPeers) != 0 {
 		t.Fatalf("Expected no interested peers after unsubscribe, got %d", len(interestedPeers))
 	}
+}
+
+type recordingEventLog struct {
+	delegate  eventlog.EventLog
+	appendErr error
+	record    func(string)
+}
+
+func (l *recordingEventLog) AppendEvent(ctx context.Context, topic string, event *eventlog.Event) (*eventlog.Event, error) {
+	if l.record != nil {
+		l.record("append")
+	}
+	if l.appendErr != nil {
+		return nil, l.appendErr
+	}
+	return l.delegate.AppendEvent(ctx, topic, event)
+}
+
+func (l *recordingEventLog) ReadEvents(ctx context.Context, topic string, startOffset int64, maxCount int) ([]*eventlog.Event, error) {
+	return l.delegate.ReadEvents(ctx, topic, startOffset, maxCount)
+}
+
+func (l *recordingEventLog) GetTopicEndOffset(ctx context.Context, topic string) (int64, error) {
+	return l.delegate.GetTopicEndOffset(ctx, topic)
+}
+
+func (l *recordingEventLog) ReplayEvents(ctx context.Context, topic string, startOffset int64) (<-chan *eventlog.Event, <-chan error) {
+	return l.delegate.ReplayEvents(ctx, topic, startOffset)
+}
+
+func (l *recordingEventLog) Compact(ctx context.Context) error {
+	return l.delegate.Compact(ctx)
+}
+
+func (l *recordingEventLog) GetStatistics(ctx context.Context) (eventlog.EventLogStatistics, error) {
+	return l.delegate.GetStatistics(ctx)
+}
+
+func (l *recordingEventLog) Close() error {
+	return l.delegate.Close()
+}
+
+type recordingClient struct {
+	*TrustedClient
+	record func(string)
+}
+
+func (c *recordingClient) DeliverEvent(event *eventlog.Event) error {
+	if c.record != nil {
+		c.record("deliver")
+	}
+	return c.TrustedClient.DeliverEvent(event)
 }
 
 // Test client that simulates delivery failures
