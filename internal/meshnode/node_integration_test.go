@@ -308,15 +308,22 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 func waitForMeshNodeCondition(t *testing.T, timeout time.Duration, condition func() bool, description string) {
 	t.Helper()
 
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
 		if condition() {
 			return
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
 
-	t.Fatal(fmt.Sprintf("Timed out waiting for %s", description))
+		select {
+		case <-deadline.C:
+			t.Fatal(fmt.Sprintf("Timed out waiting for %s", description))
+		case <-ticker.C:
+		}
+	}
 }
 
 func newStartedIntegrationNode(t *testing.T, ctx context.Context, nodeID string) *GRPCMeshNode {

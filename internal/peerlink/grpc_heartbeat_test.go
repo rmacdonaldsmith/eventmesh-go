@@ -181,18 +181,27 @@ func newConnectedHeartbeatPeerLinks(t *testing.T, heartbeatInterval time.Duratio
 func waitForPeerHealth(t *testing.T, ctx context.Context, link *GRPCPeerLink, peerID string, expected peerlink.PeerHealthState) {
 	t.Helper()
 
+	waitCtx := ctx
+	cancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		waitCtx, cancel = context.WithTimeout(ctx, 3*time.Second)
+	}
+	defer cancel()
+
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 
+	var last peerlink.PeerHealthState
+	var lastErr error
 	for {
-		health, _ := link.GetPeerHealth(ctx, peerID)
-		if health == expected {
+		last, lastErr = link.GetPeerHealth(context.Background(), peerID)
+		if lastErr == nil && last == expected {
 			return
 		}
 
 		select {
-		case <-ctx.Done():
-			t.Fatalf("timed out waiting for %s health to become %s", peerID, expected)
+		case <-waitCtx.Done():
+			t.Fatalf("timed out waiting for %s health to become %s: last=%s err=%v", peerID, expected, last, lastErr)
 		case <-ticker.C:
 		}
 	}

@@ -60,6 +60,7 @@ func TestClient_Stream(t *testing.T) {
 
 	t.Run("creates_stream_client_successfully", func(t *testing.T) {
 		// Create a mock server for this test to avoid connection issues
+		streamRequested := make(chan struct{})
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodGet && r.URL.Path == "/api/v1/subscriptions":
@@ -74,7 +75,8 @@ func TestClient_Stream(t *testing.T) {
 			case r.Method == http.MethodGet && r.URL.Path == "/api/v1/events/stream":
 				assert.Empty(t, r.URL.Query().Get("topic"))
 				w.Header().Set("Content-Type", "text/event-stream")
-				time.Sleep(100 * time.Millisecond)
+				close(streamRequested)
+				<-r.Context().Done()
 			case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/subscriptions/sub-temp-stream":
 				w.WriteHeader(http.StatusNoContent)
 			default:
@@ -100,6 +102,11 @@ func TestClient_Stream(t *testing.T) {
 		assert.NotNil(t, streamClient.Events())
 		assert.NotNil(t, streamClient.Errors())
 		assert.NotNil(t, streamClient.Done())
+		select {
+		case <-streamRequested:
+		case <-time.After(1 * time.Second):
+			t.Fatal("stream endpoint was not requested")
+		}
 
 		// Clean up
 		err = streamClient.Close()
@@ -174,8 +181,10 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 			flusher.Flush()
 
-			// Keep connection open briefly, then close
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+			case <-time.After(100 * time.Millisecond):
+			}
 		}))
 		defer server.Close()
 
@@ -235,7 +244,10 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 			flusher.Flush()
 
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+			case <-time.After(100 * time.Millisecond):
+			}
 		}))
 		defer server.Close()
 
@@ -282,7 +294,10 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 			flusher.Flush()
 
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+			case <-time.After(100 * time.Millisecond):
+			}
 		}))
 		defer server.Close()
 
@@ -375,7 +390,6 @@ func TestStreamClient_Reconnection(t *testing.T) {
 				eventJSON, _ := json.Marshal(event)
 				fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 				flusher.Flush()
-				time.Sleep(50 * time.Millisecond)
 			}
 		}))
 		defer server.Close()
@@ -501,18 +515,9 @@ func TestStreamClient_Lifecycle(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			flusher := w.(http.Flusher)
 
-			// Send periodic keepalives until connection is closed
-			for i := 0; i < 100; i++ {
-				select {
-				case <-r.Context().Done():
-					return // Client closed connection
-				default:
-				}
-
-				fmt.Fprintf(w, ": keepalive %d\n\n", i)
-				flusher.Flush()
-				time.Sleep(50 * time.Millisecond)
-			}
+			fmt.Fprintf(w, ": keepalive\n\n")
+			flusher.Flush()
+			<-r.Context().Done()
 		}))
 		defer server.Close()
 
@@ -527,12 +532,11 @@ func TestStreamClient_Lifecycle(t *testing.T) {
 		streamClient, err := client.Stream(context.Background(), StreamConfig{})
 		require.NoError(t, err)
 
-		// Stream should be active
+		// Stream should be active after the client is created.
 		select {
 		case <-streamClient.Done():
 			t.Fatal("Stream should not be done immediately")
-		case <-time.After(100 * time.Millisecond):
-			// Expected - stream is active
+		default:
 		}
 
 		// Close should terminate the stream
@@ -559,20 +563,11 @@ func TestStreamClient_Lifecycle(t *testing.T) {
 			w.Header().Set("Cache-Control", "no-cache")
 			flusher := w.(http.Flusher)
 
-			// Keep sending events until client disconnects
-			for i := 0; i < 100; i++ {
-				select {
-				case <-r.Context().Done():
-					return // Client disconnected
-				default:
-				}
-
-				event := EventStreamMessage{EventID: fmt.Sprintf("shutdown-test-%d", i)}
-				eventJSON, _ := json.Marshal(event)
-				fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
-				flusher.Flush()
-				time.Sleep(50 * time.Millisecond)
-			}
+			event := EventStreamMessage{EventID: "shutdown-test-0"}
+			eventJSON, _ := json.Marshal(event)
+			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+			flusher.Flush()
+			<-r.Context().Done()
 		}))
 		defer server.Close()
 
@@ -616,16 +611,18 @@ func TestStreamClient_EventChannelBuffering(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			flusher := w.(http.Flusher)
 
-			// Send more events than buffer size
+			// Send more events than buffer size rapidly.
 			for i := 0; i < 10; i++ {
 				event := EventStreamMessage{EventID: fmt.Sprintf("overflow-event-%d", i)}
 				eventJSON, _ := json.Marshal(event)
 				fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 				flusher.Flush()
-				time.Sleep(10 * time.Millisecond) // Rapid sending
 			}
 
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-r.Context().Done():
+			case <-time.After(100 * time.Millisecond):
+			}
 		}))
 		defer server.Close()
 
@@ -654,7 +651,6 @@ func TestStreamClient_EventChannelBuffering(t *testing.T) {
 			case event := <-streamClient.Events():
 				assert.Contains(t, event.EventID, "overflow-event-")
 				receivedEvents++
-				time.Sleep(100 * time.Millisecond) // Slow consumption
 			case err := <-streamClient.Errors():
 				t.Logf("Received error (may be expected): %v", err)
 			case <-time.After(1 * time.Second):

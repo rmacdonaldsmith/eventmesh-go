@@ -74,9 +74,6 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_ContextCancellation(t *testing.
 		result <- shouldRetry
 	}()
 
-	// Let it run for a moment
-	time.Sleep(100 * time.Millisecond)
-
 	// Cancel context - should cause function to return false (don't retry)
 	cancel()
 
@@ -127,8 +124,9 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 		t.Fatalf("Failed to start client: %v", err)
 	}
 
-	// Set up event receiver
+	// Set up event receivers
 	eventChan, errChan := client.ReceiveEvents(ctx)
+	serverEventChan, serverErrChan := server.ReceiveEvents(ctx)
 
 	// Create connection and establish stream
 	conn, err := grpc.NewClient(server.GetListeningAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -168,9 +166,6 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 		}
 	}()
 
-	// Give it a moment to start
-	time.Sleep(100 * time.Millisecond)
-
 	// Test: Send event from server to client (client should receive it through the loop)
 	testEvent := eventlog.NewEvent("test-topic", []byte("hello from server"))
 	err = server.SendEvent(testCtx, "client-node", testEvent)
@@ -200,8 +195,20 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 		t.Fatalf("Failed to send outbound event: %v", err)
 	}
 
-	// Let the stream loop process the outbound event
-	time.Sleep(100 * time.Millisecond)
+	// Verify the server receives the outbound event instead of sleeping and assuming it was processed.
+	select {
+	case receivedEvent := <-serverEventChan:
+		if receivedEvent.Topic != "outbound-topic" {
+			t.Errorf("Expected topic 'outbound-topic', got '%s'", receivedEvent.Topic)
+		}
+		if string(receivedEvent.Payload) != "hello from client" {
+			t.Errorf("Expected payload 'hello from client', got '%s'", string(receivedEvent.Payload))
+		}
+	case err := <-serverErrChan:
+		t.Fatalf("Server receive error: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Error("Server did not receive outbound event within timeout")
+	}
 
 }
 

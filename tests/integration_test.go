@@ -151,9 +151,12 @@ func startEventMeshServer(ctx context.Context) (*exec.Cmd, error) {
 // waitForServerReady polls the server health endpoint until it's ready
 func waitForServerReady(serverURL string, timeout time.Duration) error {
 	client := &http.Client{Timeout: 2 * time.Second}
-	deadline := time.Now().Add(timeout)
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
-	for time.Now().Before(deadline) {
+	for {
 		resp, err := client.Get(serverURL + "/api/v1/health")
 		if err == nil {
 			resp.Body.Close()
@@ -161,10 +164,13 @@ func waitForServerReady(serverURL string, timeout time.Duration) error {
 				return nil
 			}
 		}
-		time.Sleep(500 * time.Millisecond)
-	}
 
-	return fmt.Errorf("server did not become ready within %v", timeout)
+		select {
+		case <-deadline.C:
+			return fmt.Errorf("server did not become ready within %v", timeout)
+		case <-ticker.C:
+		}
+	}
 }
 
 // runIntegrationWorkflow executes the complete CLI integration test workflow

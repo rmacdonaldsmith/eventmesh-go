@@ -64,17 +64,8 @@ func TestGRPCPeerLink_AttemptStreamConnection_Success(t *testing.T) {
 		result <- client.attemptStreamConnection(testCtx, "server-node", conn)
 	}()
 
-	// Give it a moment to establish connection and do handshake
-	time.Sleep(200 * time.Millisecond)
-
-	// Check that peer is marked as healthy
-	health, err := client.GetPeerHealth(context.Background(), "server-node")
-	if err != nil {
-		t.Fatalf("Failed to get peer health: %v", err)
-	}
-	if health != peerlink.PeerHealthy {
-		t.Errorf("Expected peer to be healthy after successful handshake, got: %s", health)
-	}
+	// Wait for the handshake to complete and mark the peer healthy.
+	waitForPeerHealth(t, testCtx, client, "server-node", peerlink.PeerHealthy)
 
 	// Let the context timeout, which should cause graceful termination
 	select {

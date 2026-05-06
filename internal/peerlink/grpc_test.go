@@ -1027,19 +1027,8 @@ func TestGRPCPeerLink_EventStreamContextCancellation(t *testing.T) {
 	// Cancel the context - this should cause EventStream to exit gracefully
 	cancel()
 
-	// Give the EventStream a moment to process the cancellation
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify peer health was updated to Disconnected
-	// We need a new context since the old one was cancelled
-	newCtx := context.Background()
-	healthState, err = peerLink.GetPeerHealth(newCtx, "test-client")
-	if err != nil {
-		t.Fatalf("Failed to get peer health after cancellation: %v", err)
-	}
-	if healthState != peerlink.PeerDisconnected {
-		t.Errorf("Expected disconnected peer after context cancellation, got %v", healthState)
-	}
+	// Verify peer health was updated to Disconnected without relying on a fixed sleep.
+	waitForPeerHealth(t, context.Background(), peerLink, "test-client", peerlink.PeerDisconnected)
 
 	t.Logf("Context cancellation handled correctly - peer marked as disconnected")
 }
@@ -1105,8 +1094,8 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 		t.Fatalf("Failed to connect sender to receiver peer: %v", err)
 	}
 
-	// Small delay to allow gRPC connection to establish
-	time.Sleep(100 * time.Millisecond)
+	// Wait for the connection handshake to complete before sending events.
+	waitForPeerHealth(t, ctx, sender, "receiver-node", peerlink.PeerHealthy)
 
 	// Test both regular events and subscription events
 	testEvent := eventlog.NewEvent("test-topic", []byte("hello from sender"))
@@ -1227,8 +1216,9 @@ func TestGRPCPeerLink_SimultaneousBidirectionalConnections(t *testing.T) {
 		t.Fatalf("Failed to connect B to A: %v", err)
 	}
 
-	// Small delay to allow connections to establish
-	time.Sleep(100 * time.Millisecond)
+	// Wait for both connection handshakes to complete before sending events.
+	waitForPeerHealth(t, ctx, nodeA, "node-B", peerlink.PeerHealthy)
+	waitForPeerHealth(t, ctx, nodeB, "node-A", peerlink.PeerHealthy)
 
 	// Test: Send event from A to B
 	testEvent := eventlog.NewEvent("test-topic", []byte("hello from A to B"))

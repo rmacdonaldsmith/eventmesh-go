@@ -104,11 +104,15 @@ func TestInMemoryRoutingTable_LongRunningOperationWithCancellation(t *testing.T)
 
 	// Simulate a scenario where we have many operations
 	const numOperations = 100
+	started := make(chan bool, numOperations)
+	release := make(chan struct{})
 	done := make(chan bool, numOperations)
 
-	// Start multiple operations
+	// Start multiple operations and release them together so cancellation timing is deterministic.
 	for i := 0; i < numOperations; i++ {
 		go func(id int) {
+			started <- true
+			<-release
 			subscriber := routingtable.NewLocalSubscriber(fmt.Sprintf("client-%d", id))
 			err := rt.Subscribe(ctx, fmt.Sprintf("topic-%d", id), subscriber)
 			if err != nil {
@@ -118,11 +122,11 @@ func TestInMemoryRoutingTable_LongRunningOperationWithCancellation(t *testing.T)
 		}(i)
 	}
 
-	// Cancel the context after a short delay
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}()
+	for i := 0; i < numOperations; i++ {
+		<-started
+	}
+	cancel()
+	close(release)
 
 	// Wait for all operations to complete
 	completed := 0
