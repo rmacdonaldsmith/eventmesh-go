@@ -16,6 +16,8 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
 
+const sseKeepaliveInterval = 2 * time.Second
+
 // HTTPClient represents an HTTP API client for the MeshNode
 type HTTPClient struct {
 	clientID        string
@@ -877,9 +879,8 @@ func (h *Handlers) writeSSEMessage(w http.ResponseWriter, message EventStreamMes
 func (h *Handlers) streamWithKeepalive(w http.ResponseWriter, r *http.Request, client *HTTPClient) {
 	ctx := r.Context()
 
-	// Create a ticker for keepalive messages (every 2 seconds for testing, 30 seconds for production)
-	// TODO: Make this configurable
-	ticker := time.NewTicker(2 * time.Second)
+	// Create a ticker for SSE keepalive messages.
+	ticker := time.NewTicker(sseKeepaliveInterval)
 	defer ticker.Stop()
 
 	// Flush any buffered data immediately
@@ -893,8 +894,7 @@ func (h *Handlers) streamWithKeepalive(w http.ResponseWriter, r *http.Request, c
 	for {
 		select {
 		case <-ctx.Done():
-			// Context cancelled (client disconnected or timeout)
-			// TODO: Cleanup will be handled by MeshNode subscription system
+			// Context cancelled (client disconnected or timeout).
 			return
 
 		case <-ticker.C:

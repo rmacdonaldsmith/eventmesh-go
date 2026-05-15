@@ -3,8 +3,10 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // ContextKey type for context keys to avoid collisions
@@ -134,12 +136,36 @@ func (m *Middleware) ContentType(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// Logging middleware logs HTTP requests
+// Logging middleware logs HTTP requests with structured fields.
 func (m *Middleware) Logging(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Simple request logging - in production, use structured logging
-		// TODO: Replace with structured logging in production
-		next(w, r)
+		start := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+
+		next(recorder, r)
+
+		slog.Info("http request completed",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", recorder.statusCode,
+			"duration_ms", time.Since(start).Milliseconds(),
+			"remote_addr", r.RemoteAddr)
+	}
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (r *statusRecorder) WriteHeader(statusCode int) {
+	r.statusCode = statusCode
+	r.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (r *statusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
 	}
 }
 

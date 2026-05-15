@@ -21,31 +21,57 @@ func TestInputValidation(t *testing.T) {
 	handlers := setup.Server.handlers
 
 	t.Run("validateJSON_missing_content_type", func(t *testing.T) {
-		// This test should fail initially - we need to implement validateJSON usage
-		// Test that requests without proper content-type are rejected
-		if handlers == nil {
-			t.Error("Expected handlers to be created")
+		requestBody := `{"topic": "test.events", "payload": {"message": "hello"}}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/events", strings.NewReader(requestBody))
+		req.Header.Set("Authorization", "Bearer "+setup.GenerateTestToken(t, "test-publisher", false))
+
+		rr := httptest.NewRecorder()
+		handlers.PublishEvent(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rr.Code, rr.Body.String())
 		}
-		// TODO: Add actual HTTP request validation testing
-		// This is a placeholder that will be filled when we implement validation
+		if !strings.Contains(rr.Body.String(), "Content-Type must be application/json") {
+			t.Fatalf("Expected content-type validation error, got: %s", rr.Body.String())
+		}
 	})
 
 	t.Run("empty_topic_validation", func(t *testing.T) {
-		// Test that empty topics are rejected
-		// This should fail until we add topic validation
-		if handlers == nil {
-			t.Error("Expected handlers to be created")
+		requestBody := `{"topic": "", "payload": {"message": "hello"}}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/events", strings.NewReader(requestBody))
+		req.Header.Set("Content-Type", "application/json")
+		token := setup.GenerateTestToken(t, "test-publisher", false)
+		req.Header.Set("Authorization", "Bearer "+token)
+		claims, err := setup.Auth.ValidateToken(token)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
 		}
-		// TODO: Add topic validation testing
+		req = req.WithContext(context.WithValue(req.Context(), ClaimsKey, claims))
+
+		rr := httptest.NewRecorder()
+		handlers.PublishEvent(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rr.Code, rr.Body.String())
+		}
+		if !strings.Contains(rr.Body.String(), "topic is required") {
+			t.Fatalf("Expected topic validation error, got: %s", rr.Body.String())
+		}
 	})
 
 	t.Run("empty_client_id_validation", func(t *testing.T) {
-		// Test that empty client IDs in auth requests are rejected
-		// This should already work based on existing Login handler logic
-		if handlers == nil {
-			t.Error("Expected handlers to be created")
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"clientId": ""}`))
+		req.Header.Set("Content-Type", "application/json")
+
+		rr := httptest.NewRecorder()
+		handlers.Login(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, rr.Code, rr.Body.String())
 		}
-		// TODO: Add client ID validation testing
+		if !strings.Contains(rr.Body.String(), "clientId is required") {
+			t.Fatalf("Expected client ID validation error, got: %s", rr.Body.String())
+		}
 	})
 }
 
