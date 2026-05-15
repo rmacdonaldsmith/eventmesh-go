@@ -717,7 +717,7 @@ func TestGRPCMeshNode_IncomingPeerEventPersistsBeforeDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	if err := node.Start(ctx); err != nil {
 		t.Fatalf("Expected no error starting node, got %v", err)
@@ -762,7 +762,7 @@ func TestGRPCMeshNode_IncomingPeerEventAppendFailureSkipsDelivery(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	if err := node.Start(ctx); err != nil {
 		t.Fatalf("Expected no error starting node, got %v", err)

@@ -78,7 +78,7 @@ func TestApplyEventLogConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("EventLogFactory failed: %v", err)
 		}
-		defer log.Close()
+		defer func() { _ = log.Close() }()
 
 		if _, err := log.AppendEvent(context.Background(), "test.topic", nil); err == nil {
 			t.Fatal("Expected created EventLog to reject nil event")

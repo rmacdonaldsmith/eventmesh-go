@@ -361,31 +361,6 @@ func (n *GRPCMeshNode) UnsubscribeByID(ctx context.Context, clientID, subscripti
 	return nil
 }
 
-// removeSubscriptionMetadata removes a subscription from the metadata store
-func (n *GRPCMeshNode) removeSubscriptionMetadata(clientID, subscriptionID string) error {
-	n.subscriptionsMu.Lock()
-	defer n.subscriptionsMu.Unlock()
-
-	clientSubs := n.subscriptions[clientID]
-	if clientSubs == nil {
-		return fmt.Errorf("%w: no subscriptions found for client %s", meshnode.ErrSubscriptionNotFound, clientID)
-	}
-
-	_, exists := clientSubs[subscriptionID]
-	if !exists {
-		return fmt.Errorf("%w: subscription %s not found for client %s", meshnode.ErrSubscriptionNotFound, subscriptionID, clientID)
-	}
-
-	delete(clientSubs, subscriptionID)
-
-	// Clean up empty client map
-	if len(clientSubs) == 0 {
-		delete(n.subscriptions, clientID)
-	}
-
-	return nil
-}
-
 func (n *GRPCMeshNode) removeSubscriptionMetadataByTopic(clientID, topic string) {
 	n.subscriptionsMu.Lock()
 	defer n.subscriptionsMu.Unlock()

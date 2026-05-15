@@ -65,7 +65,7 @@ func (log *PebbleEventLog) AppendEvent(ctx context.Context, topic string, event 
 	}
 
 	batch := log.db.NewBatch()
-	defer batch.Close()
+	defer func() { _ = batch.Close() }()
 
 	if err := batch.Set(pebbleEventKey(topic, nextOffset), encodedEvent, nil); err != nil {
 		return nil, fmt.Errorf("failed to stage event write: %w", err)
@@ -166,7 +166,7 @@ func (log *PebbleEventLog) ReplayEvents(ctx context.Context, topic string, start
 			errChan <- err
 			return
 		}
-		defer iter.Close()
+		defer func() { _ = iter.Close() }()
 
 		for ok := iter.SeekGE(pebbleEventKey(topic, uint64(startOffset))); ok; ok = iter.Next() {
 			if err := checkPebbleContext(ctx); err != nil {
@@ -230,7 +230,7 @@ func (log *PebbleEventLog) GetStatistics(ctx context.Context) (eventlog.EventLog
 	if err != nil {
 		return eventlog.EventLogStatistics{}, err
 	}
-	defer iter.Close()
+	defer func() { _ = iter.Close() }()
 
 	stats := eventlog.EventLogStatistics{
 		TopicCounts: make(map[string]int64),
@@ -290,7 +290,7 @@ func (log *PebbleEventLog) getTopicEndOffsetLocked(topic string) (uint64, error)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read topic end offset: %w", err)
 	}
-	defer closer.Close()
+	defer func() { _ = closer.Close() }()
 
 	if len(value) != 8 {
 		return 0, fmt.Errorf("invalid offset value length %d", len(value))
@@ -303,7 +303,7 @@ func (log *PebbleEventLog) readEventsLocked(ctx context.Context, topic string, s
 	if err != nil {
 		return nil, err
 	}
-	defer iter.Close()
+	defer func() { _ = iter.Close() }()
 
 	events := make([]*eventlog.Event, 0, maxCount)
 	for ok := iter.SeekGE(pebbleEventKey(topic, startOffset)); ok && len(events) < maxCount; ok = iter.Next() {

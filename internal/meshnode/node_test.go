@@ -116,7 +116,7 @@ func TestNewGRPCMeshNode_WithEventLogFactory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node with EventLog factory, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	if node.GetEventLog() != customLog {
 		t.Fatal("Expected mesh node to use EventLog returned by factory")
