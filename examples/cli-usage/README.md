@@ -1,6 +1,7 @@
 # CLI Usage Examples
 
-This directory contains scripts that exercise the `eventmesh-cli` binary.
+This directory contains a small script and copy/pasteable commands for the
+`eventmesh-cli` binary.
 
 From the repository root:
 
@@ -9,20 +10,19 @@ make build
 ./bin/eventmesh --http --no-auth --node-id cli-demo
 ```
 
-Then in this directory:
+Then in another terminal:
 
 ```bash
 cd examples/cli-usage
+./simple-publisher.sh
 ```
 
-## Scripts
+## Script
 
 - `simple-publisher.sh` publishes sample user, product, and system events.
-- `pattern-subscriber.sh` demonstrates wildcard subscriptions and streaming.
-- `order-workflow.sh` simulates a simple order-processing event flow.
 
-Some older references to additional scripts were removed; the list above is the
-current set in this directory.
+Larger workflow scripts were intentionally removed. They were useful demos, but
+became maintenance-heavy while the codebase is still evolving.
 
 ## Common Commands
 

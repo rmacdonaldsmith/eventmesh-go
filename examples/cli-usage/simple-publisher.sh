@@ -7,7 +7,6 @@ set -e
 
 # Configuration
 SERVER_URL=${SERVER_URL:-"http://localhost:8081"}
-CLIENT_ID="simple-publisher"
 
 # Colors
 GREEN='\033[0;32m'
@@ -22,11 +21,7 @@ echo -e "${BLUE}=================================${NC}"
 
 # Check server health
 echo -e "${GREEN}Checking server health...${NC}"
-"$CLI_BIN" health --server "$SERVER_URL" --client-id health-check
-
-# Authenticate
-echo -e "${GREEN}Authenticating publisher...${NC}"
-"$CLI_BIN" auth --server "$SERVER_URL" --client-id "$CLIENT_ID"
+"$CLI_BIN" --no-auth health --server "$SERVER_URL"
 
 echo -e "${GREEN}Publishing sample events...${NC}"
 
@@ -51,9 +46,8 @@ for event in "${events[@]}"; do
     IFS=':' read -r topic payload <<< "$event"
 
     echo -e "${YELLOW}Publishing: $topic${NC}"
-    "$CLI_BIN" publish \
+    "$CLI_BIN" --no-auth publish \
         --server "$SERVER_URL" \
-        --client-id "$CLIENT_ID" \
         --topic "$topic" \
         --payload "$payload"
 
@@ -70,5 +64,6 @@ done
 
 echo ""
 echo -e "${GREEN}Next steps:${NC}"
-echo -e "${YELLOW}• Run pattern-subscriber.sh to see wildcard subscriptions${NC}"
-echo -e "${YELLOW}• Try streaming events with: $CLI_BIN stream --server $SERVER_URL --client-id stream-client --topic \"*\"${NC}"
+echo -e "${YELLOW}• Inspect one topic: $CLI_BIN --no-auth topics info --server $SERVER_URL --topic user.registered${NC}"
+echo -e "${YELLOW}• Replay events: $CLI_BIN --no-auth replay --server $SERVER_URL --topic user.registered --offset 0${NC}"
+echo -e "${YELLOW}• Stream matching events: $CLI_BIN --no-auth stream --server $SERVER_URL --topic \"user.*\"${NC}"

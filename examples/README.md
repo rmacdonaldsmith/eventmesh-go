@@ -1,17 +1,22 @@
 # EventMesh Examples
 
-These examples are development demos for the current EventMesh implementation.
-They assume you have already run `make build` from the repository root.
+These examples are intentionally small development aids for the current
+EventMesh implementation. They assume you have already run `make build` from
+the repository root.
+
+The examples avoid large demo workflows because the API and mesh behavior are
+still evolving. Prefer copy/pasteable commands and short scripts that are easy
+to keep current.
 
 ## Recommended Path
 
-1. Start with [single-node](single-node/) to learn the CLI and API.
-2. Use [cli-usage](cli-usage/) for longer command workflows.
-3. Use [multi-node](multi-node/) to inspect peer discovery and mesh behavior.
+1. [single-node](single-node/) — start one local server and use core CLI commands.
+2. [cli-usage](cli-usage/) — publish a small batch of sample events.
+3. [multi-node](multi-node/) — manually start two nodes with static seed discovery.
 
 ## Development Mode
 
-Most scripts use `--no-auth` because they are demos. In no-auth mode:
+Most examples use `--no-auth` because they are demos. In no-auth mode:
 
 - non-admin routes accept a dummy token from the CLI
 - admin routes still require an admin JWT
@@ -42,14 +47,13 @@ replay.
 
 ### cli-usage
 
-Standalone scripts for common CLI workflows such as publishing event batches,
-creating wildcard subscriptions, and simulating business event flows.
+One short script for publishing sample events plus copy/pasteable CLI commands.
 
 ### multi-node
 
-Scripts for starting multiple local nodes with static seed discovery. This is
-useful for development and test inspection, but the multi-node behavior is still
-MVP-level and not a production deployment recipe.
+Manual two-node startup commands using static seed discovery. This is useful for
+inspection, but the mesh layer is still MVP-level and not a production
+deployment recipe.
 
 ## Topic Patterns
 
