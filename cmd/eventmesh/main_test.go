@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
+	"strings"
 	"testing"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/httpapi"
@@ -127,12 +128,54 @@ func TestHealthFlag(t *testing.T) {
 	}
 }
 
+func TestHealthStatus(t *testing.T) {
+	tests := []struct {
+		name    string
+		healthy bool
+		want    string
+	}{
+		{name: "healthy", healthy: true, want: "✅ Healthy"},
+		{name: "unhealthy", healthy: false, want: "❌ Unhealthy"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := healthStatus(tt.healthy); got != tt.want {
+				t.Fatalf("healthStatus(%v) = %q, want %q", tt.healthy, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatAddress(t *testing.T) {
+	tests := []struct {
+		name string
+		addr string
+		want string
+	}{
+		{name: "empty", addr: "", want: ""},
+		{name: "ipv6_unspecified", addr: "[::]:8081", want: "localhost:8081"},
+		{name: "ipv4", addr: "127.0.0.1:8081", want: "127.0.0.1:8081"},
+		{name: "hostname", addr: "node1:9090", want: "node1:9090"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatAddress(tt.addr); got != tt.want {
+				t.Fatalf("formatAddress(%q) = %q, want %q", tt.addr, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetDefaultNodeID(t *testing.T) {
+	nodeID := getDefaultNodeID()
+	if !strings.HasPrefix(nodeID, "eventmesh-") {
+		t.Fatalf("Expected default node ID to start with eventmesh-, got %q", nodeID)
+	}
+}
+
 // contains checks if s contains substr
 func contains(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, substr)
 }
