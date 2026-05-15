@@ -14,7 +14,7 @@ func TestNewGRPCMeshNode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	// Verify the node was created with correct configuration
 	if node.config.NodeID != "test-node" {
@@ -88,7 +88,7 @@ func TestNewGRPCMeshNode_WithPeerLinkConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node with PeerLink config, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	// Verify the PeerLink was created with custom config
 	if node.dataPlanePeerLink == nil {
@@ -109,7 +109,7 @@ func TestGRPCMeshNode_InterfaceCompliance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -149,7 +149,7 @@ func TestGRPCMeshNode_InvalidRequests(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -178,7 +178,7 @@ func TestGRPCMeshNode_AuthenticateClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -255,7 +255,9 @@ func TestGRPCMeshNode_AuthenticateClient(t *testing.T) {
 	}
 
 	// Test authentication on closed node
-	node.Close()
+	if err := node.Close(); err != nil {
+		t.Fatalf("Failed to close node: %v", err)
+	}
 	_, err = node.AuthenticateClient(ctx, "client-3")
 	if err == nil {
 		t.Error("Expected error for authentication on closed node")
@@ -275,7 +277,7 @@ func TestGRPCMeshNode_StartWithBootstrapDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -307,7 +309,7 @@ func TestGRPCMeshNode_StartWithoutBootstrapConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 

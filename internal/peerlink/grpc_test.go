@@ -94,7 +94,7 @@ func TestGRPCPeerLink_StartStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating GRPCPeerLink, got: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -124,7 +124,7 @@ func TestGRPCPeerLink_StartStopMultiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating GRPCPeerLink, got: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -182,7 +182,7 @@ func TestGRPCPeerLink_ConnectGetPeers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating GRPCPeerLink, got: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -249,7 +249,7 @@ func TestGRPCPeerLink_SendEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating GRPCPeerLink, got: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -291,7 +291,7 @@ func TestGRPCPeerLink_ReceiveEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating GRPCPeerLink, got: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -333,7 +333,7 @@ func TestGRPCPeerLink_BoundedQueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating GRPCPeerLink, got: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -404,7 +404,7 @@ func TestGRPCPeerLink_HealthState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating GRPCPeerLink, got: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -731,7 +731,7 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create GRPCPeerLink: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -741,7 +741,7 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start PeerLink: %v", err)
 	}
-	defer peerLink.Stop(ctx)
+	defer func() { _ = peerLink.Stop(ctx) }()
 
 	// Register a test peer manually to create the send queue (avoid actual network connection)
 	peerLink.mu.Lock()
@@ -766,7 +766,7 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create gRPC client: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := peerlinkv1.NewPeerLinkClient(conn)
 
@@ -774,7 +774,7 @@ func TestGRPCPeerLink_EventStreamBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create EventStream: %v", err)
 	}
-	defer stream.CloseSend()
+	defer func() { _ = stream.CloseSend() }()
 
 	// Send a handshake message
 	handshake := &peerlinkv1.PeerMessage{
@@ -868,7 +868,7 @@ func TestGRPCPeerLink_EventStreamHandshakeValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create GRPCPeerLink: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -878,14 +878,14 @@ func TestGRPCPeerLink_EventStreamHandshakeValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start PeerLink: %v", err)
 	}
-	defer peerLink.Stop(ctx)
+	defer func() { _ = peerLink.Stop(ctx) }()
 
 	// Create gRPC client
 	conn, err := grpc.NewClient(peerLink.listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC client: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := peerlinkv1.NewPeerLinkClient(conn)
 
@@ -894,7 +894,7 @@ func TestGRPCPeerLink_EventStreamHandshakeValidation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create EventStream: %v", err)
 		}
-		defer stream.CloseSend()
+		defer func() { _ = stream.CloseSend() }()
 
 		// Send non-handshake message first
 		eventMsg := &peerlinkv1.PeerMessage{
@@ -926,7 +926,7 @@ func TestGRPCPeerLink_EventStreamHandshakeValidation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to create EventStream: %v", err)
 		}
-		defer stream.CloseSend()
+		defer func() { _ = stream.CloseSend() }()
 
 		// Send handshake with empty node ID
 		handshake := &peerlinkv1.PeerMessage{
@@ -965,7 +965,7 @@ func TestGRPCPeerLink_EventStreamContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create GRPCPeerLink: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	// Use a short-lived context that we can cancel
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -976,14 +976,14 @@ func TestGRPCPeerLink_EventStreamContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start PeerLink: %v", err)
 	}
-	defer peerLink.Stop(ctx)
+	defer func() { _ = peerLink.Stop(ctx) }()
 
 	// Create gRPC client
 	conn, err := grpc.NewClient(peerLink.listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC client: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client := peerlinkv1.NewPeerLinkClient(conn)
 
@@ -992,7 +992,7 @@ func TestGRPCPeerLink_EventStreamContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create EventStream: %v", err)
 	}
-	defer stream.CloseSend()
+	defer func() { _ = stream.CloseSend() }()
 
 	// Send handshake
 	handshake := &peerlinkv1.PeerMessage{
@@ -1044,7 +1044,7 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create sender PeerLink: %v", err)
 	}
-	defer sender.Close()
+	defer func() { _ = sender.Close() }()
 
 	// Create receiver PeerLink
 	receiverConfig := &Config{
@@ -1055,7 +1055,7 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create receiver PeerLink: %v", err)
 	}
-	defer receiver.Close()
+	defer func() { _ = receiver.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -1065,13 +1065,13 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start sender: %v", err)
 	}
-	defer sender.Stop(ctx)
+	defer func() { _ = sender.Stop(ctx) }()
 
 	err = receiver.Start(ctx)
 	if err != nil {
 		t.Fatalf("Failed to start receiver: %v", err)
 	}
-	defer receiver.Stop(ctx)
+	defer func() { _ = receiver.Stop(ctx) }()
 
 	// Set up receiver to listen for events
 	eventChan, errChan := receiver.ReceiveEvents(ctx)
@@ -1126,15 +1126,16 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 				eventsReceived, expectedEvents, receivedEvent.Topic, string(receivedEvent.Payload))
 
 			// Verify the specific events
-			if receivedEvent.Topic == "test-topic" {
+			switch receivedEvent.Topic {
+			case "test-topic":
 				if string(receivedEvent.Payload) != "hello from sender" {
 					t.Errorf("Expected regular event payload 'hello from sender', got '%s'", string(receivedEvent.Payload))
 				}
-			} else if receivedEvent.Topic == "__mesh.subscription.subscribe" {
+			case "__mesh.subscription.subscribe":
 				if !strings.Contains(string(receivedEvent.Payload), "test-client") {
 					t.Errorf("Expected subscription event to contain 'test-client', got '%s'", string(receivedEvent.Payload))
 				}
-			} else {
+			default:
 				t.Errorf("Unexpected event topic: %s", receivedEvent.Topic)
 			}
 
@@ -1161,7 +1162,7 @@ func TestGRPCPeerLink_SimultaneousBidirectionalConnections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create node A: %v", err)
 	}
-	defer nodeA.Close()
+	defer func() { _ = nodeA.Close() }()
 
 	nodeBConfig := &Config{
 		NodeID:        "node-B",
@@ -1171,7 +1172,7 @@ func TestGRPCPeerLink_SimultaneousBidirectionalConnections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create node B: %v", err)
 	}
-	defer nodeB.Close()
+	defer func() { _ = nodeB.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1181,13 +1182,13 @@ func TestGRPCPeerLink_SimultaneousBidirectionalConnections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to start node A: %v", err)
 	}
-	defer nodeA.Stop(ctx)
+	defer func() { _ = nodeA.Stop(ctx) }()
 
 	err = nodeB.Start(ctx)
 	if err != nil {
 		t.Fatalf("Failed to start node B: %v", err)
 	}
-	defer nodeB.Stop(ctx)
+	defer func() { _ = nodeB.Stop(ctx) }()
 
 	// Set up receivers for both nodes BEFORE establishing connections (like MeshNode does)
 	nodeAEventChan, nodeAErrChan := nodeA.ReceiveEvents(ctx)

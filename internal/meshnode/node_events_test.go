@@ -19,7 +19,7 @@ func TestGRPCMeshNode_PublishEvent_LocalPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -74,7 +74,7 @@ func TestGRPCMeshNode_PublishEvent_Multiple(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -123,7 +123,7 @@ func TestGRPCMeshNode_PublishEvent_NilClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -146,7 +146,7 @@ func TestGRPCMeshNode_PublishEvent_NilEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -169,7 +169,7 @@ func TestGRPCMeshNode_LocalSubscriberDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -219,7 +219,7 @@ func TestGRPCMeshNode_MultipleLocalSubscribers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -277,7 +277,7 @@ func TestGRPCMeshNode_PublishFlow_Complete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -361,7 +361,7 @@ func TestGRPCMeshNode_PublishFlow_ErrorHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -398,7 +398,7 @@ func TestGRPCMeshNode_PersistenceBeforeForwarding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -454,7 +454,7 @@ func TestGRPCMeshNode_Unsubscribe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -519,7 +519,7 @@ func TestGRPCMeshNode_Unsubscribe_ErrorHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -569,7 +569,7 @@ func TestGRPCMeshNode_SubscriptionPropagation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -627,7 +627,7 @@ func TestGRPCMeshNode_IncomingEventHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -688,7 +688,7 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -726,7 +726,7 @@ func TestGRPCMeshNode_GetInterestedPeersMatchesWildcardSubscriptions(t *testing.
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -762,7 +762,7 @@ func TestGRPCMeshNode_GetInterestedPeersWildcardDoesNotMatchDifferentDepth(t *te
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -788,7 +788,7 @@ func TestGRPCMeshNode_GetInterestedPeersWildcardUnsubscribeRemovesInterest(t *te
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -834,8 +834,7 @@ func (c *failingClient) DeliverEvent(event *eventlog.Event) error {
 	if c.shouldFail {
 		return fmt.Errorf("delivery failed: %s", c.failureMessage)
 	}
-	c.TrustedClient.DeliverEvent(event)
-	return nil
+	return c.TrustedClient.DeliverEvent(event)
 }
 
 // TestGRPCMeshNode_PublishEvent_DeliveryErrors tests error handling in local subscriber delivery
@@ -845,7 +844,7 @@ func TestGRPCMeshNode_PublishEvent_DeliveryErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)
@@ -914,7 +913,7 @@ func TestGRPCMeshNode_PublishEvent_ContextCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	backgroundCtx := context.Background()
 	err = node.Start(backgroundCtx)
@@ -955,7 +954,7 @@ func TestGRPCMeshNode_PublishEvent_EventValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	err = node.Start(ctx)

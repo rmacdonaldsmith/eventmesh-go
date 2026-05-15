@@ -21,7 +21,7 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create server PeerLink: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	ctx := context.Background()
 
@@ -40,14 +40,14 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Create gRPC connection to server
 	conn, err := grpc.NewClient(server.GetListeningAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Set up client state
 	client.mu.Lock()
@@ -78,7 +78,7 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_Success(t *testing.T) {
 	t.Log("✅ establishStreamWithHandshake succeeded and peer marked as healthy")
 
 	// Clean up stream
-	stream.CloseSend()
+	_ = stream.CloseSend()
 }
 
 // TestGRPCPeerLink_EstablishStreamWithHandshake_ConnectionFailure tests connection failure handling
@@ -91,14 +91,14 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_ConnectionFailure(t *testing.
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Try to connect to a non-existent server
 	conn, err := grpc.NewClient("localhost:99999", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Set up client state
 	client.mu.Lock()
@@ -115,7 +115,7 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_ConnectionFailure(t *testing.
 	}
 	if stream != nil {
 		t.Errorf("Expected nil stream on failure, got non-nil stream")
-		stream.CloseSend()
+		_ = stream.CloseSend()
 	}
 
 	t.Log("✅ establishStreamWithHandshake correctly failed on connection error")
@@ -131,14 +131,14 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_HandshakeFailure(t *testing.T
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Create connection to invalid address (will cause dial errors)
 	conn, err := grpc.NewClient("127.0.0.1:1", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Set up client state
 	client.mu.Lock()
@@ -155,7 +155,7 @@ func TestGRPCPeerLink_EstablishStreamWithHandshake_HandshakeFailure(t *testing.T
 	}
 	if stream != nil {
 		t.Errorf("Expected nil stream on handshake failure, got non-nil stream")
-		stream.CloseSend()
+		_ = stream.CloseSend()
 	}
 
 	t.Log("✅ establishStreamWithHandshake correctly failed on handshake error")

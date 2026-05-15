@@ -11,7 +11,7 @@ import (
 
 func TestGRPCPeerLink_ControlMessagesAreNotBlockedByFullDataQueue(t *testing.T) {
 	peerLink := newQueueTestPeerLink(t)
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx := context.Background()
 	if err := peerLink.SendEvent(ctx, "peer-1", eventlog.NewEvent("data.one", []byte("one"))); err != nil {
@@ -35,7 +35,7 @@ func TestGRPCPeerLink_ControlMessagesAreNotBlockedByFullDataQueue(t *testing.T) 
 
 func TestGRPCPeerLink_HeartbeatIsNotBlockedByFullDataQueue(t *testing.T) {
 	peerLink := newQueueTestPeerLink(t)
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx := context.Background()
 	if err := peerLink.SendEvent(ctx, "peer-1", eventlog.NewEvent("data.one", []byte("one"))); err != nil {
@@ -49,7 +49,7 @@ func TestGRPCPeerLink_HeartbeatIsNotBlockedByFullDataQueue(t *testing.T) {
 
 func TestGRPCPeerLink_ControlQueueIsSelectedBeforeDataQueue(t *testing.T) {
 	peerLink := newQueueTestPeerLink(t)
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx := context.Background()
 	if err := peerLink.SendEvent(ctx, "peer-1", eventlog.NewEvent("data.one", []byte("one"))); err != nil {

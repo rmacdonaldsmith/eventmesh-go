@@ -10,8 +10,8 @@ import (
 
 func TestGRPCPeerLink_SendHeartbeatMarksReceiverHealthy(t *testing.T) {
 	server, client := newConnectedHeartbeatPeerLinks(t, 5*time.Second)
-	defer server.Close()
-	defer client.Close()
+	defer func() { _ = server.Close() }()
+	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -29,8 +29,8 @@ func TestGRPCPeerLink_SendHeartbeatMarksReceiverHealthy(t *testing.T) {
 
 func TestGRPCPeerLink_StartHeartbeatsSendsPeriodicHeartbeats(t *testing.T) {
 	server, client := newConnectedHeartbeatPeerLinks(t, 20*time.Millisecond)
-	defer server.Close()
-	defer client.Close()
+	defer func() { _ = server.Close() }()
+	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -42,7 +42,7 @@ func TestGRPCPeerLink_StartHeartbeatsSendsPeriodicHeartbeats(t *testing.T) {
 	if err := client.StartHeartbeats(ctx); err != nil {
 		t.Fatalf("StartHeartbeats failed: %v", err)
 	}
-	defer client.StopHeartbeats(context.Background())
+	defer func() { _ = client.StopHeartbeats(context.Background()) }()
 
 	waitForPeerHealth(t, ctx, server, "client-node", peerlink.PeerHealthy)
 
@@ -68,7 +68,7 @@ func TestGRPCPeerLink_StartHeartbeatsMarksSilentPeerUnhealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create PeerLink: %v", err)
 	}
-	defer peerLink.Close()
+	defer func() { _ = peerLink.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -85,15 +85,15 @@ func TestGRPCPeerLink_StartHeartbeatsMarksSilentPeerUnhealthy(t *testing.T) {
 	if err := peerLink.StartHeartbeats(ctx); err != nil {
 		t.Fatalf("StartHeartbeats failed: %v", err)
 	}
-	defer peerLink.StopHeartbeats(context.Background())
+	defer func() { _ = peerLink.StopHeartbeats(context.Background()) }()
 
 	waitForPeerHealth(t, ctx, peerLink, "silent-peer", peerlink.PeerUnhealthy)
 }
 
 func TestGRPCPeerLink_HeartbeatRecoveryResetsHealthCounters(t *testing.T) {
 	server, client := newConnectedHeartbeatPeerLinks(t, 5*time.Second)
-	defer server.Close()
-	defer client.Close()
+	defer func() { _ = server.Close() }()
+	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -146,7 +146,7 @@ func newConnectedHeartbeatPeerLinks(t *testing.T, heartbeatInterval time.Duratio
 		HeartbeatInterval: heartbeatInterval,
 	})
 	if err != nil {
-		server.Close()
+		_ = server.Close()
 		t.Fatalf("failed to create client PeerLink: %v", err)
 	}
 
@@ -154,13 +154,13 @@ func newConnectedHeartbeatPeerLinks(t *testing.T, heartbeatInterval time.Duratio
 	t.Cleanup(cancel)
 
 	if err := server.Start(ctx); err != nil {
-		client.Close()
-		server.Close()
+		_ = client.Close()
+		_ = server.Close()
 		t.Fatalf("failed to start server PeerLink: %v", err)
 	}
 	if err := client.Start(ctx); err != nil {
-		client.Close()
-		server.Close()
+		_ = client.Close()
+		_ = server.Close()
 		t.Fatalf("failed to start client PeerLink: %v", err)
 	}
 
@@ -169,8 +169,8 @@ func newConnectedHeartbeatPeerLinks(t *testing.T, heartbeatInterval time.Duratio
 		address: server.GetListeningAddress(),
 		healthy: true,
 	}); err != nil {
-		client.Close()
-		server.Close()
+		_ = client.Close()
+		_ = server.Close()
 		t.Fatalf("failed to connect client to server: %v", err)
 	}
 

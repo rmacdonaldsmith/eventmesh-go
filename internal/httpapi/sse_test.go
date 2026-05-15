@@ -22,7 +22,7 @@ func TestStreamEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create mesh node: %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	// Start the mesh node
 	ctx := context.Background()

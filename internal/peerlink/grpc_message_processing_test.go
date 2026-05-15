@@ -22,7 +22,7 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create server PeerLink: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	clientConfig := &Config{
 		NodeID:        "client-node",
@@ -32,7 +32,7 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 
@@ -56,7 +56,7 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create gRPC connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client.mu.Lock()
 	client.registerPeer("server-node")
@@ -70,7 +70,7 @@ func TestGRPCPeerLink_StartReceiveGoroutine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to establish stream: %v", err)
 	}
-	defer stream.CloseSend()
+	defer func() { _ = stream.CloseSend() }()
 
 	recvDone := client.startReceiveGoroutine(testCtx, "server-node", stream)
 
@@ -118,7 +118,7 @@ func TestGRPCPeerLink_ProcessOutboundMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Create a test message
 	testEvent := eventlog.NewEvent("test-topic", []byte("test payload"))
@@ -148,7 +148,7 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Set up client state
 	client.mu.Lock()
@@ -214,6 +214,7 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 
 	// Test drops counter increase when queue is full
 	// Fill the queue first
+fillQueue:
 	for i := 0; i < 10; i++ {
 		dummyEvent := eventlog.NewEvent("dummy", []byte("dummy"))
 		dummyMsg := &DataPlaneMessage{
@@ -225,7 +226,7 @@ func TestGRPCPeerLink_HandleSendFailure(t *testing.T) {
 		case sendQueue <- dummyMsg:
 			// Successfully queued
 		default:
-			break // Queue full
+			break fillQueue // Queue full
 		}
 	}
 

@@ -11,7 +11,7 @@ import (
 
 func TestInMemoryRoutingTable_Subscribe(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	subscriber := routingtable.NewLocalSubscriber("client-1")
@@ -37,7 +37,7 @@ func TestInMemoryRoutingTable_Subscribe(t *testing.T) {
 
 func TestInMemoryRoutingTable_Subscribe_NilSubscriber(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	err := rt.Subscribe(ctx, "orders.created", nil)
@@ -48,7 +48,7 @@ func TestInMemoryRoutingTable_Subscribe_NilSubscriber(t *testing.T) {
 
 func TestInMemoryRoutingTable_Subscribe_EmptyTopic(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	subscriber := routingtable.NewLocalSubscriber("client-1")
@@ -61,7 +61,7 @@ func TestInMemoryRoutingTable_Subscribe_EmptyTopic(t *testing.T) {
 
 func TestInMemoryRoutingTable_Unsubscribe(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	subscriber := routingtable.NewLocalSubscriber("client-1")
@@ -91,7 +91,7 @@ func TestInMemoryRoutingTable_Unsubscribe(t *testing.T) {
 
 func TestInMemoryRoutingTable_GetSubscribers_NoMatch(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	subscribers, err := rt.GetSubscribers(ctx, "non.existent.topic")
@@ -106,7 +106,7 @@ func TestInMemoryRoutingTable_GetSubscribers_NoMatch(t *testing.T) {
 
 func TestInMemoryRoutingTable_MultipleSubscribers(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	local1 := routingtable.NewLocalSubscriber("client-1")
@@ -154,7 +154,7 @@ func TestInMemoryRoutingTable_MultipleSubscribers(t *testing.T) {
 
 func TestInMemoryRoutingTable_ConcurrentAccess(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	var wg sync.WaitGroup

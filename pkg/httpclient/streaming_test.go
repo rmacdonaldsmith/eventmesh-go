@@ -174,11 +174,11 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 			otherEventJSON, err := json.Marshal(otherEvent)
 			require.NoError(t, err)
 
-			fmt.Fprintf(w, "data: %s\n\n", string(otherEventJSON))
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", string(otherEventJSON))
 			flusher.Flush()
 
 			// Send SSE formatted data
-			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 			flusher.Flush()
 
 			select {
@@ -207,7 +207,7 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 		}
 		streamClient, err := client.Stream(ctx, streamConfig)
 		require.NoError(t, err)
-		defer streamClient.Close()
+		defer func() { _ = streamClient.Close() }()
 
 		// Should receive the event
 		select {
@@ -232,7 +232,7 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 			flusher := w.(http.Flusher)
 
 			// Send keepalive comment (should be ignored)
-			fmt.Fprintf(w, ": keepalive\n\n")
+			_, _ = fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
 
 			// Send actual event
@@ -241,7 +241,7 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 				Topic:   "test.keepalive",
 			}
 			eventJSON, _ := json.Marshal(event)
-			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 			flusher.Flush()
 
 			select {
@@ -264,7 +264,7 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 
 		streamClient, err := client.Stream(ctx, StreamConfig{})
 		require.NoError(t, err)
-		defer streamClient.Close()
+		defer func() { _ = streamClient.Close() }()
 
 		// Should receive the actual event, not the keepalive
 		select {
@@ -285,13 +285,13 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 			flusher := w.(http.Flusher)
 
 			// Send malformed JSON
-			fmt.Fprintf(w, "data: {invalid json}\n\n")
+			_, _ = fmt.Fprintf(w, "data: {invalid json}\n\n")
 			flusher.Flush()
 
 			// Send valid JSON after
 			event := EventStreamMessage{EventID: "valid-event"}
 			eventJSON, _ := json.Marshal(event)
-			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 			flusher.Flush()
 
 			select {
@@ -314,7 +314,7 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 
 		streamClient, err := client.Stream(ctx, StreamConfig{})
 		require.NoError(t, err)
-		defer streamClient.Close()
+		defer func() { _ = streamClient.Close() }()
 
 		// Should receive error for malformed JSON
 		select {
@@ -337,7 +337,7 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 		// Create mock server that returns HTTP error
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("Unauthorized"))
+			_, _ = w.Write([]byte("Unauthorized"))
 		}))
 		defer server.Close()
 
@@ -354,7 +354,7 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 
 		streamClient, err := client.Stream(ctx, StreamConfig{})
 		require.NoError(t, err)
-		defer streamClient.Close()
+		defer func() { _ = streamClient.Close() }()
 
 		// Should receive HTTP error
 		select {
@@ -388,7 +388,7 @@ func TestStreamClient_Reconnection(t *testing.T) {
 			for _, eventID := range eventsToSend {
 				event := EventStreamMessage{EventID: eventID}
 				eventJSON, _ := json.Marshal(event)
-				fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 				flusher.Flush()
 			}
 		}))
@@ -411,7 +411,7 @@ func TestStreamClient_Reconnection(t *testing.T) {
 		}
 		streamClient, err := client.Stream(ctx, streamConfig)
 		require.NoError(t, err)
-		defer streamClient.Close()
+		defer func() { _ = streamClient.Close() }()
 
 		// Should receive error from first failed connection
 		select {
@@ -467,7 +467,7 @@ func TestStreamClient_Reconnection(t *testing.T) {
 		}
 		streamClient, err := client.Stream(ctx, streamConfig)
 		require.NoError(t, err)
-		defer streamClient.Close()
+		defer func() { _ = streamClient.Close() }()
 
 		// Should receive multiple errors during reconnection attempts
 		errorCount := 0
@@ -515,7 +515,7 @@ func TestStreamClient_Lifecycle(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			flusher := w.(http.Flusher)
 
-			fmt.Fprintf(w, ": keepalive\n\n")
+			_, _ = fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
 			<-r.Context().Done()
 		}))
@@ -565,7 +565,7 @@ func TestStreamClient_Lifecycle(t *testing.T) {
 
 			event := EventStreamMessage{EventID: "shutdown-test-0"}
 			eventJSON, _ := json.Marshal(event)
-			fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 			flusher.Flush()
 			<-r.Context().Done()
 		}))
@@ -615,7 +615,7 @@ func TestStreamClient_EventChannelBuffering(t *testing.T) {
 			for i := 0; i < 10; i++ {
 				event := EventStreamMessage{EventID: fmt.Sprintf("overflow-event-%d", i)}
 				eventJSON, _ := json.Marshal(event)
-				fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", string(eventJSON))
 				flusher.Flush()
 			}
 
@@ -642,7 +642,7 @@ func TestStreamClient_EventChannelBuffering(t *testing.T) {
 		}
 		streamClient, err := client.Stream(ctx, streamConfig)
 		require.NoError(t, err)
-		defer streamClient.Close()
+		defer func() { _ = streamClient.Close() }()
 
 		// Read events slowly to test buffer behavior
 		receivedEvents := 0

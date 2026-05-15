@@ -21,7 +21,7 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_ContextCancellation(t *testing.
 	if err != nil {
 		t.Fatalf("Failed to create server PeerLink: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	clientConfig := &Config{
 		NodeID:        "client-node",
@@ -31,7 +31,7 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_ContextCancellation(t *testing.
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 
@@ -51,7 +51,7 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_ContextCancellation(t *testing.
 	if err != nil {
 		t.Fatalf("Failed to create gRPC connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client.mu.Lock()
 	client.registerPeer("server-node")
@@ -66,7 +66,7 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_ContextCancellation(t *testing.
 	if err != nil {
 		t.Fatalf("Failed to establish stream: %v", err)
 	}
-	defer stream.CloseSend()
+	defer func() { _ = stream.CloseSend() }()
 
 	result := make(chan bool, 1)
 	go func() {
@@ -99,7 +99,7 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create server PeerLink: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	clientConfig := &Config{
 		NodeID:        "client-node",
@@ -109,7 +109,7 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 
@@ -133,7 +133,7 @@ func TestGRPCPeerLink_RunBidirectionalStreamLoop_SendReceive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create gRPC connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	client.mu.Lock()
 	client.registerPeer("server-node")
@@ -222,7 +222,7 @@ func TestGRPCPeerLink_GetSendQueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Set up peer
 	client.mu.Lock()

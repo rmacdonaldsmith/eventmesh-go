@@ -42,8 +42,8 @@ func TestSingleNodeIntegration(t *testing.T) {
 	}
 	defer func() {
 		if serverCmd.Process != nil {
-			serverCmd.Process.Kill()
-			serverCmd.Wait()
+			_ = serverCmd.Process.Kill()
+			_ = serverCmd.Wait()
 		}
 	}()
 
@@ -84,8 +84,8 @@ func TestSingleNodeNoAuthIntegration(t *testing.T) {
 	}
 	defer func() {
 		if serverCmd.Process != nil {
-			serverCmd.Process.Kill()
-			serverCmd.Wait()
+			_ = serverCmd.Process.Kill()
+			_ = serverCmd.Wait()
 		}
 	}()
 
@@ -159,7 +159,7 @@ func waitForServerReady(serverURL string, timeout time.Duration) error {
 	for {
 		resp, err := client.Get(serverURL + "/api/v1/health")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return nil
 			}

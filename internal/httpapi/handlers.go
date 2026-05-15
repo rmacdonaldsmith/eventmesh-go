@@ -142,7 +142,9 @@ func (h *Handlers) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode auth response", "error", err)
+	}
 }
 
 // Event endpoints
@@ -368,13 +370,15 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 	// or if this is a test environment
 	if shouldStream {
 		// Send connection established message
-		w.Write([]byte(": SSE connection established for all topics\n\n"))
+		if _, err := w.Write([]byte(": SSE connection established for all topics\n\n")); err != nil {
+			return
+		}
 
 		// Start streaming with keepalive
 		h.streamWithKeepalive(w, r, client)
 	} else {
 		// For non-streaming clients, just send connection message
-		w.Write([]byte(": SSE connection established for all topics\n\n"))
+		_, _ = w.Write([]byte(": SSE connection established for all topics\n\n"))
 	}
 }
 
@@ -510,7 +514,9 @@ func (h *Handlers) CreateSubscription(w http.ResponseWriter, r *http.Request) {
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		slog.Error("failed to encode subscription response", "error", err)
+	}
 }
 
 // GetSubscriptions handles GET /api/v1/subscriptions
@@ -549,7 +555,9 @@ func (h *Handlers) GetSubscriptions(w http.ResponseWriter, r *http.Request) {
 	// Return success response
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		slog.Error("failed to encode subscriptions response", "error", err)
+	}
 }
 
 // DeleteSubscription handles DELETE /api/v1/subscriptions/{id}
@@ -781,7 +789,9 @@ func (h *Handlers) Health(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		slog.Error("failed to encode health response", "error", err)
+	}
 }
 
 // Helper methods

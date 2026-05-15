@@ -11,7 +11,7 @@ import (
 
 func TestInMemoryRoutingTable_ContextCancellation(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	subscriber := routingtable.NewLocalSubscriber("client-1")
 
@@ -43,7 +43,7 @@ func TestInMemoryRoutingTable_ContextCancellation(t *testing.T) {
 
 func TestInMemoryRoutingTable_ContextTimeout(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	subscriber := routingtable.NewLocalSubscriber("client-1")
 
@@ -70,7 +70,7 @@ func TestInMemoryRoutingTable_ContextTimeout(t *testing.T) {
 
 func TestInMemoryRoutingTable_ContextDeadline(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	subscriber := routingtable.NewLocalSubscriber("client-1")
 
@@ -98,7 +98,7 @@ func TestInMemoryRoutingTable_ContextDeadline(t *testing.T) {
 
 func TestInMemoryRoutingTable_LongRunningOperationWithCancellation(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -157,7 +157,7 @@ func TestInMemoryRoutingTable_LongRunningOperationWithCancellation(t *testing.T)
 // TestInMemoryRoutingTable_ContextValues tests that operations work with context values
 func TestInMemoryRoutingTable_ContextValues(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 
 	// Create a context with some values
 	type contextKey string

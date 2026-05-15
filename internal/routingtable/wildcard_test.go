@@ -12,7 +12,7 @@ import (
 func TestInMemoryRoutingTable_WildcardMatching(t *testing.T) {
 
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	subscriber := routingtable.NewLocalSubscriber("client-1")
@@ -55,7 +55,7 @@ func TestInMemoryRoutingTable_WildcardMatching(t *testing.T) {
 func TestInMemoryRoutingTable_WildcardPrecedence(t *testing.T) {
 
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	wildcardSub := routingtable.NewLocalSubscriber("wildcard-client")
@@ -107,7 +107,7 @@ func TestInMemoryRoutingTable_WildcardPrecedence(t *testing.T) {
 func TestInMemoryRoutingTable_ComplexWildcardPatterns(t *testing.T) {
 
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	subscriber := routingtable.NewLocalSubscriber("client-1")

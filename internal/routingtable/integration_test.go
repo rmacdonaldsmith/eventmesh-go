@@ -9,7 +9,7 @@ import (
 
 func TestInMemoryRoutingTable_GetAllSubscriptions(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	// Add some subscriptions
@@ -17,10 +17,10 @@ func TestInMemoryRoutingTable_GetAllSubscriptions(t *testing.T) {
 	local2 := routingtable.NewLocalSubscriber("client-2")
 	peer1 := routingtable.NewPeerSubscriber("node-1")
 
-	rt.Subscribe(ctx, "orders.created", local1)
-	rt.Subscribe(ctx, "orders.updated", local1)
-	rt.Subscribe(ctx, "orders.created", local2)
-	rt.Subscribe(ctx, "inventory.updated", peer1)
+	_ = rt.Subscribe(ctx, "orders.created", local1)
+	_ = rt.Subscribe(ctx, "orders.updated", local1)
+	_ = rt.Subscribe(ctx, "orders.created", local2)
+	_ = rt.Subscribe(ctx, "inventory.updated", peer1)
 
 	subscriptions, err := rt.GetAllSubscriptions(ctx)
 	if err != nil {
@@ -50,12 +50,12 @@ func TestInMemoryRoutingTable_GetAllSubscriptions(t *testing.T) {
 
 func TestInMemoryRoutingTable_RebuildFromGossip(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	// Add initial subscriptions
 	local1 := routingtable.NewLocalSubscriber("client-1")
-	rt.Subscribe(ctx, "orders.created", local1)
+	_ = rt.Subscribe(ctx, "orders.created", local1)
 
 	// Verify initial state
 	count, err := rt.GetTopicCount(ctx)
@@ -110,7 +110,7 @@ func TestInMemoryRoutingTable_RebuildFromGossip(t *testing.T) {
 
 func TestInMemoryRoutingTable_GetTopicCount(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	// Initially empty
@@ -126,9 +126,9 @@ func TestInMemoryRoutingTable_GetTopicCount(t *testing.T) {
 	local1 := routingtable.NewLocalSubscriber("client-1")
 	local2 := routingtable.NewLocalSubscriber("client-2")
 
-	rt.Subscribe(ctx, "orders.created", local1)
-	rt.Subscribe(ctx, "orders.created", local2)    // Same topic
-	rt.Subscribe(ctx, "inventory.updated", local1) // Different topic
+	_ = rt.Subscribe(ctx, "orders.created", local1)
+	_ = rt.Subscribe(ctx, "orders.created", local2)    // Same topic
+	_ = rt.Subscribe(ctx, "inventory.updated", local1) // Different topic
 
 	count, err = rt.GetTopicCount(ctx)
 	if err != nil {
@@ -141,7 +141,7 @@ func TestInMemoryRoutingTable_GetTopicCount(t *testing.T) {
 
 func TestInMemoryRoutingTable_GetSubscriberCount(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	// Initially empty
@@ -158,10 +158,10 @@ func TestInMemoryRoutingTable_GetSubscriberCount(t *testing.T) {
 	local2 := routingtable.NewLocalSubscriber("client-2")
 	peer1 := routingtable.NewPeerSubscriber("node-1")
 
-	rt.Subscribe(ctx, "orders.created", local1)
-	rt.Subscribe(ctx, "orders.created", local2)
-	rt.Subscribe(ctx, "inventory.updated", local1) // Same subscriber, different topic
-	rt.Subscribe(ctx, "user.created", peer1)
+	_ = rt.Subscribe(ctx, "orders.created", local1)
+	_ = rt.Subscribe(ctx, "orders.created", local2)
+	_ = rt.Subscribe(ctx, "inventory.updated", local1) // Same subscriber, different topic
+	_ = rt.Subscribe(ctx, "user.created", peer1)
 
 	count, err = rt.GetSubscriberCount(ctx)
 	if err != nil {
@@ -172,7 +172,7 @@ func TestInMemoryRoutingTable_GetSubscriberCount(t *testing.T) {
 	}
 
 	// Unsubscribe one and verify count decreases
-	rt.Unsubscribe(ctx, "orders.created", "client-1")
+	_ = rt.Unsubscribe(ctx, "orders.created", "client-1")
 
 	count, err = rt.GetSubscriberCount(ctx)
 	if err != nil {
@@ -190,7 +190,7 @@ func TestInMemoryRoutingTable_InterfaceCompliance(t *testing.T) {
 
 func TestInMemoryRoutingTable_DuplicateSubscriptions(t *testing.T) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	subscriber := routingtable.NewLocalSubscriber("client-1")

@@ -21,7 +21,7 @@ func TestGRPCPeerLink_AttemptStreamConnection_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create server PeerLink: %v", err)
 	}
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 
 	ctx := context.Background()
 
@@ -40,14 +40,14 @@ func TestGRPCPeerLink_AttemptStreamConnection_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Create gRPC connection to server
 	conn, err := grpc.NewClient(server.GetListeningAddress(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("Failed to create gRPC connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Test attemptStreamConnection with a short-lived context
 	testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -89,7 +89,7 @@ func TestGRPCPeerLink_AttemptStreamConnection_HandshakeFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create client PeerLink: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -99,7 +99,7 @@ func TestGRPCPeerLink_AttemptStreamConnection_HandshakeFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create gRPC connection: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Set up client state
 	client.mu.Lock()

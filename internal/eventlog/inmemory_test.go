@@ -10,7 +10,7 @@ import (
 // TestEventLog_AppendEvent tests appending events to specific topics
 func TestEventLog_AppendEvent(t *testing.T) {
 	log := NewInMemoryEventLog()
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 
 	ctx := context.Background()
 
@@ -49,7 +49,7 @@ func TestEventLog_AppendEvent(t *testing.T) {
 // TestEventLog_TopicIsolation tests that topics have independent offset sequences
 func TestEventLog_TopicIsolation(t *testing.T) {
 	log := NewInMemoryEventLog()
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 
 	ctx := context.Background()
 
@@ -78,7 +78,7 @@ func TestEventLog_TopicIsolation(t *testing.T) {
 // TestEventLog_ReadEvents tests reading events from topics
 func TestEventLog_ReadEvents(t *testing.T) {
 	log := NewInMemoryEventLog()
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 
 	ctx := context.Background()
 	topic := "test-topic"
@@ -86,7 +86,7 @@ func TestEventLog_ReadEvents(t *testing.T) {
 	// Add some events
 	for i := 0; i < 5; i++ {
 		event := eventlog.NewEvent(topic, []byte("payload"))
-		log.AppendEvent(ctx, topic, event)
+		_, _ = log.AppendEvent(ctx, topic, event)
 	}
 
 	// Test reading from start
@@ -123,7 +123,7 @@ func TestEventLog_ReadEvents(t *testing.T) {
 // TestEventLog_ReplayEvents tests the replay channel functionality
 func TestEventLog_ReplayEvents(t *testing.T) {
 	log := NewInMemoryEventLog()
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 
 	ctx := context.Background()
 	topic := "replay-topic"
@@ -131,7 +131,7 @@ func TestEventLog_ReplayEvents(t *testing.T) {
 	// Add events
 	for i := 0; i < 3; i++ {
 		event := eventlog.NewEvent(topic, []byte("payload"))
-		log.AppendEvent(ctx, topic, event)
+		_, _ = log.AppendEvent(ctx, topic, event)
 	}
 
 	// Replay from start
@@ -165,7 +165,7 @@ func TestEventLog_ReplayEvents(t *testing.T) {
 // TestEventLog_GetTopicEndOffset tests getting topic end offsets
 func TestEventLog_GetTopicEndOffset(t *testing.T) {
 	log := NewInMemoryEventLog()
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 
 	ctx := context.Background()
 
@@ -182,7 +182,7 @@ func TestEventLog_GetTopicEndOffset(t *testing.T) {
 	topic := "test-topic"
 	for i := 0; i < 3; i++ {
 		event := eventlog.NewEvent(topic, []byte("payload"))
-		log.AppendEvent(ctx, topic, event)
+		_, _ = log.AppendEvent(ctx, topic, event)
 	}
 
 	offset, err = log.GetTopicEndOffset(ctx, topic)
@@ -197,7 +197,7 @@ func TestEventLog_GetTopicEndOffset(t *testing.T) {
 // TestEventLog_TopicValidation tests topic validation
 func TestEventLog_TopicValidation(t *testing.T) {
 	log := NewInMemoryEventLog()
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 
 	ctx := context.Background()
 	event := eventlog.NewEvent("valid", []byte("payload"))
@@ -218,7 +218,7 @@ func TestEventLog_TopicValidation(t *testing.T) {
 // TestInMemoryEventLog_GetStatistics tests statistics functionality
 func TestInMemoryEventLog_GetStatistics(t *testing.T) {
 	log := NewInMemoryEventLog()
-	defer log.Close()
+	defer func() { _ = log.Close() }()
 
 	ctx := context.Background()
 
@@ -243,7 +243,7 @@ func TestInMemoryEventLog_GetStatistics(t *testing.T) {
 		for i, topic := range topics {
 			for j := 0; j < eventCounts[i]; j++ {
 				event := eventlog.NewEvent(topic, []byte("payload"))
-				log.AppendEvent(ctx, topic, event)
+				_, _ = log.AppendEvent(ctx, topic, event)
 			}
 		}
 
@@ -268,7 +268,7 @@ func TestInMemoryEventLog_GetStatistics(t *testing.T) {
 
 	t.Run("closed_log_returns_error", func(t *testing.T) {
 		closedLog := NewInMemoryEventLog()
-		closedLog.Close()
+		_ = closedLog.Close()
 
 		_, err := closedLog.GetStatistics(ctx)
 		if err == nil {

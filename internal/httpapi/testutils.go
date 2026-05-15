@@ -52,7 +52,7 @@ func NewTestServerSetup(t *testing.T) *TestServerSetup {
 
 // Close cleans up test resources
 func (setup *TestServerSetup) Close() {
-	setup.Node.Close()
+	_ = setup.Node.Close()
 }
 
 // GenerateTestToken creates a JWT token for testing

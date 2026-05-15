@@ -28,14 +28,14 @@ func TestGRPCMeshNode_MultiNodeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating node A, got %v", err)
 	}
-	defer nodeA.Close()
+	defer func() { _ = nodeA.Close() }()
 
 	configB := NewConfig("node-B", "localhost:9101")
 	nodeB, err := NewGRPCMeshNode(configB)
 	if err != nil {
 		t.Fatalf("Expected no error creating node B, got %v", err)
 	}
-	defer nodeB.Close()
+	defer func() { _ = nodeB.Close() }()
 
 	ctx := context.Background()
 
@@ -154,7 +154,7 @@ func TestGRPCMeshNode_MultiNodeIntegration(t *testing.T) {
 
 	for _, subscriber := range localSubscribersB {
 		if trustedClient, ok := subscriber.(*TrustedClient); ok {
-			trustedClient.DeliverEvent(publishedEvent)
+			_ = trustedClient.DeliverEvent(publishedEvent)
 		}
 	}
 
@@ -196,14 +196,14 @@ func TestPeerLinkToMeshNodeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create sender node: %v", err)
 	}
-	defer sender.Close()
+	defer func() { _ = sender.Close() }()
 
 	receiverConfig := NewConfig("receiver-node", "localhost:0")
 	receiver, err := NewGRPCMeshNode(receiverConfig)
 	if err != nil {
 		t.Fatalf("Failed to create receiver node: %v", err)
 	}
-	defer receiver.Close()
+	defer func() { _ = receiver.Close() }()
 
 	ctx := context.Background()
 
@@ -320,7 +320,7 @@ func waitForMeshNodeCondition(t *testing.T, timeout time.Duration, condition fun
 
 		select {
 		case <-deadline.C:
-			t.Fatal(fmt.Sprintf("Timed out waiting for %s", description))
+			t.Fatalf("Timed out waiting for %s", description)
 		case <-ticker.C:
 		}
 	}

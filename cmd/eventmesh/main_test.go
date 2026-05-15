@@ -19,7 +19,7 @@ func TestHTTPIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create mesh node: %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	server := httpapi.NewServer(node, httpapi.Config{
 		Port:      "0",

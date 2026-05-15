@@ -32,7 +32,7 @@ func TestGRPCMeshNode_PeerFailureDoesNotBlockHealthyPeerForwarding(t *testing.T)
 	)
 	peerLink.failSendsTo(failedPeerID, errors.New("simulated partition"))
 	node.setPeerLink(peerLink)
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	if err := node.Start(ctx); err != nil {
 		t.Fatalf("Failed to start mesh node: %v", err)
@@ -100,7 +100,7 @@ func TestGRPCMeshNode_BackpressuredPeerReportsDropAfterLocalPersistence(t *testi
 	if err != nil {
 		t.Fatalf("Failed to create mesh node: %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	if err := node.Start(ctx); err != nil {
 		t.Fatalf("Failed to start mesh node: %v", err)

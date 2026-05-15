@@ -11,7 +11,7 @@ import (
 // BenchmarkInMemoryRoutingTable_Subscribe measures subscription performance
 func BenchmarkInMemoryRoutingTable_Subscribe(b *testing.B) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	// Pre-create subscribers to avoid allocation during benchmark
@@ -32,14 +32,14 @@ func BenchmarkInMemoryRoutingTable_Subscribe(b *testing.B) {
 // BenchmarkInMemoryRoutingTable_GetSubscribers measures lookup performance
 func BenchmarkInMemoryRoutingTable_GetSubscribers(b *testing.B) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	// Setup: Add subscribers to create realistic lookup scenario
 	const numSubscribers = 1000
 	for i := 0; i < numSubscribers; i++ {
 		subscriber := routingtable.NewLocalSubscriber(fmt.Sprintf("client-%d", i))
-		rt.Subscribe(ctx, "orders.created", subscriber)
+		_ = rt.Subscribe(ctx, "orders.created", subscriber)
 	}
 
 	b.ResetTimer()
@@ -54,7 +54,7 @@ func BenchmarkInMemoryRoutingTable_GetSubscribers(b *testing.B) {
 // BenchmarkInMemoryRoutingTable_MixedOperations measures mixed workload performance
 func BenchmarkInMemoryRoutingTable_MixedOperations(b *testing.B) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	// Pre-create subscribers and topics
@@ -77,11 +77,11 @@ func BenchmarkInMemoryRoutingTable_MixedOperations(b *testing.B) {
 		// Mix of operations: 70% subscribe, 20% lookup, 10% unsubscribe
 		switch i % 10 {
 		case 0: // Unsubscribe (10%)
-			rt.Unsubscribe(ctx, topic, subscriber.ID())
+			_ = rt.Unsubscribe(ctx, topic, subscriber.ID())
 		case 1, 2: // Lookup (20%)
-			rt.GetSubscribers(ctx, topic)
+			_, _ = rt.GetSubscribers(ctx, topic)
 		default: // Subscribe (70%)
-			rt.Subscribe(ctx, topic, subscriber)
+			_ = rt.Subscribe(ctx, topic, subscriber)
 		}
 	}
 }
@@ -89,7 +89,7 @@ func BenchmarkInMemoryRoutingTable_MixedOperations(b *testing.B) {
 // BenchmarkInMemoryRoutingTable_ConcurrentSubscribe measures concurrent subscription performance
 func BenchmarkInMemoryRoutingTable_ConcurrentSubscribe(b *testing.B) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	b.RunParallel(func(pb *testing.PB) {
@@ -108,14 +108,14 @@ func BenchmarkInMemoryRoutingTable_ConcurrentSubscribe(b *testing.B) {
 // BenchmarkInMemoryRoutingTable_ConcurrentLookup measures concurrent lookup performance
 func BenchmarkInMemoryRoutingTable_ConcurrentLookup(b *testing.B) {
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	// Setup: Add some subscribers for realistic lookups
 	const numSubscribers = 100
 	for i := 0; i < numSubscribers; i++ {
 		subscriber := routingtable.NewLocalSubscriber(fmt.Sprintf("client-%d", i))
-		rt.Subscribe(ctx, "orders.created", subscriber)
+		_ = rt.Subscribe(ctx, "orders.created", subscriber)
 	}
 
 	b.ResetTimer()
@@ -136,7 +136,7 @@ func TestInMemoryRoutingTable_PerformanceBaseline(t *testing.T) {
 	}
 
 	rt := NewInMemoryRoutingTable()
-	defer rt.Close()
+	defer func() { _ = rt.Close() }()
 	ctx := context.Background()
 
 	// Baseline 1: Large number of subscribers to single topic
@@ -178,7 +178,7 @@ func TestInMemoryRoutingTable_PerformanceBaseline(t *testing.T) {
 	t.Run("ManyTopics", func(t *testing.T) {
 		const numTopics = 10000
 		rt2 := NewInMemoryRoutingTable()
-		defer rt2.Close()
+		defer func() { _ = rt2.Close() }()
 
 		// Create many topics with 1-3 subscribers each
 		for i := 0; i < numTopics; i++ {
@@ -222,7 +222,7 @@ func TestInMemoryRoutingTable_PerformanceBaseline(t *testing.T) {
 	// Baseline 3: Memory usage estimation
 	t.Run("MemoryUsage", func(t *testing.T) {
 		rt3 := NewInMemoryRoutingTable()
-		defer rt3.Close()
+		defer func() { _ = rt3.Close() }()
 
 		const numTopics = 1000
 		const subscribersPerTopic = 10

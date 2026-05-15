@@ -255,7 +255,9 @@ func TestDeleteSubscription(t *testing.T) {
 		}
 
 		var createResponse SubscriptionResponse
-		json.NewDecoder(createW.Body).Decode(&createResponse)
+		if err := json.NewDecoder(createW.Body).Decode(&createResponse); err != nil {
+			t.Fatalf("Failed to decode create subscription response: %v", err)
+		}
 		subscriptionID := createResponse.ID
 
 		// Now delete the subscription
@@ -290,7 +292,9 @@ func TestDeleteSubscription(t *testing.T) {
 		handlers.ListSubscriptions(getW, getReq)
 
 		var subscriptions []SubscriptionResponse
-		json.NewDecoder(getW.Body).Decode(&subscriptions)
+		if err := json.NewDecoder(getW.Body).Decode(&subscriptions); err != nil {
+			t.Fatalf("Failed to decode subscriptions response: %v", err)
+		}
 
 		// Should have no subscriptions now
 		if len(subscriptions) != 0 {

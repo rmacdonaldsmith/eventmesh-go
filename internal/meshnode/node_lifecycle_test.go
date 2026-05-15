@@ -127,7 +127,7 @@ func TestGRPCMeshNode_StartOwnsHeartbeatLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	peerLink := newLifecycleSpyPeerLink()
 	node.setPeerLink(peerLink)
@@ -155,7 +155,7 @@ func TestGRPCMeshNode_StopOwnsPeerLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	peerLink := newLifecycleSpyPeerLink()
 	node.setPeerLink(peerLink)
@@ -190,7 +190,7 @@ func TestGRPCMeshNode_ComprehensiveHealthMonitoring(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 
@@ -432,7 +432,7 @@ func TestGRPCMeshNode_GetHealthDoesNotMutateEventLog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Expected no error creating mesh node, got %v", err)
 	}
-	defer node.Close()
+	defer func() { _ = node.Close() }()
 
 	ctx := context.Background()
 	eventLog := node.GetEventLog()
