@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -580,8 +581,7 @@ func (h *Handlers) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	err := h.meshNode.UnsubscribeByID(ctx, claims.ClientID, subscriptionID)
 	if err != nil {
-		// Check if it's a "not found" error (either no subscriptions for client or specific subscription not found)
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "no subscriptions found") {
+		if errors.Is(err, meshnodepkg.ErrSubscriptionNotFound) {
 			h.writeError(w, fmt.Sprintf("Subscription not found: %s", subscriptionID), http.StatusNotFound)
 			return
 		}

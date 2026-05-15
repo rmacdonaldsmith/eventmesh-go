@@ -331,13 +331,13 @@ func (n *GRPCMeshNode) UnsubscribeByID(ctx context.Context, clientID, subscripti
 	clientSubs := n.subscriptions[clientID]
 	if clientSubs == nil {
 		n.subscriptionsMu.RUnlock()
-		return fmt.Errorf("no subscriptions found for client %s", clientID)
+		return fmt.Errorf("%w: no subscriptions found for client %s", meshnode.ErrSubscriptionNotFound, clientID)
 	}
 
 	subscription, exists := clientSubs[subscriptionID]
 	if !exists {
 		n.subscriptionsMu.RUnlock()
-		return fmt.Errorf("subscription %s not found for client %s", subscriptionID, clientID)
+		return fmt.Errorf("%w: subscription %s not found for client %s", meshnode.ErrSubscriptionNotFound, subscriptionID, clientID)
 	}
 
 	topic := subscription.Topic
@@ -349,7 +349,7 @@ func (n *GRPCMeshNode) UnsubscribeByID(ctx context.Context, clientID, subscripti
 	n.mu.RUnlock()
 
 	if client == nil {
-		return fmt.Errorf("client %s not found", clientID)
+		return fmt.Errorf("%w: client %s not found", meshnode.ErrClientNotFound, clientID)
 	}
 
 	// Call the regular Unsubscribe method to handle routing table and peer propagation
@@ -368,12 +368,12 @@ func (n *GRPCMeshNode) removeSubscriptionMetadata(clientID, subscriptionID strin
 
 	clientSubs := n.subscriptions[clientID]
 	if clientSubs == nil {
-		return fmt.Errorf("no subscriptions found for client %s", clientID)
+		return fmt.Errorf("%w: no subscriptions found for client %s", meshnode.ErrSubscriptionNotFound, clientID)
 	}
 
 	_, exists := clientSubs[subscriptionID]
 	if !exists {
-		return fmt.Errorf("subscription %s not found for client %s", subscriptionID, clientID)
+		return fmt.Errorf("%w: subscription %s not found for client %s", meshnode.ErrSubscriptionNotFound, subscriptionID, clientID)
 	}
 
 	delete(clientSubs, subscriptionID)
