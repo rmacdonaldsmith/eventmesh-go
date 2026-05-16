@@ -386,7 +386,7 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if resumeCursor != nil {
-			if err := h.replaySSECursor(w, r, *resumeCursor, existingSubscriptionTopics(topics)); err != nil {
+			if err := h.replaySSECursor(w, r, *resumeCursor, topics); err != nil {
 				slog.Warn("failed to replay SSE resume cursor", "client_id", claims.ClientID, "error", err)
 				return
 			}
@@ -454,12 +454,6 @@ func (h *Handlers) replaySSECursor(w http.ResponseWriter, r *http.Request, curso
 		flusher.Flush()
 	}
 	return nil
-}
-
-func existingSubscriptionTopics(topics []string) []string {
-	copied := make([]string, len(topics))
-	copy(copied, topics)
-	return copied
 }
 
 func topicCoveredBySubscriptions(topic string, subscriptions []string) bool {
@@ -1053,7 +1047,10 @@ func (h *Handlers) streamWithKeepalive(w http.ResponseWriter, r *http.Request, c
 				flusher.Flush()
 			}
 
-		case event := <-eventChan:
+		case event, ok := <-eventChan:
+			if !ok {
+				return
+			}
 			// Received an event from MeshNode, forward it to SSE client.
 			sseMessage, err := h.eventToSSEMessage(event)
 			if err != nil {

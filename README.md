@@ -9,8 +9,9 @@ real-time application coordination: easy for humans, services, and AI agents to
 inspect, understand, validate, publish into, and debug safely.
 
 The codebase is functional as a development/MVP system. It is not yet a
-production broker: storage is in-memory, peer security is not mTLS yet, and some
-multi-node behavior is still being hardened.
+production broker: the default storage is in-memory, Pebble is available for
+local durability, peer security is not mTLS yet, and some multi-node behavior is
+still being hardened.
 
 ## Delivery Guarantees
 
@@ -229,7 +230,7 @@ examples/               Runnable demo scripts
 
 ## Current Roadmap Themes
 
-- Persistent EventLog backend
+- Pebble storage hardening, retention, and compaction policy
 - Agent-friendly event metadata, discovery, validation, replay, and tooling
 - More reliable multi-node subscription propagation and delivery semantics
 - mTLS and stronger peer identity

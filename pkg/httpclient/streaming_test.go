@@ -386,7 +386,7 @@ func TestStreamClient_TracksSSEIDsForResume(t *testing.T) {
 	eventJSON, err := json.Marshal(event)
 	require.NoError(t, err)
 
-	err = streamClient.processSSEStream(context.Background(), strings.NewReader("id: "+eventID+"\n"+"data: "+string(eventJSON)+"\n\n"), StreamConfig{})
+	err = streamClient.processSSEStream(context.Background(), strings.NewReader("id:"+eventID+"\n"+"data:"+string(eventJSON)+"\n\n"), StreamConfig{})
 	require.NoError(t, err)
 
 	select {

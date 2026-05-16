@@ -23,7 +23,7 @@ EventMesh is currently a single Go process that can expose:
 
 - an HTTP API for clients
 - a gRPC PeerLink listener for mesh peers
-- an in-memory EventLog
+- an EventLog, defaulting to in-memory with optional Pebble durability
 - an in-memory RoutingTable
 - a MeshNode orchestrator that connects the pieces
 
@@ -389,7 +389,7 @@ work captured in [discovery.md](discovery.md).
 
 These are useful directions, but they are not current implementation facts:
 
-- RocksDB or other persistent EventLog backend
+- distributed or replicated EventLog storage
 - mTLS peer authentication
 - ACLs or topic-level authorization
 - durable subscriptions across node restarts
@@ -408,7 +408,7 @@ Near-term quality work:
 
 Production-readiness work:
 
-- persistent EventLog backend
+- Pebble storage hardening, retention, and compaction policy
 - mTLS and peer identity
 - typed errors and API error contracts
 - load and multi-client tests

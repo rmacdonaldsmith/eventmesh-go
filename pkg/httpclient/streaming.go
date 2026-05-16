@@ -246,14 +246,14 @@ func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader, 
 		line := scanner.Text()
 
 		// Handle SSE format
-		if strings.HasPrefix(line, "id: ") {
-			currentEventID = strings.TrimSpace(strings.TrimPrefix(line, "id: "))
+		if fieldValue, ok := parseSSEField(line, "id"); ok {
+			currentEventID = strings.TrimSpace(fieldValue)
 			continue
 		}
 
-		if strings.HasPrefix(line, "data: ") {
+		if fieldValue, ok := parseSSEField(line, "data"); ok {
 			// Extract JSON data
-			jsonData := strings.TrimPrefix(line, "data: ")
+			jsonData := fieldValue
 
 			// Parse event message
 			var event EventStreamMessage
@@ -286,7 +286,7 @@ func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader, 
 			default:
 				// Channel full, drop event (could add metrics here)
 			}
-		} else if strings.HasPrefix(line, ": ") {
+		} else if strings.HasPrefix(line, ":") {
 			// Keepalive comment - ignore but could log for debugging
 			continue
 		} else if line == "" {
@@ -301,6 +301,17 @@ func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader, 
 	}
 
 	return nil
+}
+
+func parseSSEField(line, field string) (string, bool) {
+	prefix := field + ":"
+	if !strings.HasPrefix(line, prefix) {
+		return "", false
+	}
+
+	value := strings.TrimPrefix(line, prefix)
+	value = strings.TrimPrefix(value, " ")
+	return value, true
 }
 
 func (sc *StreamClient) resumeCursorHeader() (string, error) {

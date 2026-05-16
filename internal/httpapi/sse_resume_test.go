@@ -39,6 +39,31 @@ func TestWriteSSEMessageRequiresID(t *testing.T) {
 	}
 }
 
+func TestStreamEventsRejectsInvalidResumeCursor(t *testing.T) {
+	setup := NewTestServerSetup(t)
+	defer setup.Close()
+
+	token := setup.GenerateTestToken(t, "resume-client", false)
+	claims, err := setup.Auth.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stream?since=not-base64", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	req = req.WithContext(context.WithValue(req.Context(), ClaimsKey, claims))
+
+	recorder := httptest.NewRecorder()
+	setup.Server.handlers.StreamEvents(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "Invalid SSE resume cursor") {
+		t.Fatalf("Expected invalid cursor message, got %s", recorder.Body.String())
+	}
+}
+
 func TestStreamEventsRejectsCursorForDifferentNode(t *testing.T) {
 	setup := NewTestServerSetup(t)
 	defer setup.Close()
@@ -118,6 +143,31 @@ func TestStreamEventsResumeReplaysFromCursor(t *testing.T) {
 	}
 	if messages[0].EventID == "" || messages[1].EventID == "" {
 		t.Fatalf("Expected replay messages to include EventID: %#v", messages)
+	}
+}
+
+func TestStreamEventsResumeSkipsUnauthorizedCursorTopics(t *testing.T) {
+	setup := NewTestServerSetup(t)
+	defer setup.Close()
+
+	token := setup.GenerateTestToken(t, "resume-client", false)
+	publishEventForTest(t, setup.Server.handlers, setup.Auth, token, "payments.completed", `{"sequence": 1}`)
+	publishEventForTest(t, setup.Server.handlers, setup.Auth, token, "payments.completed", `{"sequence": 2}`)
+
+	cursor := sseMultiTopicCursor{
+		Version: sseCursorVersion,
+		NodeID:  setup.Node.GetNodeID(),
+		Topics:  map[string]int64{"payments.completed": 0},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stream", nil)
+	recorder := httptest.NewRecorder()
+
+	if err := setup.Server.handlers.replaySSECursor(recorder, req, cursor, []string{"orders.*"}); err != nil {
+		t.Fatalf("replaySSECursor failed: %v", err)
+	}
+	if messages := parseSSEDataMessages(t, recorder.Body.String()); len(messages) != 0 {
+		t.Fatalf("Expected no replayed messages for unauthorized cursor topic, got %#v", messages)
 	}
 }
 
