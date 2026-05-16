@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,21 +16,23 @@ import (
 
 // StreamClient handles Server-Sent Events streaming
 type StreamClient struct {
-	client                  *Client
-	events                  chan EventStreamMessage
-	errors                  chan error
-	done                    chan struct{}
-	cancel                  context.CancelFunc
-	temporarySubscriptionID string
-	resumeMu                sync.Mutex
-	resumeNodeID            string
-	resumeOffsets           map[string]int64
+	client                 *Client
+	events                 chan EventStreamMessage
+	errors                 chan error
+	done                   chan struct{}
+	cancel                 context.CancelFunc
+	temporarySubscriptions map[string]string // topic -> subscription ID created by this stream
+	resumeMu               sync.Mutex
+	resumeNodeID           string
+	resumeOffsets          map[string]int64
 }
 
 // StreamConfig configures the streaming client
 type StreamConfig struct {
-	// Topic to filter events (optional)
-	Topic string
+	// Topics to subscribe to and filter locally. When set, the client ensures
+	// these subscriptions exist before each connection attempt and removes any
+	// subscriptions it created when the stream closes.
+	Topics []string
 
 	// BufferSize for the event channel
 	BufferSize int
@@ -52,8 +55,9 @@ func (sc *StreamConfig) SetDefaults() {
 }
 
 // Stream creates a new SSE streaming client for events.
-// If Topic is set, the client creates a temporary subscription for that topic,
-// filters the unified SSE stream locally, and removes the subscription on Close.
+// If Topics is set, the client creates temporary subscriptions for missing
+// topics, filters the unified SSE stream locally, re-ensures the subscriptions
+// before reconnects, and removes subscriptions it created on Close.
 func (c *Client) Stream(ctx context.Context, config StreamConfig) (*StreamClient, error) {
 	if c.token == "" {
 		return nil, fmt.Errorf("client not authenticated - call Authenticate() first")
@@ -61,26 +65,22 @@ func (c *Client) Stream(ctx context.Context, config StreamConfig) (*StreamClient
 
 	config.SetDefaults()
 
-	var temporarySubscriptionID string
-	if config.Topic != "" {
-		subscriptionID, err := c.ensureStreamSubscription(ctx, config.Topic)
-		if err != nil {
-			return nil, err
-		}
-		temporarySubscriptionID = subscriptionID
+	temporarySubscriptions, err := c.ensureStreamSubscriptions(ctx, config.Topics)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create cancellable context
 	streamCtx, cancel := context.WithCancel(ctx)
 
 	streamClient := &StreamClient{
-		client:                  c,
-		events:                  make(chan EventStreamMessage, config.BufferSize),
-		errors:                  make(chan error, 10),
-		done:                    make(chan struct{}),
-		cancel:                  cancel,
-		temporarySubscriptionID: temporarySubscriptionID,
-		resumeOffsets:           make(map[string]int64),
+		client:                 c,
+		events:                 make(chan EventStreamMessage, config.BufferSize),
+		errors:                 make(chan error, 10),
+		done:                   make(chan struct{}),
+		cancel:                 cancel,
+		temporarySubscriptions: temporarySubscriptions,
+		resumeOffsets:          make(map[string]int64),
 	}
 
 	// Start streaming in background
@@ -111,19 +111,61 @@ func (sc *StreamClient) Close() error {
 	// Wait for streaming goroutine to finish
 	<-sc.done
 
-	if sc.temporarySubscriptionID == "" {
+	if len(sc.temporarySubscriptions) == 0 {
 		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), sc.client.config.Timeout)
 	defer cancel()
 
-	if err := sc.client.DeleteSubscription(ctx, sc.temporarySubscriptionID); err != nil {
-		return fmt.Errorf("failed to remove temporary stream subscription: %w", err)
+	var cleanupErr error
+	for _, subscriptionID := range sc.temporarySubscriptions {
+		if err := sc.client.DeleteSubscription(ctx, subscriptionID); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("subscription %s: %w", subscriptionID, err))
+		}
 	}
-	sc.temporarySubscriptionID = ""
+	sc.temporarySubscriptions = nil
 
+	if cleanupErr != nil {
+		return fmt.Errorf("failed to remove temporary stream subscriptions: %w", cleanupErr)
+	}
 	return nil
+}
+
+func uniqueStreamTopics(topics []string) []string {
+	seen := make(map[string]struct{})
+	unique := make([]string, 0, len(topics))
+	for _, topic := range topics {
+		topic = strings.TrimSpace(topic)
+		if topic == "" {
+			continue
+		}
+		if _, ok := seen[topic]; ok {
+			continue
+		}
+		seen[topic] = struct{}{}
+		unique = append(unique, topic)
+	}
+	return unique
+}
+
+func (c *Client) ensureStreamSubscriptions(ctx context.Context, topics []string) (map[string]string, error) {
+	uniqueTopics := uniqueStreamTopics(topics)
+	if len(uniqueTopics) == 0 {
+		return nil, nil
+	}
+
+	createdSubscriptions := make(map[string]string)
+	for _, topic := range uniqueTopics {
+		subscriptionID, err := c.ensureStreamSubscription(ctx, topic)
+		if err != nil {
+			return nil, err
+		}
+		if subscriptionID != "" {
+			createdSubscriptions[topic] = subscriptionID
+		}
+	}
+	return createdSubscriptions, nil
 }
 
 func (c *Client) ensureStreamSubscription(ctx context.Context, topic string) (string, error) {
@@ -158,6 +200,22 @@ func (sc *StreamClient) startStreaming(ctx context.Context, config StreamConfig)
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		if subscriptions, err := sc.client.ensureStreamSubscriptions(ctx, config.Topics); err != nil {
+			select {
+			case sc.errors <- fmt.Errorf("stream subscription error: %w", err):
+			case <-ctx.Done():
+				return
+			default:
+			}
+		} else {
+			if sc.temporarySubscriptions == nil {
+				sc.temporarySubscriptions = make(map[string]string)
+			}
+			for topic, subscriptionID := range subscriptions {
+				sc.temporarySubscriptions[topic] = subscriptionID
+			}
 		}
 
 		err := sc.connectAndStream(ctx, config)
@@ -274,7 +332,7 @@ func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader, 
 			sc.recordResumeEventID(event.EventID)
 			currentEventID = ""
 
-			if config.Topic != "" && !matchesStreamTopic(config.Topic, event.Topic) {
+			if len(config.Topics) > 0 && !matchesAnyStreamTopic(config.Topics, event.Topic) {
 				continue
 			}
 
@@ -352,6 +410,15 @@ func (sc *StreamClient) recordResumeEventID(eventID string) {
 	if current, ok := sc.resumeOffsets[cursor.Topic]; !ok || cursor.Offset > current {
 		sc.resumeOffsets[cursor.Topic] = cursor.Offset
 	}
+}
+
+func matchesAnyStreamTopic(patterns []string, topic string) bool {
+	for _, pattern := range uniqueStreamTopics(patterns) {
+		if matchesStreamTopic(pattern, topic) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchesStreamTopic(pattern, topic string) bool {

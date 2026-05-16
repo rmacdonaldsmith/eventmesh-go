@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/httpclient"
@@ -14,7 +15,7 @@ import (
 
 func newStreamCommand() *cobra.Command {
 	var (
-		topic        string
+		topics       []string
 		offset       int64
 		bufferSize   int
 		prettyFormat bool
@@ -24,16 +25,17 @@ func newStreamCommand() *cobra.Command {
 		Use:   "stream",
 		Short: "Stream events from a topic in real-time",
 		Long: `Stream events from a topic in real-time using Server-Sent Events.
-When --topic is set, the CLI creates a temporary subscription, streams matching
-events as they are published, and removes that subscription when the stream stops.
+When --topic is set one or more times, the CLI creates temporary subscriptions,
+streams matching events as they are published, and removes those subscriptions
+when the stream stops.
 Optionally specify an offset to start streaming from historical events.
 Press Ctrl+C to stop streaming.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStream(topic, offset, bufferSize, prettyFormat)
+			return runStream(topics, offset, bufferSize, prettyFormat)
 		},
 	}
 
-	cmd.Flags().StringVar(&topic, "topic", "", "Topic to stream from using a temporary subscription (optional - streams active subscriptions if not specified)")
+	cmd.Flags().StringSliceVar(&topics, "topic", nil, "Topic to stream from using a temporary subscription; repeat or comma-separate for multiple topics (optional - streams active subscriptions if not specified)")
 	cmd.Flags().Int64Var(&offset, "offset", -1, "Starting offset for streaming (-1 means real-time only, 0+ starts from historical events)")
 	cmd.Flags().IntVar(&bufferSize, "buffer-size", 100, "Event buffer size")
 	cmd.Flags().BoolVar(&prettyFormat, "pretty", false, "Pretty print JSON payloads")
@@ -41,7 +43,7 @@ Press Ctrl+C to stop streaming.`,
 	return cmd
 }
 
-func runStream(topic string, offset int64, bufferSize int, prettyFormat bool) error {
+func runStream(topics []string, offset int64, bufferSize int, prettyFormat bool) error {
 	if err := requireAuthentication(); err != nil {
 		return err
 	}
@@ -62,7 +64,7 @@ func runStream(topic string, offset int64, bufferSize int, prettyFormat bool) er
 
 	// Configure streaming
 	config := httpclient.StreamConfig{
-		Topic:                topic,
+		Topics:               streamTopics(topics),
 		BufferSize:           bufferSize,
 		MaxReconnectAttempts: 0, // Infinite retries
 	}
@@ -74,8 +76,8 @@ func runStream(topic string, offset int64, bufferSize int, prettyFormat bool) er
 	}
 
 	fmt.Printf("🌊 Starting event stream from %s", serverURL)
-	if topic != "" {
-		fmt.Printf(" (topic: %s)", topic)
+	if len(config.Topics) > 0 {
+		fmt.Printf(" (topics: %s)", strings.Join(config.Topics, ", "))
 	} else {
 		fmt.Printf(" (all topics)")
 	}
@@ -127,6 +129,23 @@ func runStream(topic string, offset int64, bufferSize int, prettyFormat bool) er
 			return nil
 		}
 	}
+}
+
+func streamTopics(topics []string) []string {
+	seen := make(map[string]struct{})
+	unique := make([]string, 0, len(topics))
+	for _, topic := range topics {
+		topic = strings.TrimSpace(topic)
+		if topic == "" {
+			continue
+		}
+		if _, ok := seen[topic]; ok {
+			continue
+		}
+		seen[topic] = struct{}{}
+		unique = append(unique, topic)
+	}
+	return unique
 }
 
 func printEvent(event httpclient.EventStreamMessage, count int, pretty bool) {

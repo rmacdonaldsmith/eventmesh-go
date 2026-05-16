@@ -217,14 +217,19 @@ second subscription mechanism hidden in the stream endpoint.
 
 The Go HTTP client and CLI provide a convenience on top of this model:
 
-- `StreamConfig{Topic: "orders.*"}` or `eventmesh-cli stream --topic orders.*`
-  creates a temporary subscription if one does not already exist.
+- `StreamConfig{Topics: []string{"orders.*", "payments.*"}}` or repeated
+  `eventmesh-cli stream --topic orders.* --topic payments.*` creates temporary
+  subscriptions if they do not already exist.
 - The client connects to the unified SSE stream.
 - The client filters received events locally.
-- The temporary subscription is removed when the stream closes.
+- Temporary subscriptions created by the client are removed when the stream
+  closes.
 
 SSE stream attachment is connection-scoped and does not create extra
-subscription metadata.
+subscription metadata. The Go client re-ensures configured `StreamConfig.Topics`
+before each reconnect so managed streams recover when an ephemeral subscription
+set is lost by a server restart. Raw HTTP clients and streams opened without
+configured topics must manage subscription recreation themselves.
 
 ### SSE Resume Semantics
 

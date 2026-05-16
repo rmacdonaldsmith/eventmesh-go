@@ -122,6 +122,6 @@ curl 'http://localhost:8081/api/v1/topics/test.events/events?offset=0&limit=100'
 ## Notes
 
 - `*` matches one topic segment, not an arbitrary suffix.
-- `stream --topic` creates and later removes a temporary subscription.
+- `stream --topic` can be repeated; the CLI creates, re-ensures across reconnects, and later removes temporary subscriptions it created.
 - `GET /api/v1/events/stream?topic=...` is not a supported HTTP contract.
 - Broad streams such as `--topic '*'` are useful for demos but can be noisy.

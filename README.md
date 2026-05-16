@@ -105,9 +105,11 @@ Stream a topic:
 ./bin/eventmesh-cli --no-auth stream --topic test.events
 ```
 
-When `stream --topic` is used, the CLI creates a temporary subscription, opens
-the unified SSE stream, filters matching events locally, and removes the
-temporary subscription when the stream closes.
+When `stream --topic` is used one or more times, the CLI creates temporary
+subscriptions, opens the unified SSE stream, filters matching events locally,
+re-ensures those subscriptions across reconnects, and removes subscriptions it
+created when the stream closes. Raw HTTP clients must manage subscription
+recreation themselves after node restarts.
 
 ## Authenticated Flow
 

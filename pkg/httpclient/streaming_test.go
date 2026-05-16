@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,14 +28,14 @@ func TestStreamConfig_SetDefaults(t *testing.T) {
 
 	t.Run("preserves_custom_values", func(t *testing.T) {
 		config := StreamConfig{
-			Topic:                "custom.topic",
+			Topics:               []string{"custom.topic"},
 			BufferSize:           200,
 			ReconnectDelay:       5 * time.Second,
 			MaxReconnectAttempts: 3,
 		}
 		config.SetDefaults()
 
-		assert.Equal(t, "custom.topic", config.Topic)
+		assert.Equal(t, []string{"custom.topic"}, config.Topics)
 		assert.Equal(t, 200, config.BufferSize)
 		assert.Equal(t, 5*time.Second, config.ReconnectDelay)
 		assert.Equal(t, 3, config.MaxReconnectAttempts)
@@ -51,7 +52,7 @@ func TestClient_Stream(t *testing.T) {
 		require.NoError(t, err)
 
 		// Don't set token - client is not authenticated
-		streamConfig := StreamConfig{Topic: "test.events"}
+		streamConfig := StreamConfig{Topics: []string{"test.events"}}
 		streamClient, err := client.Stream(context.Background(), streamConfig)
 
 		assert.Error(t, err)
@@ -95,7 +96,7 @@ func TestClient_Stream(t *testing.T) {
 		require.NoError(t, err)
 		client.SetToken("test-token")
 
-		streamConfig := StreamConfig{Topic: "test.events"}
+		streamConfig := StreamConfig{Topics: []string{"test.events"}}
 		streamClient, err := client.Stream(context.Background(), streamConfig)
 
 		require.NoError(t, err)
@@ -203,7 +204,7 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 		defer cancel()
 
 		streamConfig := StreamConfig{
-			Topic:      "test.events",
+			Topics:     []string{"test.events"},
 			BufferSize: 10,
 		}
 		streamClient, err := client.Stream(ctx, streamConfig)
@@ -508,6 +509,89 @@ func decodeTestMultiTopicCursor(raw string) (sseMultiTopicCursor, error) {
 		return sseMultiTopicCursor{}, err
 	}
 	return cursor, nil
+}
+
+func TestStreamClient_ReensuresManagedSubscriptionsBeforeReconnect(t *testing.T) {
+	var mu sync.Mutex
+	subscriptions := map[string]string{}
+	createCounts := map[string]int{}
+	streamRequests := 0
+	recreatedBeforeSecondStream := make(chan struct{}, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/subscriptions":
+			var responses []SubscriptionResponse
+			for topic, id := range subscriptions {
+				responses = append(responses, SubscriptionResponse{ID: id, Topic: topic, ClientID: "test-client"})
+			}
+			_ = json.NewEncoder(w).Encode(responses)
+			return
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/subscriptions":
+			var req SubscriptionRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+			createCounts[req.Topic]++
+			id := fmt.Sprintf("sub-%s-%d", strings.ReplaceAll(req.Topic, ".", "-"), createCounts[req.Topic])
+			subscriptions[req.Topic] = id
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(SubscriptionResponse{ID: id, Topic: req.Topic, ClientID: "test-client"})
+			if streamRequests == 1 && createCounts["orders.*"] == 2 && createCounts["payments.*"] == 2 {
+				select {
+				case recreatedBeforeSecondStream <- struct{}{}:
+				default:
+				}
+			}
+			return
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/subscriptions/"):
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/events/stream":
+			streamRequests++
+			w.Header().Set("Content-Type", "text/event-stream")
+			if streamRequests == 1 {
+				// Simulate node restart after the first stream: subscriptions vanish
+				// and must be recreated before the reconnect stream is opened.
+				subscriptions = map[string]string{}
+				return
+			}
+			return
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{ServerURL: server.URL, ClientID: "test-client"})
+	require.NoError(t, err)
+	client.SetToken("test-token")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	streamClient, err := client.Stream(ctx, StreamConfig{
+		Topics:               []string{"orders.*", "payments.*"},
+		ReconnectDelay:       10 * time.Millisecond,
+		MaxReconnectAttempts: 2,
+	})
+	require.NoError(t, err)
+	defer func() { _ = streamClient.Close() }()
+
+	select {
+	case <-recreatedBeforeSecondStream:
+	case err := <-streamClient.Errors():
+		t.Fatalf("Unexpected stream error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for managed subscriptions to be recreated before reconnect")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.Equal(t, 2, createCounts["orders.*"])
+	assert.Equal(t, 2, createCounts["payments.*"])
+	assert.GreaterOrEqual(t, streamRequests, 1)
 }
 
 func TestStreamClient_Reconnection(t *testing.T) {
