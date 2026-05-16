@@ -226,6 +226,66 @@ The Go HTTP client and CLI provide a convenience on top of this model:
 SSE stream attachment is connection-scoped and does not create extra
 subscription metadata.
 
+### Planned SSE Resume Semantics
+
+SSE resume is planned as node-local, local-log resume. The SSE `id:` field will
+be a resume cursor derived from the serving MeshNode's local EventLog position,
+not from a publishing client-provided ID. For a locally published event, the
+cursor is derived after the local EventLog append assigns the topic offset. For
+an inbound peer event, the receiving node first appends the event to its own
+EventLog, then streams it to local SSE clients with a cursor for the receiving
+node's local log position.
+
+Planned cursor shape for a single streamed event:
+
+```json
+{"v":1,"nodeId":"node-a","topic":"orders.created","offset":42}
+```
+
+The cursor is encoded for the SSE `id:` line. Data events should always include
+an SSE event ID; keepalive comments such as `: ping` do not have IDs.
+
+The Go HTTP client can maintain a stronger multi-topic resume cursor while it
+streams events from multiple active subscriptions:
+
+```json
+{"v":1,"nodeId":"node-a","topics":{"orders.created":42,"payments.completed":9}}
+```
+
+On reconnect, clients should send the cursor through the standard
+`Last-Event-ID` header. The server may also accept `?since=...` for manual
+clients and tests. The server should accept both single-event cursors and
+multi-topic cursors. For a multi-topic cursor, it replays each cursor topic from
+`offset + 1` if that topic is still covered by one of the client's active
+subscriptions. Topics not present in the cursor are live-only until durable
+per-subscription offsets exist.
+
+Phase 1 resume is intentionally sticky to a node. Cursor offsets refer to the
+serving node's local EventLog, so a cursor for `node-a` is not safely
+interpretable by `node-b`. If a client reconnects to a different node, the
+server should reject the resume request with `409 Conflict` and a clear message
+that the cursor belongs to another node. The client may retry the original node
+or start a fresh stream elsewhere. Cross-node durable resume is future work.
+
+When using Pebble durable storage with SSE resume, operators should configure a
+stable explicit `--node-id`. Changing a node ID while reusing the same durable
+EventLog path invalidates existing resume cursors. A later hardening phase may
+store node identity metadata in the EventLog and fail or warn if a durable log is
+opened by a different node ID.
+
+Resume replay should register the live SSE stream before replaying missed
+events. This avoids losing new live events during catch-up, but it can produce
+duplicates. EventMesh's delivery contract is at-least-once, so SSE clients must
+be duplicate-tolerant and should deduplicate by SSE event ID.
+
+Fluid live mesh routing and durable resume are separate concerns. Publishers and
+subscribers do not need to know each other for live routing, and the mesh can
+route new events around topology changes. Durable resume asks a stronger
+question: which ordered local log should replay old events? Phase 1 answers that
+with a node-local cursor. Later phases may add stable node identity enforcement,
+global event identity, distributed replay lookup, or durable per-subscription
+offsets.
+
 When a peer connects or reconnects, MeshNode resends its current local
 subscription metadata to that peer through the control plane. This rebuilds
 routing interest after network healing. It does not replay user events that were
@@ -268,9 +328,11 @@ the durable source for later explicit replay or catch-up.
 ### Subscriber Contract
 
 Live subscriber delivery over SSE or in-memory client channels is best-effort
-while the client is connected. A disconnected client should use replay by topic
-and offset to catch up from the EventLog. Durable subscriber offsets,
-acknowledgements, and server-side resume semantics are future design work.
+while the client is connected. A disconnected client can use replay by topic and
+offset to catch up from the EventLog. Planned SSE resume will automate a
+node-local catch-up path by using an SSE cursor that references the serving
+node's local EventLog. Durable subscriber offsets, acknowledgements, and
+cross-node resume semantics remain future design work.
 
 ### Non-Goal: Exactly-Once
 

@@ -165,6 +165,9 @@ Important SSE contract:
 - `GET /api/v1/events/stream?topic=...` is intentionally rejected. Create a
   subscription first, or use the Go/CLI client convenience that does this for
   you.
+- Planned SSE resume is node-local: resume cursors refer to the serving node's
+  local EventLog. Clients should reconnect to the same stable node ID; cross-node
+  durable resume is future work.
 
 ## Build And Test
 
