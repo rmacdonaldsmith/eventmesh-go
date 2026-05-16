@@ -146,6 +146,92 @@ func TestStreamEventsResumeReplaysFromCursor(t *testing.T) {
 	}
 }
 
+func TestEventToSSEMessageUsesLocalEventLogCursor(t *testing.T) {
+	setup := NewTestServerSetup(t)
+	defer setup.Close()
+
+	token := setup.GenerateTestToken(t, "resume-client", false)
+	published := publishEventForTest(t, setup.Server.handlers, setup.Auth, token, "orders.created", `{"sequence": 1}`)
+	events, err := setup.Node.GetEventLog().ReadEvents(context.Background(), "orders.created", published.Offset, 1)
+	if err != nil {
+		t.Fatalf("ReadEvents failed: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 persisted event, got %d", len(events))
+	}
+
+	message, err := setup.Server.handlers.eventToSSEMessage(events[0])
+	if err != nil {
+		t.Fatalf("eventToSSEMessage failed: %v", err)
+	}
+
+	cursor, err := decodeSSECursor(message.EventID)
+	if err != nil {
+		t.Fatalf("decodeSSECursor failed: %v", err)
+	}
+	if cursor.NodeID != setup.Node.GetNodeID() {
+		t.Fatalf("Expected cursor node %q, got %q", setup.Node.GetNodeID(), cursor.NodeID)
+	}
+	if cursor.Topics["orders.created"] != published.Offset {
+		t.Fatalf("Expected cursor offset %d, got %d", published.Offset, cursor.Topics["orders.created"])
+	}
+}
+
+func TestStreamEventsResumeReplaysMultiTopicCursor(t *testing.T) {
+	setup := NewTestServerSetup(t)
+	defer setup.Close()
+
+	token := setup.GenerateTestToken(t, "resume-client", false)
+	claims, err := setup.Auth.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken failed: %v", err)
+	}
+
+	createSubscriptionForTest(t, setup.Server.handlers, setup.Auth, token, "orders.*")
+	createSubscriptionForTest(t, setup.Server.handlers, setup.Auth, token, "payments.*")
+	publishEventForTest(t, setup.Server.handlers, setup.Auth, token, "orders.created", `{"sequence": 1}`)
+	publishEventForTest(t, setup.Server.handlers, setup.Auth, token, "orders.created", `{"sequence": 2}`)
+	publishEventForTest(t, setup.Server.handlers, setup.Auth, token, "payments.completed", `{"sequence": 1}`)
+	publishEventForTest(t, setup.Server.handlers, setup.Auth, token, "payments.completed", `{"sequence": 2}`)
+
+	cursor, err := encodeSSECursor(sseMultiTopicCursor{
+		Version: sseCursorVersion,
+		NodeID:  setup.Node.GetNodeID(),
+		Topics: map[string]int64{
+			"orders.created":     0,
+			"payments.completed": 0,
+		},
+	})
+	if err != nil {
+		t.Fatalf("encodeSSECursor failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.WithValue(context.Background(), ClaimsKey, claims))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stream", nil).WithContext(ctx)
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Last-Event-ID", cursor)
+
+	recorder := NewStreamingRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		setup.Server.handlers.StreamEvents(recorder, req)
+	}()
+
+	replayedBody := waitForSSEDataMessages(t, recorder, 2)
+	cancel()
+	<-done
+
+	messages := parseSSEDataMessages(t, replayedBody)
+	seen := map[string]int64{}
+	for _, message := range messages {
+		seen[message.Topic] = message.Offset
+	}
+	if seen["orders.created"] != 1 || seen["payments.completed"] != 1 {
+		t.Fatalf("Expected replay of both topics at offset 1, got %#v from body %s", seen, replayedBody)
+	}
+}
+
 func TestStreamEventsResumeSkipsUnauthorizedCursorTopics(t *testing.T) {
 	setup := NewTestServerSetup(t)
 	defer setup.Close()

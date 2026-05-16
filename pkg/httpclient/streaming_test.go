@@ -406,6 +406,46 @@ func TestStreamClient_TracksSSEIDsForResume(t *testing.T) {
 	assert.Equal(t, int64(42), decoded.Topics["orders.created"])
 }
 
+func TestStreamClient_ResumeCursorTracksMultipleTopicsAndHighestOffsets(t *testing.T) {
+	streamClient := &StreamClient{
+		events:        make(chan EventStreamMessage, 4),
+		errors:        make(chan error, 1),
+		resumeOffsets: make(map[string]int64),
+	}
+
+	frames := []sseEventCursor{
+		{Version: sseCursorVersion, NodeID: "node-a", Topic: "orders.created", Offset: 3},
+		{Version: sseCursorVersion, NodeID: "node-a", Topic: "payments.completed", Offset: 7},
+		{Version: sseCursorVersion, NodeID: "node-a", Topic: "orders.created", Offset: 2},
+	}
+
+	var stream strings.Builder
+	for _, frame := range frames {
+		eventID, err := encodeSSECursor(frame)
+		require.NoError(t, err)
+		eventJSON, err := json.Marshal(EventStreamMessage{Topic: frame.Topic, Offset: frame.Offset})
+		require.NoError(t, err)
+		stream.WriteString("id: ")
+		stream.WriteString(eventID)
+		stream.WriteString("\n")
+		stream.WriteString("data: ")
+		stream.Write(eventJSON)
+		stream.WriteString("\n\n")
+	}
+
+	err := streamClient.processSSEStream(context.Background(), strings.NewReader(stream.String()), StreamConfig{})
+	require.NoError(t, err)
+
+	resumeHeader, err := streamClient.resumeCursorHeader()
+	require.NoError(t, err)
+
+	decoded, err := decodeTestMultiTopicCursor(resumeHeader)
+	require.NoError(t, err)
+	assert.Equal(t, "node-a", decoded.NodeID)
+	assert.Equal(t, int64(3), decoded.Topics["orders.created"])
+	assert.Equal(t, int64(7), decoded.Topics["payments.completed"])
+}
+
 func TestStreamClient_SendsLastEventIDOnReconnect(t *testing.T) {
 	firstEventID, err := encodeSSECursor(sseEventCursor{Version: sseCursorVersion, NodeID: "node-a", Topic: "orders.created", Offset: 0})
 	require.NoError(t, err)
