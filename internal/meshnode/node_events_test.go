@@ -795,15 +795,14 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 		t.Fatalf("Expected no error starting node, got %v", err)
 	}
 
-	// Create a subscription change like what would be received from a peer via control plane
-	subscriptionChange := &peerlink.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "peer-client-1",
-		Topic:    "orders.*",
-		NodeId:   "peer-node-1",
+	// Create an aggregate interest update like what would be received from a peer via control plane.
+	subscriptionChange := &peerlink.InterestUpdate{
+		Action: "subscribe",
+		Topic:  "orders.*",
+		NodeId: "peer-node-1",
 	}
 
-	node.processIncomingSubscriptionChange(ctx, subscriptionChange)
+	node.processIncomingInterestUpdate(ctx, subscriptionChange)
 
 	node.peerSubscriptionsMu.RLock()
 	subscribed := node.peerSubscriptions["peer-node-1"]["orders.*"]
@@ -812,14 +811,13 @@ func TestGRPCMeshNode_SubscriptionEventHandling(t *testing.T) {
 		t.Fatalf("Expected peer-node-1 to be subscribed to orders.*")
 	}
 
-	unsubscriptionChange := &peerlink.SubscriptionChange{
-		Action:   "unsubscribe",
-		ClientId: "peer-client-1",
-		Topic:    "orders.*",
-		NodeId:   "peer-node-1",
+	unsubscriptionChange := &peerlink.InterestUpdate{
+		Action: "unsubscribe",
+		Topic:  "orders.*",
+		NodeId: "peer-node-1",
 	}
 
-	node.processIncomingSubscriptionChange(ctx, unsubscriptionChange)
+	node.processIncomingInterestUpdate(ctx, unsubscriptionChange)
 
 	node.peerSubscriptionsMu.RLock()
 	subscribed = node.peerSubscriptions["peer-node-1"]["orders.*"]
@@ -843,17 +841,15 @@ func TestGRPCMeshNode_GetInterestedPeersMatchesWildcardSubscriptions(t *testing.
 	uninterestedPeer := &simplePeerNode{id: "peer-with-users", address: "localhost:9002", healthy: true}
 	allPeers := []peerlink.PeerNode{interestedPeer, uninterestedPeer}
 
-	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "remote-orders-client",
-		Topic:    "orders.*",
-		NodeId:   interestedPeer.ID(),
+	node.processIncomingInterestUpdate(ctx, &peerlink.InterestUpdate{
+		Action: "subscribe",
+		Topic:  "orders.*",
+		NodeId: interestedPeer.ID(),
 	})
-	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "remote-users-client",
-		Topic:    "users.*",
-		NodeId:   uninterestedPeer.ID(),
+	node.processIncomingInterestUpdate(ctx, &peerlink.InterestUpdate{
+		Action: "subscribe",
+		Topic:  "users.*",
+		NodeId: uninterestedPeer.ID(),
 	})
 
 	interestedPeers := node.getInterestedPeers("orders.created", allPeers)
@@ -878,11 +874,10 @@ func TestGRPCMeshNode_GetInterestedPeersWildcardDoesNotMatchDifferentDepth(t *te
 	peer := &simplePeerNode{id: "peer-with-orders", address: "localhost:9001", healthy: true}
 	allPeers := []peerlink.PeerNode{peer}
 
-	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "remote-orders-client",
-		Topic:    "orders.*",
-		NodeId:   peer.ID(),
+	node.processIncomingInterestUpdate(ctx, &peerlink.InterestUpdate{
+		Action: "subscribe",
+		Topic:  "orders.*",
+		NodeId: peer.ID(),
 	})
 
 	interestedPeers := node.getInterestedPeers("orders.eu.created", allPeers)
@@ -904,17 +899,15 @@ func TestGRPCMeshNode_GetInterestedPeersWildcardUnsubscribeRemovesInterest(t *te
 	peer := &simplePeerNode{id: "peer-with-orders", address: "localhost:9001", healthy: true}
 	allPeers := []peerlink.PeerNode{peer}
 
-	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "remote-orders-client",
-		Topic:    "orders.*",
-		NodeId:   peer.ID(),
+	node.processIncomingInterestUpdate(ctx, &peerlink.InterestUpdate{
+		Action: "subscribe",
+		Topic:  "orders.*",
+		NodeId: peer.ID(),
 	})
-	node.processIncomingSubscriptionChange(ctx, &peerlink.SubscriptionChange{
-		Action:   "unsubscribe",
-		ClientId: "remote-orders-client",
-		Topic:    "orders.*",
-		NodeId:   peer.ID(),
+	node.processIncomingInterestUpdate(ctx, &peerlink.InterestUpdate{
+		Action: "unsubscribe",
+		Topic:  "orders.*",
+		NodeId: peer.ID(),
 	})
 
 	interestedPeers := node.getInterestedPeers("orders.created", allPeers)

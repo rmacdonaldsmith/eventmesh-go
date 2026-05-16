@@ -22,14 +22,13 @@ func TestGRPCPeerLink_ControlMessagesAreNotBlockedByFullDataQueue(t *testing.T) 
 		t.Fatal("expected second data-plane event to fail because the data queue is full")
 	}
 
-	change := &peerlink.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "client-1",
-		Topic:    "orders.*",
-		NodeId:   "node-1",
+	update := &peerlink.InterestUpdate{
+		Action: "subscribe",
+		Topic:  "orders.*",
+		NodeId: "node-1",
 	}
-	if err := peerLink.SendSubscriptionChange(ctx, "peer-1", change); err != nil {
-		t.Fatalf("control-plane subscription change should not be blocked by full data queue: %v", err)
+	if err := peerLink.SendInterestUpdate(ctx, "peer-1", update); err != nil {
+		t.Fatalf("control-plane interest update should not be blocked by full data queue: %v", err)
 	}
 }
 

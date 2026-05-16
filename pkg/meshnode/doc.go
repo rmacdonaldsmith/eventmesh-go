@@ -20,7 +20,7 @@
 //  3. MeshNode persists events locally first (REQ-MNODE-002)
 //  4. MeshNode uses RoutingTable to find interested subscribers
 //  5. MeshNode uses PeerLink to forward events to remote subscribers
-//  6. MeshNode propagates subscription changes via gossip (REQ-MNODE-003)
+//  6. MeshNode propagates aggregate topic interest via gossip (REQ-MNODE-003)
 //
 // The interfaces use Go idioms:
 //   - context.Context for cancellation and timeouts

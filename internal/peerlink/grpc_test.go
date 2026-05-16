@@ -569,14 +569,13 @@ func TestGRPCPeerLink_PlaneMetrics(t *testing.T) {
 	if err := peerLink.SendEvent(context.Background(), "test-peer", eventlog.NewEvent("data", []byte("one"))); err != nil {
 		t.Fatalf("Failed to queue data-plane event: %v", err)
 	}
-	change := &peerlink.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "client-1",
-		Topic:    "data",
-		NodeId:   "node-1",
+	update := &peerlink.InterestUpdate{
+		Action: "subscribe",
+		Topic:  "data",
+		NodeId: "node-1",
 	}
-	if err := peerLink.SendSubscriptionChange(context.Background(), "test-peer", change); err != nil {
-		t.Fatalf("Failed to queue control-plane subscription change: %v", err)
+	if err := peerLink.SendInterestUpdate(context.Background(), "test-peer", update); err != nil {
+		t.Fatalf("Failed to queue control-plane interest update: %v", err)
 	}
 
 	if err := peerLink.SendEvent(context.Background(), "test-peer", eventlog.NewEvent("data", []byte("two"))); err == nil {
@@ -618,9 +617,13 @@ func TestGRPCPeerLink_PlaneMetrics(t *testing.T) {
 		sentAt: time.Now(),
 	}, peerLink.sendQueues["test-peer"], nil)
 	peerLink.handleSendFailure("test-peer", &ControlPlaneMsg{
-		peerID:             "test-peer",
-		subscriptionChange: change,
-		sentAt:             time.Now(),
+		peerID: "test-peer",
+		interestMessage: &peerlink.InterestMessage{Update: &peerlink.InterestUpdate{
+			Action: "subscribe",
+			Topic:  "data",
+			NodeId: "node-1",
+		}},
+		sentAt: time.Now(),
 	}, peerLink.controlQueues["test-peer"], nil)
 
 	metrics = requirePeerMetrics(t, peerLink.GetAllPeerMetrics(), "test-peer")

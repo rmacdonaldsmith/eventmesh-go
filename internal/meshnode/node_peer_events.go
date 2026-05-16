@@ -53,10 +53,9 @@ func (n *GRPCMeshNode) handleIncomingDataPlaneEvents(ctx context.Context) {
 	}
 }
 
-// handleIncomingControlPlaneMessages processes subscription changes from peer nodes
+// handleIncomingControlPlaneMessages processes aggregate peer-interest messages.
 func (n *GRPCMeshNode) handleIncomingControlPlaneMessages(ctx context.Context) {
-	// Get subscription change channel from PeerLink control plane
-	changeChan, errChan := n.controlPlanePeerLink.ReceiveSubscriptionChanges(ctx)
+	messageChan, errChan := n.controlPlanePeerLink.ReceiveInterestMessages(ctx)
 
 	for {
 		select {
@@ -64,14 +63,14 @@ func (n *GRPCMeshNode) handleIncomingControlPlaneMessages(ctx context.Context) {
 			// Context cancelled, stop processing
 			return
 
-		case change, ok := <-changeChan:
+		case message, ok := <-messageChan:
 			if !ok {
 				// Change channel closed, stop processing
 				return
 			}
 
-			// Process the incoming subscription change
-			n.processIncomingSubscriptionChange(ctx, change)
+			// Process the incoming peer-interest message.
+			n.processIncomingInterestMessage(ctx, message)
 
 		case err, ok := <-errChan:
 			if !ok {
@@ -80,7 +79,7 @@ func (n *GRPCMeshNode) handleIncomingControlPlaneMessages(ctx context.Context) {
 			}
 			if err != nil {
 				// Log error but continue processing
-				slog.Error("error receiving subscription changes from peers",
+				slog.Error("error receiving interest messages from peers",
 					"node_id", n.config.NodeID,
 					"error", err)
 			}
@@ -153,39 +152,60 @@ func (n *GRPCMeshNode) processIncomingUserEvent(ctx context.Context, event *even
 	}
 }
 
-// processIncomingSubscriptionChange handles a single incoming subscription change from a peer
-// This is clean control plane processing using protobuf messages
-func (n *GRPCMeshNode) processIncomingSubscriptionChange(ctx context.Context, change *peerlinkpkg.SubscriptionChange) {
-	// Update peer subscription tracking
+func (n *GRPCMeshNode) processIncomingInterestMessage(ctx context.Context, message *peerlinkpkg.InterestMessage) {
+	if message == nil {
+		return
+	}
+	if message.Update != nil {
+		n.processIncomingInterestUpdate(ctx, message.Update)
+		return
+	}
+	if message.Snapshot != nil {
+		n.processIncomingInterestSnapshot(ctx, message.Snapshot)
+	}
+}
+
+func (n *GRPCMeshNode) processIncomingInterestUpdate(ctx context.Context, update *peerlinkpkg.InterestUpdate) {
 	n.peerSubscriptionsMu.Lock()
 	defer n.peerSubscriptionsMu.Unlock()
 
-	// Initialize peer map if it doesn't exist
-	if n.peerSubscriptions[change.NodeId] == nil {
-		n.peerSubscriptions[change.NodeId] = make(map[string]bool)
+	if n.peerSubscriptions[update.NodeId] == nil {
+		n.peerSubscriptions[update.NodeId] = make(map[string]bool)
 	}
 
-	// Update subscription state
-	switch change.Action {
+	switch update.Action {
 	case "subscribe":
-		n.peerSubscriptions[change.NodeId][change.Topic] = true
-		slog.Debug("peer subscription added",
-			"peer_node_id", change.NodeId,
-			"client_id", change.ClientId,
-			"topic", change.Topic)
+		n.peerSubscriptions[update.NodeId][update.Topic] = true
+		slog.Debug("peer interest added",
+			"peer_node_id", update.NodeId,
+			"topic", update.Topic)
 	case "unsubscribe":
-		delete(n.peerSubscriptions[change.NodeId], change.Topic)
-		slog.Debug("peer subscription removed",
-			"peer_node_id", change.NodeId,
-			"client_id", change.ClientId,
-			"topic", change.Topic)
+		delete(n.peerSubscriptions[update.NodeId], update.Topic)
+		slog.Debug("peer interest removed",
+			"peer_node_id", update.NodeId,
+			"topic", update.Topic)
 	default:
-		slog.Warn("received subscription change with unknown action",
-			"action", change.Action,
-			"peer_node_id", change.NodeId,
-			"client_id", change.ClientId,
-			"topic", change.Topic)
+		slog.Warn("received interest update with unknown action",
+			"action", update.Action,
+			"peer_node_id", update.NodeId,
+			"topic", update.Topic)
 	}
+}
+
+func (n *GRPCMeshNode) processIncomingInterestSnapshot(ctx context.Context, snapshot *peerlinkpkg.InterestSnapshot) {
+	n.peerSubscriptionsMu.Lock()
+	defer n.peerSubscriptionsMu.Unlock()
+
+	topics := make(map[string]bool, len(snapshot.Topics))
+	for _, topic := range snapshot.Topics {
+		if topic != "" {
+			topics[topic] = true
+		}
+	}
+	n.peerSubscriptions[snapshot.NodeId] = topics
+	slog.Debug("peer interest snapshot applied",
+		"peer_node_id", snapshot.NodeId,
+		"topics", len(topics))
 }
 
 // getInterestedPeers returns only peers that have subscribers for the given topic

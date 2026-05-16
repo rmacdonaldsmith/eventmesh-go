@@ -21,7 +21,7 @@ message PeerMessage {
     Event event = 2;              // Data plane: user events
     Ack ack = 3;
     Heartbeat heartbeat = 4;
-    ControlPlaneMessage control_plane = 5;  // Control plane: subscription gossip
+    ControlPlaneMessage control_plane = 5;  // Control plane: topic-interest gossip
   }
 }
 
@@ -54,20 +54,27 @@ message Heartbeat {
   int64 timestamp = 1;
 }
 
-// Control plane message wrapper for subscription gossip and other mesh coordination.
+// Control plane message wrapper for topic-interest gossip and other mesh coordination.
 // Control-plane frames are never user events, even though they share the same
 // physical EventStream as data-plane frames.
 message ControlPlaneMessage {
   oneof kind {
-    SubscriptionChange subscription_change = 1;  // Subscription gossip between nodes
+    InterestUpdate interest_update = 1;      // Aggregate node-level interest delta
+    InterestSnapshot interest_snapshot = 2;  // Complete aggregate node-level interest snapshot
   }
 }
 
-// Subscription change notification for peer-to-peer gossip.
-// Replaces the previous approach of using special Event topics like "__mesh.subscription.subscribe".
-message SubscriptionChange {
-  string action = 1;     // "subscribe" or "unsubscribe"
-  string client_id = 2;  // ID of the client making the change
-  string topic = 3;      // Topic pattern being subscribed/unsubscribed
-  string node_id = 4;    // ID of the node where the change occurred
+// Aggregate topic-interest delta for peer-to-peer gossip.
+// Peers gossip node-level topic interest, not individual client subscriptions.
+message InterestUpdate {
+  string node_id = 1;  // ID of the node where aggregate interest changed
+  string action = 2;   // "subscribe" or "unsubscribe"
+  string topic = 3;    // Topic pattern whose aggregate interest changed
+}
+
+// Complete aggregate topic-interest snapshot for peer-to-peer gossip.
+// Receivers replace their entire stored view for node_id with topics.
+message InterestSnapshot {
+  string node_id = 1;          // ID of the node sending its current aggregate interest view
+  repeated string topics = 2;  // Current aggregate topic patterns with local interest
 }

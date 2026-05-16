@@ -53,12 +53,12 @@ func (m *DataPlaneMessage) IncrementSendAttempts() int {
 }
 func (m *DataPlaneMessage) Event() *eventlog.Event { return m.event }
 
-// ControlPlaneMsg represents a subscription change message
+// ControlPlaneMsg represents an aggregate peer-interest control message.
 type ControlPlaneMsg struct {
-	peerID             string
-	subscriptionChange *peerlink.SubscriptionChange
-	sentAt             time.Time
-	sendAttempts       int
+	peerID          string
+	interestMessage *peerlink.InterestMessage
+	sentAt          time.Time
+	sendAttempts    int
 }
 
 func (m *ControlPlaneMsg) PeerID() string        { return m.peerID }
@@ -69,8 +69,8 @@ func (m *ControlPlaneMsg) IncrementSendAttempts() int {
 	m.sendAttempts++
 	return m.sendAttempts
 }
-func (m *ControlPlaneMsg) SubscriptionChange() *peerlink.SubscriptionChange {
-	return m.subscriptionChange
+func (m *ControlPlaneMsg) InterestMessage() *peerlink.InterestMessage {
+	return m.interestMessage
 }
 
 // HeartbeatMsg represents a control-plane heartbeat message.
@@ -130,23 +130,23 @@ type connectionInfo struct {
 // GRPCPeerLink implements the PeerLink interface using gRPC for peer-to-peer communication
 type GRPCPeerLink struct {
 	peerlinkv1.UnimplementedPeerLinkServer
-	config                  *Config
-	closed                  bool
-	mu                      sync.RWMutex
-	grpcServer              *grpc.Server
-	listener                net.Listener
-	started                 bool
-	connections             map[string]*connectionInfo                 // peerID -> connection info
-	sendQueues              map[string]chan PeerMessage                // peerID -> data-plane send queue
-	controlQueues           map[string]chan PeerMessage                // peerID -> control-plane send queue
-	metrics                 map[string]*peerMetrics                    // peerID -> metrics
-	subscribers             map[chan *eventlog.Event]bool              // active ReceiveEvents channels
-	subscriptionSubscribers map[chan *peerlink.SubscriptionChange]bool // active ReceiveSubscriptionChanges channels
-	outboundConns           map[string]*grpc.ClientConn                // peerID -> outbound gRPC connection
-	outboundCancel          map[string]context.CancelFunc              // peerID -> cancel func for connection goroutine
-	heartbeatCancel         context.CancelFunc
-	heartbeatToken          *struct{}
-	heartbeatsRunning       bool
+	config              *Config
+	closed              bool
+	mu                  sync.RWMutex
+	grpcServer          *grpc.Server
+	listener            net.Listener
+	started             bool
+	connections         map[string]*connectionInfo              // peerID -> connection info
+	sendQueues          map[string]chan PeerMessage             // peerID -> data-plane send queue
+	controlQueues       map[string]chan PeerMessage             // peerID -> control-plane send queue
+	metrics             map[string]*peerMetrics                 // peerID -> metrics
+	subscribers         map[chan *eventlog.Event]bool           // active ReceiveEvents channels
+	interestSubscribers map[chan *peerlink.InterestMessage]bool // active ReceiveInterestMessages channels
+	outboundConns       map[string]*grpc.ClientConn             // peerID -> outbound gRPC connection
+	outboundCancel      map[string]context.CancelFunc           // peerID -> cancel func for connection goroutine
+	heartbeatCancel     context.CancelFunc
+	heartbeatToken      *struct{}
+	heartbeatsRunning   bool
 }
 
 // NewGRPCPeerLink creates a new GRPCPeerLink with the given configuration
@@ -160,17 +160,17 @@ func NewGRPCPeerLink(config *Config) (*GRPCPeerLink, error) {
 	configCopy.SetDefaults()
 
 	return &GRPCPeerLink{
-		config:                  &configCopy,
-		closed:                  false,
-		started:                 false,
-		connections:             make(map[string]*connectionInfo),
-		sendQueues:              make(map[string]chan PeerMessage),
-		controlQueues:           make(map[string]chan PeerMessage),
-		metrics:                 make(map[string]*peerMetrics),
-		subscribers:             make(map[chan *eventlog.Event]bool),
-		subscriptionSubscribers: make(map[chan *peerlink.SubscriptionChange]bool),
-		outboundConns:           make(map[string]*grpc.ClientConn),
-		outboundCancel:          make(map[string]context.CancelFunc),
+		config:              &configCopy,
+		closed:              false,
+		started:             false,
+		connections:         make(map[string]*connectionInfo),
+		sendQueues:          make(map[string]chan PeerMessage),
+		controlQueues:       make(map[string]chan PeerMessage),
+		metrics:             make(map[string]*peerMetrics),
+		subscribers:         make(map[chan *eventlog.Event]bool),
+		interestSubscribers: make(map[chan *peerlink.InterestMessage]bool),
+		outboundConns:       make(map[string]*grpc.ClientConn),
+		outboundCancel:      make(map[string]context.CancelFunc),
 	}, nil
 }
 
@@ -267,17 +267,10 @@ func (g *GRPCPeerLink) EventStream(stream grpc.BidiStreamingServer[peerlinkv1.Pe
 				g.mu.Unlock()
 			} else if controlMsg := msg.GetControlPlane(); controlMsg != nil {
 				g.markPeerSeen(peerID)
-				// Control plane: Handle subscription changes and other control messages
-				if subChange := controlMsg.GetSubscriptionChange(); subChange != nil {
+				if interestMessage := interestMessageFromProto(controlMsg); interestMessage != nil {
 					g.mu.Lock()
 					if !g.closed {
-						receivedChange := &peerlink.SubscriptionChange{
-							Action:   subChange.Action,
-							ClientId: subChange.ClientId,
-							Topic:    subChange.Topic,
-							NodeId:   subChange.NodeId,
-						}
-						g.distributeSubscriptionChange(receivedChange)
+						g.distributeInterestMessage(interestMessage)
 					}
 					g.mu.Unlock()
 				}
@@ -361,9 +354,7 @@ func (g *GRPCPeerLink) sendServerStreamMessage(peerID string, queuedMsg PeerMess
 				"peer_id", peerID,
 				"error", err)
 		case *ControlPlaneMsg:
-			slog.Error("EventStream failed to send subscription change",
-				"action", m.SubscriptionChange().Action,
-				"topic", m.SubscriptionChange().Topic,
+			slog.Error("EventStream failed to send interest message",
 				"peer_id", peerID,
 				"error", err)
 		case *HeartbeatMsg:
@@ -590,17 +581,10 @@ func (g *GRPCPeerLink) startReceiveGoroutine(ctx context.Context, peerID string,
 				g.mu.Unlock()
 			} else if controlMsg := msg.GetControlPlane(); controlMsg != nil {
 				g.markPeerSeen(peerID)
-				// Control plane: Handle subscription changes and other control messages
-				if subChange := controlMsg.GetSubscriptionChange(); subChange != nil {
+				if interestMessage := interestMessageFromProto(controlMsg); interestMessage != nil {
 					g.mu.Lock()
 					if !g.closed {
-						receivedChange := &peerlink.SubscriptionChange{
-							Action:   subChange.Action,
-							ClientId: subChange.ClientId,
-							Topic:    subChange.Topic,
-							NodeId:   subChange.NodeId,
-						}
-						g.distributeSubscriptionChange(receivedChange)
+						g.distributeInterestMessage(interestMessage)
 					}
 					g.mu.Unlock()
 				}
@@ -614,6 +598,23 @@ func (g *GRPCPeerLink) startReceiveGoroutine(ctx context.Context, peerID string,
 		}
 	}()
 	return recvDone
+}
+
+func interestMessageFromProto(controlMsg *peerlinkv1.ControlPlaneMessage) *peerlink.InterestMessage {
+	if update := controlMsg.GetInterestUpdate(); update != nil {
+		return &peerlink.InterestMessage{Update: &peerlink.InterestUpdate{
+			NodeId: update.NodeId,
+			Action: update.Action,
+			Topic:  update.Topic,
+		}}
+	}
+	if snapshot := controlMsg.GetInterestSnapshot(); snapshot != nil {
+		return &peerlink.InterestMessage{Snapshot: &peerlink.InterestSnapshot{
+			NodeId: snapshot.NodeId,
+			Topics: append([]string(nil), snapshot.Topics...),
+		}}
+	}
+	return nil
 }
 
 func eventFromProto(eventMsg *peerlinkv1.Event) *eventlog.Event {
@@ -651,18 +652,9 @@ func (g *GRPCPeerLink) serializeMessage(msg PeerMessage) (*peerlinkv1.PeerMessag
 		}, nil
 
 	case *ControlPlaneMsg:
-		// Control plane: subscription change
-		subChange := &peerlinkv1.SubscriptionChange{
-			Action:   m.SubscriptionChange().Action,
-			ClientId: m.SubscriptionChange().ClientId,
-			Topic:    m.SubscriptionChange().Topic,
-			NodeId:   m.SubscriptionChange().NodeId,
-		}
-
-		controlMsg := &peerlinkv1.ControlPlaneMessage{
-			Kind: &peerlinkv1.ControlPlaneMessage_SubscriptionChange{
-				SubscriptionChange: subChange,
-			},
+		controlMsg, err := controlMessageToProto(m.InterestMessage())
+		if err != nil {
+			return nil, err
 		}
 
 		return &peerlinkv1.PeerMessage{
@@ -708,11 +700,9 @@ func (g *GRPCPeerLink) processOutboundMessage(peerID string, msg PeerMessage, st
 				"event_offset", m.Event().Offset,
 				"error", err)
 		case *ControlPlaneMsg:
-			slog.Error("failed to send subscription change to peer",
+			slog.Error("failed to send interest message to peer",
 				"peer_id", peerID,
 				"local_node_id", g.config.NodeID,
-				"action", m.SubscriptionChange().Action,
-				"topic", m.SubscriptionChange().Topic,
 				"error", err)
 		case *HeartbeatMsg:
 			slog.Error("failed to send heartbeat to peer",
@@ -764,6 +754,34 @@ func (g *GRPCPeerLink) dropFailedMessage(peerID string, msg PeerMessage, reason 
 		"reason", reason)
 }
 
+func controlMessageToProto(message *peerlink.InterestMessage) (*peerlinkv1.ControlPlaneMessage, error) {
+	if message == nil {
+		return nil, errors.New("interest message is nil")
+	}
+	if message.Update != nil {
+		return &peerlinkv1.ControlPlaneMessage{
+			Kind: &peerlinkv1.ControlPlaneMessage_InterestUpdate{
+				InterestUpdate: &peerlinkv1.InterestUpdate{
+					NodeId: message.Update.NodeId,
+					Action: message.Update.Action,
+					Topic:  message.Update.Topic,
+				},
+			},
+		}, nil
+	}
+	if message.Snapshot != nil {
+		return &peerlinkv1.ControlPlaneMessage{
+			Kind: &peerlinkv1.ControlPlaneMessage_InterestSnapshot{
+				InterestSnapshot: &peerlinkv1.InterestSnapshot{
+					NodeId: message.Snapshot.NodeId,
+					Topics: append([]string(nil), message.Snapshot.Topics...),
+				},
+			},
+		}, nil
+	}
+	return nil, errors.New("interest message has no update or snapshot")
+}
+
 func messageTopic(msg PeerMessage) string {
 	switch m := msg.(type) {
 	case *DataPlaneMessage:
@@ -772,10 +790,17 @@ func messageTopic(msg PeerMessage) string {
 		}
 		return m.Event().Topic
 	case *ControlPlaneMsg:
-		if m.SubscriptionChange() == nil {
+		message := m.InterestMessage()
+		if message == nil {
 			return "unknown"
 		}
-		return m.SubscriptionChange().Topic
+		if message.Update != nil {
+			return message.Update.Topic
+		}
+		if message.Snapshot != nil {
+			return "interest-snapshot"
+		}
+		return "unknown"
 	case *HeartbeatMsg:
 		return "heartbeat"
 	default:
@@ -977,8 +1002,7 @@ func (g *GRPCPeerLink) SendEvent(ctx context.Context, peerID string, event *even
 	}
 }
 
-// SendSubscriptionChange sends subscription change notifications to peers
-func (g *GRPCPeerLink) SendSubscriptionChange(ctx context.Context, peerID string, change *peerlink.SubscriptionChange) error {
+func (g *GRPCPeerLink) sendInterestMessage(ctx context.Context, peerID string, message *peerlink.InterestMessage) error {
 	g.mu.RLock()
 	if g.closed {
 		g.mu.RUnlock()
@@ -995,9 +1019,9 @@ func (g *GRPCPeerLink) SendSubscriptionChange(ctx context.Context, peerID string
 
 	// Create control plane message
 	msg := &ControlPlaneMsg{
-		peerID:             peerID,
-		subscriptionChange: change,
-		sentAt:             time.Now(),
+		peerID:          peerID,
+		interestMessage: message,
+		sentAt:          time.Now(),
 	}
 
 	// Try to send to queue with timeout (bounded queue behavior)
@@ -1010,8 +1034,18 @@ func (g *GRPCPeerLink) SendSubscriptionChange(ctx context.Context, peerID string
 		return nil
 	case <-timeoutCtx.Done():
 		g.recordPlaneDrop(peerID, controlPlaneMessage)
-		return errors.New("send queue full - subscription change dropped")
+		return errors.New("send queue full - interest message dropped")
 	}
+}
+
+// SendInterestUpdate sends an aggregate topic-interest delta to a peer.
+func (g *GRPCPeerLink) SendInterestUpdate(ctx context.Context, peerID string, update *peerlink.InterestUpdate) error {
+	return g.sendInterestMessage(ctx, peerID, &peerlink.InterestMessage{Update: update})
+}
+
+// SendInterestSnapshot sends a complete aggregate topic-interest snapshot to a peer.
+func (g *GRPCPeerLink) SendInterestSnapshot(ctx context.Context, peerID string, snapshot *peerlink.InterestSnapshot) error {
+	return g.sendInterestMessage(ctx, peerID, &peerlink.InterestMessage{Snapshot: snapshot})
 }
 
 // ReceiveEvents returns a channel for receiving events from peer nodes
@@ -1044,8 +1078,8 @@ func (g *GRPCPeerLink) ReceiveEvents(ctx context.Context) (<-chan *eventlog.Even
 	return eventChan, errChan
 }
 
-// ReceiveSubscriptionChanges returns a channel for receiving subscription changes from peer nodes
-func (g *GRPCPeerLink) ReceiveSubscriptionChanges(ctx context.Context) (<-chan *peerlink.SubscriptionChange, <-chan error) {
+// ReceiveInterestMessages returns a channel for receiving peer-interest messages.
+func (g *GRPCPeerLink) ReceiveInterestMessages(ctx context.Context) (<-chan *peerlink.InterestMessage, <-chan error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -1056,22 +1090,22 @@ func (g *GRPCPeerLink) ReceiveSubscriptionChanges(ctx context.Context) (<-chan *
 	}
 
 	// Create channels for this subscriber
-	changeChan := make(chan *peerlink.SubscriptionChange, 10) // Small buffer to prevent blocking
+	messageChan := make(chan *peerlink.InterestMessage, 10) // Small buffer to prevent blocking
 	errChan := make(chan error, 1)
 
 	// Register this channel as a subscriber
-	g.registerSubscriptionSubscriber(changeChan)
+	g.registerInterestSubscriber(messageChan)
 
 	// Handle cleanup when context is cancelled
 	go func() {
 		<-ctx.Done()
 		g.mu.Lock()
-		g.unregisterSubscriptionSubscriber(changeChan)
-		close(changeChan)
+		g.unregisterInterestSubscriber(messageChan)
+		close(messageChan)
 		g.mu.Unlock()
 	}()
 
-	return changeChan, errChan
+	return messageChan, errChan
 }
 
 // SendHeartbeat sends a heartbeat message to the specified peer
@@ -1168,16 +1202,16 @@ func (g *GRPCPeerLink) unregisterSubscriber(ch chan *eventlog.Event) {
 	delete(g.subscribers, ch)
 }
 
-// registerSubscriptionSubscriber adds a channel to the subscription change subscriber registry
+// registerInterestSubscriber adds a channel to the peer-interest subscriber registry.
 // Must be called with mutex held
-func (g *GRPCPeerLink) registerSubscriptionSubscriber(ch chan *peerlink.SubscriptionChange) {
-	g.subscriptionSubscribers[ch] = true
+func (g *GRPCPeerLink) registerInterestSubscriber(ch chan *peerlink.InterestMessage) {
+	g.interestSubscribers[ch] = true
 }
 
-// unregisterSubscriptionSubscriber removes a channel from the subscription change subscriber registry
+// unregisterInterestSubscriber removes a channel from the peer-interest subscriber registry.
 // Must be called with mutex held
-func (g *GRPCPeerLink) unregisterSubscriptionSubscriber(ch chan *peerlink.SubscriptionChange) {
-	delete(g.subscriptionSubscribers, ch)
+func (g *GRPCPeerLink) unregisterInterestSubscriber(ch chan *peerlink.InterestMessage) {
+	delete(g.interestSubscribers, ch)
 }
 
 // distributeEvent sends an event to all registered subscribers (non-blocking)
@@ -1193,13 +1227,13 @@ func (g *GRPCPeerLink) distributeEvent(event *eventlog.Event) {
 	}
 }
 
-// distributeSubscriptionChange sends a subscription change to all registered subscribers (non-blocking)
+// distributeInterestMessage sends a peer-interest message to all registered subscribers (non-blocking).
 // Must be called with mutex held
-func (g *GRPCPeerLink) distributeSubscriptionChange(change *peerlink.SubscriptionChange) {
-	for subscriber := range g.subscriptionSubscribers {
+func (g *GRPCPeerLink) distributeInterestMessage(message *peerlink.InterestMessage) {
+	for subscriber := range g.interestSubscribers {
 		select {
-		case subscriber <- change:
-			// Subscription change sent successfully
+		case subscriber <- message:
+			// Interest message sent successfully
 		default:
 			// Subscriber channel is full - skip this subscriber to avoid blocking
 		}

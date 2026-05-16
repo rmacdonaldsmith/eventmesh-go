@@ -38,17 +38,15 @@ func TestGRPCMeshNode_PeerFailureDoesNotBlockHealthyPeerForwarding(t *testing.T)
 		t.Fatalf("Failed to start mesh node: %v", err)
 	}
 
-	node.processIncomingSubscriptionChange(ctx, &peerlinkpkg.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "healthy-subscriber",
-		Topic:    topic,
-		NodeId:   healthyPeerID,
+	node.processIncomingInterestUpdate(ctx, &peerlinkpkg.InterestUpdate{
+		Action: "subscribe",
+		Topic:  topic,
+		NodeId: healthyPeerID,
 	})
-	node.processIncomingSubscriptionChange(ctx, &peerlinkpkg.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "failed-subscriber",
-		Topic:    topic,
-		NodeId:   failedPeerID,
+	node.processIncomingInterestUpdate(ctx, &peerlinkpkg.InterestUpdate{
+		Action: "subscribe",
+		Topic:  topic,
+		NodeId: failedPeerID,
 	})
 
 	publisher := NewTrustedClient("partition-publisher-client")
@@ -120,11 +118,10 @@ func TestGRPCMeshNode_BackpressuredPeerReportsDropAfterLocalPersistence(t *testi
 	}); err != nil {
 		t.Fatalf("Failed to connect unreachable peer: %v", err)
 	}
-	node.processIncomingSubscriptionChange(ctx, &peerlinkpkg.SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "backpressured-subscriber",
-		Topic:    topic,
-		NodeId:   peerID,
+	node.processIncomingInterestUpdate(ctx, &peerlinkpkg.InterestUpdate{
+		Action: "subscribe",
+		Topic:  topic,
+		NodeId: peerID,
 	})
 
 	publisher := NewTrustedClient("backpressure-publisher-client")
@@ -168,7 +165,7 @@ type partitionPeerLink struct {
 	sentByPeer      map[string][]*eventlog.Event
 	events          chan *eventlog.Event
 	eventErrs       chan error
-	changes         chan *peerlinkpkg.SubscriptionChange
+	changes         chan *peerlinkpkg.InterestMessage
 	changeErrs      chan error
 	closeOnce       sync.Once
 	heartbeatsStart int
@@ -204,7 +201,7 @@ func newPartitionPeerLink(peers ...peerlinkpkg.PeerNode) *partitionPeerLink {
 		sentByPeer:   make(map[string][]*eventlog.Event),
 		events:       make(chan *eventlog.Event),
 		eventErrs:    make(chan error),
-		changes:      make(chan *peerlinkpkg.SubscriptionChange),
+		changes:      make(chan *peerlinkpkg.InterestMessage),
 		changeErrs:   make(chan error),
 	}
 }
@@ -242,11 +239,15 @@ func (p *partitionPeerLink) ReceiveEvents(ctx context.Context) (<-chan *eventlog
 	return p.events, p.eventErrs
 }
 
-func (p *partitionPeerLink) SendSubscriptionChange(ctx context.Context, peerID string, change *peerlinkpkg.SubscriptionChange) error {
+func (p *partitionPeerLink) SendInterestUpdate(ctx context.Context, peerID string, update *peerlinkpkg.InterestUpdate) error {
 	return nil
 }
 
-func (p *partitionPeerLink) ReceiveSubscriptionChanges(ctx context.Context) (<-chan *peerlinkpkg.SubscriptionChange, <-chan error) {
+func (p *partitionPeerLink) SendInterestSnapshot(ctx context.Context, peerID string, snapshot *peerlinkpkg.InterestSnapshot) error {
+	return nil
+}
+
+func (p *partitionPeerLink) ReceiveInterestMessages(ctx context.Context) (<-chan *peerlinkpkg.InterestMessage, <-chan error) {
 	return p.changes, p.changeErrs
 }
 

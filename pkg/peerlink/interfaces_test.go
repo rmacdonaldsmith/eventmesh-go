@@ -32,14 +32,18 @@ func (m *mockDataPlanePeerLink) ReceiveEvents(ctx context.Context) (<-chan *even
 
 type mockControlPlanePeerLink struct{}
 
-func (m *mockControlPlanePeerLink) SendSubscriptionChange(ctx context.Context, peerID string, change *SubscriptionChange) error {
+func (m *mockControlPlanePeerLink) SendInterestUpdate(ctx context.Context, peerID string, update *InterestUpdate) error {
 	return nil
 }
 
-func (m *mockControlPlanePeerLink) ReceiveSubscriptionChanges(ctx context.Context) (<-chan *SubscriptionChange, <-chan error) {
-	changeChan := make(chan *SubscriptionChange, 1)
+func (m *mockControlPlanePeerLink) SendInterestSnapshot(ctx context.Context, peerID string, snapshot *InterestSnapshot) error {
+	return nil
+}
+
+func (m *mockControlPlanePeerLink) ReceiveInterestMessages(ctx context.Context) (<-chan *InterestMessage, <-chan error) {
+	messageChan := make(chan *InterestMessage, 1)
 	errChan := make(chan error, 1)
-	return changeChan, errChan
+	return messageChan, errChan
 }
 
 func (m *mockControlPlanePeerLink) SendHeartbeat(ctx context.Context, peerID string) error {
@@ -125,22 +129,28 @@ func TestControlPlanePeerLink_Functionality(t *testing.T) {
 	ctx := context.Background()
 	controlPlane := &mockControlPlanePeerLink{}
 
-	// Test SendSubscriptionChange
-	change := &SubscriptionChange{
-		Action:   "subscribe",
-		ClientId: "client-1",
-		Topic:    "orders.*",
-		NodeId:   "node-1",
+	// Test SendInterestUpdate
+	update := &InterestUpdate{
+		Action: "subscribe",
+		Topic:  "orders.*",
+		NodeId: "node-1",
 	}
-	err := controlPlane.SendSubscriptionChange(ctx, "peer-1", change)
+	err := controlPlane.SendInterestUpdate(ctx, "peer-1", update)
 	if err != nil {
-		t.Errorf("Expected no error from SendSubscriptionChange, got %v", err)
+		t.Errorf("Expected no error from SendInterestUpdate, got %v", err)
 	}
 
-	// Test ReceiveSubscriptionChanges
-	changeChan, errChan := controlPlane.ReceiveSubscriptionChanges(ctx)
-	if changeChan == nil {
-		t.Error("Expected non-nil subscription change channel")
+	// Test SendInterestSnapshot
+	snapshot := &InterestSnapshot{NodeId: "node-1", Topics: []string{"orders.*"}}
+	err = controlPlane.SendInterestSnapshot(ctx, "peer-1", snapshot)
+	if err != nil {
+		t.Errorf("Expected no error from SendInterestSnapshot, got %v", err)
+	}
+
+	// Test ReceiveInterestMessages
+	messageChan, errChan := controlPlane.ReceiveInterestMessages(ctx)
+	if messageChan == nil {
+		t.Error("Expected non-nil interest message channel")
 	}
 	if errChan == nil {
 		t.Error("Expected non-nil error channel")
@@ -234,11 +244,11 @@ func TestInterfaceSeparationPrinciples(t *testing.T) {
 	// Test that ControlPlanePeerLink only handles control messages
 	controlPlane := &mockControlPlanePeerLink{}
 
-	// Should handle subscription changes
-	change := &SubscriptionChange{Action: "subscribe", Topic: "control.topic"}
-	err = controlPlane.SendSubscriptionChange(ctx, "peer-1", change)
+	// Should handle aggregate interest updates
+	update := &InterestUpdate{Action: "subscribe", Topic: "control.topic", NodeId: "node-1"}
+	err = controlPlane.SendInterestUpdate(ctx, "peer-1", update)
 	if err != nil {
-		t.Error("ControlPlanePeerLink should handle subscription changes")
+		t.Error("ControlPlanePeerLink should handle interest updates")
 	}
 
 	// Should handle heartbeats

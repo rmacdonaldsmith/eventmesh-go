@@ -51,12 +51,23 @@ type PeerNode interface {
 	IsHealthy() bool
 }
 
-// SubscriptionChange represents a subscription change event for control plane communication
-type SubscriptionChange struct {
-	Action   string // "subscribe" or "unsubscribe"
-	ClientId string // ID of the client making the change
-	Topic    string // Topic pattern being subscribed/unsubscribed
-	NodeId   string // ID of the node where the change occurred
+// InterestUpdate represents an aggregate node-level topic-interest delta.
+type InterestUpdate struct {
+	NodeId string // ID of the node where aggregate interest changed
+	Action string // "subscribe" or "unsubscribe"
+	Topic  string // Topic pattern whose aggregate interest changed
+}
+
+// InterestSnapshot represents a complete aggregate node-level topic-interest view.
+type InterestSnapshot struct {
+	NodeId string   // ID of the node sending its current aggregate interest view
+	Topics []string // Current aggregate topic patterns with local interest
+}
+
+// InterestMessage is a control-plane peer-interest message.
+type InterestMessage struct {
+	Update   *InterestUpdate
+	Snapshot *InterestSnapshot
 }
 
 // DataPlanePeerLink handles user event streaming between mesh nodes.
@@ -74,13 +85,14 @@ type DataPlanePeerLink interface {
 // ControlPlanePeerLink handles subscription gossip and health monitoring between mesh nodes.
 // Focused interface for control plane communication with independent QoS.
 type ControlPlanePeerLink interface {
-	// SendSubscriptionChange sends subscription change notifications to peers.
-	// Used for subscription gossip propagation across the mesh.
-	SendSubscriptionChange(ctx context.Context, peerID string, change *SubscriptionChange) error
+	// SendInterestUpdate sends aggregate topic-interest deltas to peers.
+	SendInterestUpdate(ctx context.Context, peerID string, update *InterestUpdate) error
 
-	// ReceiveSubscriptionChanges returns a channel for receiving subscription changes.
-	// Subscription changes are received from all connected peers.
-	ReceiveSubscriptionChanges(ctx context.Context) (<-chan *SubscriptionChange, <-chan error)
+	// SendInterestSnapshot sends a complete aggregate topic-interest snapshot to a peer.
+	SendInterestSnapshot(ctx context.Context, peerID string, snapshot *InterestSnapshot) error
+
+	// ReceiveInterestMessages returns aggregate peer-interest control messages.
+	ReceiveInterestMessages(ctx context.Context) (<-chan *InterestMessage, <-chan error)
 
 	// SendHeartbeat sends a heartbeat message to the specified peer.
 	// Implements health monitoring for control plane.

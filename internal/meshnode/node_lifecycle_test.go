@@ -310,7 +310,7 @@ type lifecycleSpyPeerLink struct {
 	stopCalls            int
 	events               chan *eventlogpkg.Event
 	eventErrs            chan error
-	changes              chan *peerlinkpkg.SubscriptionChange
+	changes              chan *peerlinkpkg.InterestMessage
 	changeErrs           chan error
 	eventCtxs            chan context.Context
 	changeCtxs           chan context.Context
@@ -321,7 +321,7 @@ func newLifecycleSpyPeerLink() *lifecycleSpyPeerLink {
 	return &lifecycleSpyPeerLink{
 		events:     make(chan *eventlogpkg.Event),
 		eventErrs:  make(chan error),
-		changes:    make(chan *peerlinkpkg.SubscriptionChange),
+		changes:    make(chan *peerlinkpkg.InterestMessage),
 		changeErrs: make(chan error),
 		eventCtxs:  make(chan context.Context, 1),
 		changeCtxs: make(chan context.Context, 1),
@@ -337,11 +337,15 @@ func (l *lifecycleSpyPeerLink) ReceiveEvents(ctx context.Context) (<-chan *event
 	return l.events, l.eventErrs
 }
 
-func (l *lifecycleSpyPeerLink) SendSubscriptionChange(ctx context.Context, peerID string, change *peerlinkpkg.SubscriptionChange) error {
+func (l *lifecycleSpyPeerLink) SendInterestUpdate(ctx context.Context, peerID string, update *peerlinkpkg.InterestUpdate) error {
 	return nil
 }
 
-func (l *lifecycleSpyPeerLink) ReceiveSubscriptionChanges(ctx context.Context) (<-chan *peerlinkpkg.SubscriptionChange, <-chan error) {
+func (l *lifecycleSpyPeerLink) SendInterestSnapshot(ctx context.Context, peerID string, snapshot *peerlinkpkg.InterestSnapshot) error {
+	return nil
+}
+
+func (l *lifecycleSpyPeerLink) ReceiveInterestMessages(ctx context.Context) (<-chan *peerlinkpkg.InterestMessage, <-chan error) {
 	l.changeCtxs <- ctx
 	return l.changes, l.changeErrs
 }
@@ -410,7 +414,7 @@ func (l *lifecycleSpyPeerLink) waitForChangeContext(t *testing.T) context.Contex
 	case ctx := <-l.changeCtxs:
 		return ctx
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for ReceiveSubscriptionChanges context")
+		t.Fatal("timed out waiting for ReceiveInterestMessages context")
 		return nil
 	}
 }

@@ -42,6 +42,8 @@ func (n *GRPCMeshNode) Subscribe(ctx context.Context, client meshnode.Client, to
 		return fmt.Errorf("client does not implement Subscriber interface")
 	}
 
+	hadLocalInterest := n.localTopicInterestCount(topic) > 0
+
 	// Add to local routing table
 	err := n.routingTable.Subscribe(ctx, topic, subscriber)
 	if err != nil {
@@ -62,19 +64,20 @@ func (n *GRPCMeshNode) Subscribe(ctx context.Context, client meshnode.Client, to
 		"subscription_id", subscriptionID,
 		"node_id", n.config.NodeID)
 
-	// Propagate subscription interest to peers over the control plane.
-	err = n.propagateSubscriptionChange(ctx, "subscribe", client.ID(), topic)
-	if err != nil {
-		slog.Warn("failed to propagate subscription to peers",
-			"client_id", client.ID(),
-			"topic", topic,
-			"subscription_id", subscriptionID,
-			"error", err)
-	} else {
-		slog.Debug("subscription propagated to peers",
-			"client_id", client.ID(),
-			"topic", topic,
-			"subscription_id", subscriptionID)
+	// Propagate aggregate interest only when this node's local interest changes
+	// from zero subscribers to one or more subscribers.
+	if !hadLocalInterest {
+		err = n.propagateInterestUpdate(ctx, "subscribe", topic)
+		if err != nil {
+			slog.Warn("failed to propagate interest to peers",
+				"topic", topic,
+				"subscription_id", subscriptionID,
+				"error", err)
+		} else {
+			slog.Debug("interest propagated to peers",
+				"topic", topic,
+				"subscription_id", subscriptionID)
+		}
 	}
 
 	return nil
@@ -118,28 +121,29 @@ func (n *GRPCMeshNode) Unsubscribe(ctx context.Context, client meshnode.Client, 
 
 	n.removeSubscriptionMetadataByTopic(client.ID(), topic)
 
-	// Propagate subscription removal to peers over the control plane.
-	err = n.propagateSubscriptionChange(ctx, "unsubscribe", client.ID(), topic)
-	if err != nil {
-		slog.Warn("failed to propagate unsubscription to peers",
-			"client_id", client.ID(),
-			"topic", topic,
-			"error", err)
-	} else {
-		slog.Debug("unsubscription propagated to peers",
-			"client_id", client.ID(),
-			"topic", topic)
+	// Propagate aggregate interest removal only when this node's local interest
+	// drops to zero subscribers for the topic pattern.
+	if n.localTopicInterestCount(topic) == 0 {
+		err = n.propagateInterestUpdate(ctx, "unsubscribe", topic)
+		if err != nil {
+			slog.Warn("failed to propagate interest removal to peers",
+				"topic", topic,
+				"error", err)
+		} else {
+			slog.Debug("interest removal propagated to peers",
+				"topic", topic)
+		}
 	}
 
 	return nil
 }
 
-// propagateSubscriptionChange sends subscription interest changes to connected
+// propagateInterestUpdate sends aggregate topic-interest changes to connected
 // peers over the PeerLink control plane.
-func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, clientID, topic string) error {
+func (n *GRPCMeshNode) propagateInterestUpdate(ctx context.Context, action, topic string) error {
 	// Validate input parameters
-	if action == "" || clientID == "" || topic == "" {
-		return fmt.Errorf("action, clientID, and topic cannot be empty")
+	if action == "" || topic == "" {
+		return fmt.Errorf("action and topic cannot be empty")
 	}
 	if action != "subscribe" && action != "unsubscribe" {
 		return fmt.Errorf("action must be 'subscribe' or 'unsubscribe'")
@@ -153,20 +157,18 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 
 	if len(connectedPeers) == 0 {
 		// No peers to notify, not an error
-		slog.Debug("subscription change: no peers to notify",
+		slog.Debug("interest update: no peers to notify",
 			"action", action,
-			"client_id", clientID,
 			"topic", topic,
 			"node_id", n.config.NodeID)
 		return nil
 	}
 
-	// Create subscription change message
-	subscriptionChange := &peerlinkpkg.SubscriptionChange{
-		Action:   action,
-		ClientId: clientID,
-		Topic:    topic,
-		NodeId:   n.config.NodeID,
+	// Create aggregate interest update message.
+	interestUpdate := &peerlinkpkg.InterestUpdate{
+		Action: action,
+		Topic:  topic,
+		NodeId: n.config.NodeID,
 	}
 
 	// Track delivery results for observability
@@ -175,15 +177,14 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 
 	// Send to all connected peers using control plane
 	for _, peer := range connectedPeers {
-		err := n.controlPlanePeerLink.SendSubscriptionChange(ctx, peer.ID(), subscriptionChange)
+		err := n.controlPlanePeerLink.SendInterestUpdate(ctx, peer.ID(), interestUpdate)
 		if err != nil {
 			failureCount++
 			errors = append(errors, fmt.Errorf("failed to send to peer %s: %w", peer.ID(), err))
 
-			slog.Warn("failed to propagate subscription change to peer",
+			slog.Warn("failed to propagate interest update to peer",
 				"peer_id", peer.ID(),
 				"action", action,
-				"client_id", clientID,
 				"topic", topic,
 				"error", err)
 		} else {
@@ -192,9 +193,8 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 	}
 
 	// Log propagation summary
-	slog.Info("subscription change propagation completed",
+	slog.Info("interest update propagation completed",
 		"action", action,
-		"client_id", clientID,
 		"topic", topic,
 		"peers_notified", successCount,
 		"peers_failed", failureCount,
@@ -202,7 +202,7 @@ func (n *GRPCMeshNode) propagateSubscriptionChange(ctx context.Context, action, 
 
 	// Return error if all peers failed, but log partial failures
 	if failureCount > 0 && successCount == 0 {
-		return fmt.Errorf("failed to propagate subscription change to all %d peers: %v", failureCount, errors)
+		return fmt.Errorf("failed to propagate interest update to all %d peers: %v", failureCount, errors)
 	}
 
 	// Partial failures are logged but don't fail the operation
@@ -256,19 +256,43 @@ func (n *GRPCMeshNode) resyncSubscriptionsToNewPeers(ctx context.Context) {
 }
 
 func (n *GRPCMeshNode) syncLocalSubscriptionsToPeer(ctx context.Context, peerID string) error {
-	subscriptions := n.localSubscriptionSnapshot()
-	for _, subscription := range subscriptions {
-		change := &peerlinkpkg.SubscriptionChange{
-			Action:   "subscribe",
-			ClientId: subscription.ClientID,
-			Topic:    subscription.Topic,
-			NodeId:   n.config.NodeID,
-		}
-		if err := n.controlPlanePeerLink.SendSubscriptionChange(ctx, peerID, change); err != nil {
-			return fmt.Errorf("failed to send subscription %s to peer %s: %w", subscription.ID, peerID, err)
-		}
+	snapshot := &peerlinkpkg.InterestSnapshot{
+		NodeId: n.config.NodeID,
+		Topics: n.localInterestSnapshot(),
+	}
+	if err := n.controlPlanePeerLink.SendInterestSnapshot(ctx, peerID, snapshot); err != nil {
+		return fmt.Errorf("failed to send interest snapshot to peer %s: %w", peerID, err)
 	}
 	return nil
+}
+
+func (n *GRPCMeshNode) localInterestSnapshot() []string {
+	subscriptions := n.localSubscriptionSnapshot()
+	seen := make(map[string]struct{})
+	var topics []string
+	for _, subscription := range subscriptions {
+		if _, ok := seen[subscription.Topic]; ok {
+			continue
+		}
+		seen[subscription.Topic] = struct{}{}
+		topics = append(topics, subscription.Topic)
+	}
+	return topics
+}
+
+func (n *GRPCMeshNode) localTopicInterestCount(topic string) int {
+	n.subscriptionsMu.RLock()
+	defer n.subscriptionsMu.RUnlock()
+
+	count := 0
+	for _, clientSubscriptions := range n.subscriptions {
+		for _, subscription := range clientSubscriptions {
+			if subscription.Topic == topic {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 func (n *GRPCMeshNode) localSubscriptionSnapshot() []meshnode.ClientSubscription {

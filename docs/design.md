@@ -57,7 +57,7 @@ EventLog Routing PeerLink
 - looks up local subscribers through the RoutingTable
 - forwards events to peers that have expressed interest
 - tracks client subscription metadata for the HTTP API
-- propagates subscription changes to peers through the PeerLink control plane
+- propagates aggregate topic interest to peers through the PeerLink control plane
 
 ### EventLog
 
@@ -106,12 +106,12 @@ PeerLink is implemented with gRPC bidirectional streaming. It has two logical
 planes:
 
 - data plane: user events between peers
-- control plane: subscription-change messages between peers
+- control plane: aggregate topic-interest messages between peers
 
 Heartbeats are control-plane messages. They should never be delivered as user
 events or mixed into the data-plane routing path. Each peer has independent
 data-plane and control-plane send queues, and ready control-plane messages are
-selected before data-plane messages so subscription gossip and heartbeats are
+selected before data-plane messages so topic-interest gossip and heartbeats are
 not starved by user event traffic.
 
 Architecture decision: EventMesh keeps one physical peer RPC stream for now:
@@ -290,11 +290,17 @@ with a node-local cursor. Later phases may add stable node identity enforcement,
 global event identity, distributed replay lookup, or durable per-subscription
 offsets.
 
-When a peer connects or reconnects, MeshNode resends its current local
-subscription metadata to that peer through the control plane. This rebuilds
-routing interest after network healing. It does not replay user events that were
-published while the peer was disconnected; catch-up and replay remain explicit
-EventLog read concerns.
+When a peer connects or reconnects, MeshNode sends a full aggregate
+`InterestSnapshot` of its current local topic-interest set to that peer through
+the control plane. The receiver replaces its stored view for the sending node
+with the snapshot, including an empty snapshot after a restart with no local
+subscriptions. Normal subscribe/unsubscribe operations send aggregate
+`InterestUpdate` deltas only when local interest for a topic pattern transitions
+from `0 -> 1` or `1 -> 0` subscribers. Peers do not gossip individual client
+identities; clients remain local to their node. This rebuilds routing interest
+after network healing and clears stale peer interest after missed updates. It
+does not replay user events that were published while the peer was disconnected;
+catch-up and replay remain explicit EventLog read concerns.
 
 ## Delivery Guarantees
 

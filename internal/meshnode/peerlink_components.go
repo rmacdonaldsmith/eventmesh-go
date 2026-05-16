@@ -21,12 +21,16 @@ func (c composedPeerLink) ReceiveEvents(ctx context.Context) (<-chan *eventlogpk
 	return c.dataPlane.ReceiveEvents(ctx)
 }
 
-func (c composedPeerLink) SendSubscriptionChange(ctx context.Context, peerID string, change *peerlinkpkg.SubscriptionChange) error {
-	return c.control.SendSubscriptionChange(ctx, peerID, change)
+func (c composedPeerLink) SendInterestUpdate(ctx context.Context, peerID string, update *peerlinkpkg.InterestUpdate) error {
+	return c.control.SendInterestUpdate(ctx, peerID, update)
 }
 
-func (c composedPeerLink) ReceiveSubscriptionChanges(ctx context.Context) (<-chan *peerlinkpkg.SubscriptionChange, <-chan error) {
-	return c.control.ReceiveSubscriptionChanges(ctx)
+func (c composedPeerLink) SendInterestSnapshot(ctx context.Context, peerID string, snapshot *peerlinkpkg.InterestSnapshot) error {
+	return c.control.SendInterestSnapshot(ctx, peerID, snapshot)
+}
+
+func (c composedPeerLink) ReceiveInterestMessages(ctx context.Context) (<-chan *peerlinkpkg.InterestMessage, <-chan error) {
+	return c.control.ReceiveInterestMessages(ctx)
 }
 
 func (c composedPeerLink) SendHeartbeat(ctx context.Context, peerID string) error {
