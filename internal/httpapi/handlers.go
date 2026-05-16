@@ -335,6 +335,16 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	resumeCursor, err := h.resumeCursorFromRequest(r)
+	if err != nil {
+		h.writeError(w, fmt.Sprintf("Invalid SSE resume cursor: %v", err), http.StatusBadRequest)
+		return
+	}
+	if resumeCursor != nil && resumeCursor.NodeID != h.meshNode.GetNodeID() {
+		h.writeError(w, fmt.Sprintf("SSE resume cursor belongs to a different node %q; reconnect to %q or start a fresh stream", resumeCursor.NodeID, h.meshNode.GetNodeID()), http.StatusConflict)
+		return
+	}
+
 	acceptHeader := r.Header.Get("Accept")
 	shouldStream := acceptHeader == "text/event-stream" || r.URL.Query().Get("stream") == "true"
 
@@ -375,12 +385,109 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		if resumeCursor != nil {
+			if err := h.replaySSECursor(w, r, *resumeCursor, existingSubscriptionTopics(topics)); err != nil {
+				slog.Warn("failed to replay SSE resume cursor", "client_id", claims.ClientID, "error", err)
+				return
+			}
+		}
+
 		// Start streaming with keepalive
 		h.streamWithKeepalive(w, r, client)
 	} else {
 		// For non-streaming clients, just send connection message
 		_, _ = w.Write([]byte(": SSE connection established for all topics\n\n"))
 	}
+}
+
+func (h *Handlers) resumeCursorFromRequest(r *http.Request) (*sseMultiTopicCursor, error) {
+	raw := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	if raw == "" {
+		raw = strings.TrimSpace(r.URL.Query().Get("since"))
+	}
+	if raw == "" {
+		return nil, nil
+	}
+
+	cursor, err := decodeSSECursor(raw)
+	if err != nil {
+		return nil, err
+	}
+	return &cursor, nil
+}
+
+func (h *Handlers) replaySSECursor(w http.ResponseWriter, r *http.Request, cursor sseMultiTopicCursor, activeSubscriptionTopics []string) error {
+	const replayBatchSize = 1000
+
+	for topic, offset := range cursor.Topics {
+		if !topicCoveredBySubscriptions(topic, activeSubscriptionTopics) {
+			continue
+		}
+
+		nextOffset := offset + 1
+		for {
+			events, err := h.meshNode.GetEventLog().ReadEvents(r.Context(), topic, nextOffset, replayBatchSize)
+			if err != nil {
+				return fmt.Errorf("read replay events for topic %s: %w", topic, err)
+			}
+			if len(events) == 0 {
+				break
+			}
+
+			for _, event := range events {
+				message, err := h.eventToSSEMessage(event)
+				if err != nil {
+					return err
+				}
+				if err := h.writeSSEMessage(w, message); err != nil {
+					return err
+				}
+				nextOffset = event.Offset + 1
+			}
+			if len(events) < replayBatchSize {
+				break
+			}
+		}
+	}
+
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	return nil
+}
+
+func existingSubscriptionTopics(topics []string) []string {
+	copied := make([]string, len(topics))
+	copy(copied, topics)
+	return copied
+}
+
+func topicCoveredBySubscriptions(topic string, subscriptions []string) bool {
+	for _, subscription := range subscriptions {
+		if matchesTopicPattern(subscription, topic) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesTopicPattern(pattern, topic string) bool {
+	if pattern == topic {
+		return true
+	}
+
+	patternParts := strings.Split(pattern, ".")
+	topicParts := strings.Split(topic, ".")
+	if len(patternParts) != len(topicParts) {
+		return false
+	}
+
+	for i, part := range patternParts {
+		if part != "*" && part != topicParts[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handlers) registerSSEClient(ctx context.Context, client *HTTPClient, subscriptions []meshnodepkg.ClientSubscription) ([]string, error) {
@@ -872,16 +979,42 @@ func (h *Handlers) validatePublishRequest(req *PublishRequest) error {
 	return nil
 }
 
+func (h *Handlers) eventToSSEMessage(event *eventlogpkg.Event) (EventStreamMessage, error) {
+	var payload interface{}
+	if event.Payload != nil {
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			payload = string(event.Payload)
+		}
+	}
+
+	eventID, err := encodeSSEEventCursor(h.meshNode.GetNodeID(), event.Topic, event.Offset)
+	if err != nil {
+		return EventStreamMessage{}, err
+	}
+
+	return EventStreamMessage{
+		EventID:   eventID,
+		Topic:     event.Topic,
+		Payload:   payload,
+		Timestamp: event.Timestamp,
+		Offset:    event.Offset,
+	}, nil
+}
+
 // writeSSEMessage writes an EventStreamMessage as a properly formatted SSE data message
 func (h *Handlers) writeSSEMessage(w http.ResponseWriter, message EventStreamMessage) error {
+	if message.EventID == "" {
+		return fmt.Errorf("SSE event ID is required")
+	}
+
 	// Marshal the message to JSON
 	jsonData, err := json.Marshal(message)
 	if err != nil {
 		return fmt.Errorf("failed to marshal SSE message: %w", err)
 	}
 
-	// Write in SSE format: "data: {json}\n\n"
-	_, err = fmt.Fprintf(w, "data: %s\n\n", string(jsonData))
+	// Write in SSE format: "id: <cursor>\ndata: {json}\n\n"
+	_, err = fmt.Fprintf(w, "id: %s\ndata: %s\n\n", message.EventID, string(jsonData))
 	return err
 }
 
@@ -921,24 +1054,10 @@ func (h *Handlers) streamWithKeepalive(w http.ResponseWriter, r *http.Request, c
 			}
 
 		case event := <-eventChan:
-			// Received an event from MeshNode, forward it to SSE client
-			// Convert EventRecord to EventStreamMessage
-			var payload interface{}
-			if event.Payload != nil {
-				// Try to unmarshal payload as JSON
-				err := json.Unmarshal(event.Payload, &payload)
-				if err != nil {
-					// If not valid JSON, send as string
-					payload = string(event.Payload)
-				}
-			}
-
-			sseMessage := EventStreamMessage{
-				EventID:   fmt.Sprintf("%s-%d", event.Topic, event.Offset),
-				Topic:     event.Topic,
-				Payload:   payload,
-				Timestamp: event.Timestamp,
-				Offset:    event.Offset,
+			// Received an event from MeshNode, forward it to SSE client.
+			sseMessage, err := h.eventToSSEMessage(event)
+			if err != nil {
+				return
 			}
 
 			// Send the event via SSE

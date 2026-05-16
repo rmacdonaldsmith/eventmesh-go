@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,9 @@ type StreamClient struct {
 	done                    chan struct{}
 	cancel                  context.CancelFunc
 	temporarySubscriptionID string
+	resumeMu                sync.Mutex
+	resumeNodeID            string
+	resumeOffsets           map[string]int64
 }
 
 // StreamConfig configures the streaming client
@@ -76,6 +80,7 @@ func (c *Client) Stream(ctx context.Context, config StreamConfig) (*StreamClient
 		done:                    make(chan struct{}),
 		cancel:                  cancel,
 		temporarySubscriptionID: temporarySubscriptionID,
+		resumeOffsets:           make(map[string]int64),
 	}
 
 	// Start streaming in background
@@ -200,6 +205,11 @@ func (sc *StreamClient) connectAndStream(ctx context.Context, config StreamConfi
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Authorization", "Bearer "+sc.client.token)
+	if resumeCursor, err := sc.resumeCursorHeader(); err != nil {
+		return err
+	} else if resumeCursor != "" {
+		req.Header.Set("Last-Event-ID", resumeCursor)
+	}
 
 	// Perform request
 	resp, err := sc.client.httpClient.Do(req)
@@ -224,6 +234,7 @@ func (sc *StreamClient) connectAndStream(ctx context.Context, config StreamConfi
 // processSSEStream reads and parses Server-Sent Events
 func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader, config StreamConfig) error {
 	scanner := bufio.NewScanner(reader)
+	var currentEventID string
 
 	for scanner.Scan() {
 		select {
@@ -235,6 +246,11 @@ func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader, 
 		line := scanner.Text()
 
 		// Handle SSE format
+		if strings.HasPrefix(line, "id: ") {
+			currentEventID = strings.TrimSpace(strings.TrimPrefix(line, "id: "))
+			continue
+		}
+
 		if strings.HasPrefix(line, "data: ") {
 			// Extract JSON data
 			jsonData := strings.TrimPrefix(line, "data: ")
@@ -251,6 +267,12 @@ func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader, 
 				}
 				continue
 			}
+
+			if event.EventID == "" {
+				event.EventID = currentEventID
+			}
+			sc.recordResumeEventID(event.EventID)
+			currentEventID = ""
 
 			if config.Topic != "" && !matchesStreamTopic(config.Topic, event.Topic) {
 				continue
@@ -279,6 +301,46 @@ func (sc *StreamClient) processSSEStream(ctx context.Context, reader io.Reader, 
 	}
 
 	return nil
+}
+
+func (sc *StreamClient) resumeCursorHeader() (string, error) {
+	sc.resumeMu.Lock()
+	defer sc.resumeMu.Unlock()
+
+	if len(sc.resumeOffsets) == 0 {
+		return "", nil
+	}
+
+	offsets := make(map[string]int64, len(sc.resumeOffsets))
+	for topic, offset := range sc.resumeOffsets {
+		offsets[topic] = offset
+	}
+	return encodeSSEMultiTopicCursor(sc.resumeNodeID, offsets)
+}
+
+func (sc *StreamClient) recordResumeEventID(eventID string) {
+	if eventID == "" {
+		return
+	}
+
+	cursor, err := decodeSSEEventCursor(eventID)
+	if err != nil {
+		return
+	}
+
+	sc.resumeMu.Lock()
+	defer sc.resumeMu.Unlock()
+
+	if sc.resumeNodeID == "" {
+		sc.resumeNodeID = cursor.NodeID
+	}
+	if sc.resumeNodeID != cursor.NodeID {
+		sc.resumeNodeID = cursor.NodeID
+		sc.resumeOffsets = make(map[string]int64)
+	}
+	if current, ok := sc.resumeOffsets[cursor.Topic]; !ok || cursor.Offset > current {
+		sc.resumeOffsets[cursor.Topic] = cursor.Offset
+	}
 }
 
 func matchesStreamTopic(pattern, topic string) bool {

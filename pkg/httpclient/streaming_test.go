@@ -2,6 +2,7 @@ package httpclient
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -364,6 +365,109 @@ func TestStreamClient_SSEProcessing(t *testing.T) {
 			t.Fatal("Should receive HTTP error")
 		}
 	})
+}
+
+func TestStreamClient_TracksSSEIDsForResume(t *testing.T) {
+	eventID, err := encodeSSECursor(sseEventCursor{
+		Version: sseCursorVersion,
+		NodeID:  "node-a",
+		Topic:   "orders.created",
+		Offset:  42,
+	})
+	require.NoError(t, err)
+
+	streamClient := &StreamClient{
+		events:        make(chan EventStreamMessage, 1),
+		errors:        make(chan error, 1),
+		resumeOffsets: make(map[string]int64),
+	}
+
+	event := EventStreamMessage{Topic: "orders.created", Offset: 42}
+	eventJSON, err := json.Marshal(event)
+	require.NoError(t, err)
+
+	err = streamClient.processSSEStream(context.Background(), strings.NewReader("id: "+eventID+"\n"+"data: "+string(eventJSON)+"\n\n"), StreamConfig{})
+	require.NoError(t, err)
+
+	select {
+	case received := <-streamClient.Events():
+		assert.Equal(t, eventID, received.EventID)
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for parsed event")
+	}
+
+	resumeHeader, err := streamClient.resumeCursorHeader()
+	require.NoError(t, err)
+	assert.NotEmpty(t, resumeHeader)
+
+	decoded, err := decodeTestMultiTopicCursor(resumeHeader)
+	require.NoError(t, err)
+	assert.Equal(t, "node-a", decoded.NodeID)
+	assert.Equal(t, int64(42), decoded.Topics["orders.created"])
+}
+
+func TestStreamClient_SendsLastEventIDOnReconnect(t *testing.T) {
+	firstEventID, err := encodeSSECursor(sseEventCursor{Version: sseCursorVersion, NodeID: "node-a", Topic: "orders.created", Offset: 0})
+	require.NoError(t, err)
+
+	requestCount := 0
+	secondRequestLastEventID := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+
+		if requestCount == 1 {
+			eventJSON, _ := json.Marshal(EventStreamMessage{Topic: "orders.created", Offset: 0})
+			_, _ = fmt.Fprintf(w, "id: %s\ndata: %s\n\n", firstEventID, string(eventJSON))
+			flusher.Flush()
+			return
+		}
+
+		secondRequestLastEventID <- r.Header.Get("Last-Event-ID")
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{ServerURL: server.URL, ClientID: "test-client"})
+	require.NoError(t, err)
+	client.SetToken("test-token")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	streamClient, err := client.Stream(ctx, StreamConfig{ReconnectDelay: 10 * time.Millisecond, MaxReconnectAttempts: 2})
+	require.NoError(t, err)
+	defer func() { _ = streamClient.Close() }()
+
+	select {
+	case <-streamClient.Events():
+	case err := <-streamClient.Errors():
+		t.Fatalf("Unexpected stream error: %v", err)
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for first event")
+	}
+
+	select {
+	case header := <-secondRequestLastEventID:
+		decoded, err := decodeTestMultiTopicCursor(header)
+		require.NoError(t, err)
+		assert.Equal(t, "node-a", decoded.NodeID)
+		assert.Equal(t, int64(0), decoded.Topics["orders.created"])
+	case <-time.After(1 * time.Second):
+		t.Fatal("Timed out waiting for reconnect with Last-Event-ID")
+	}
+}
+
+func decodeTestMultiTopicCursor(raw string) (sseMultiTopicCursor, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return sseMultiTopicCursor{}, err
+	}
+	var cursor sseMultiTopicCursor
+	if err := json.Unmarshal(decoded, &cursor); err != nil {
+		return sseMultiTopicCursor{}, err
+	}
+	return cursor, nil
 }
 
 func TestStreamClient_Reconnection(t *testing.T) {

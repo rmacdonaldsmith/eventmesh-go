@@ -39,6 +39,7 @@ the mesh.
 - JWT-based client identity, plus explicit `--no-auth` development mode
 - In-memory append-only event log with per-topic offsets and replay
 - Optional Pebble-backed durable EventLog for local restart survival
+- Node-local SSE resume using `Last-Event-ID` cursors
 - In-memory routing table with single-segment wildcard matching, such as
   `orders.*`
 - gRPC PeerLink implementation for peer connections, event forwarding, and
@@ -165,8 +166,8 @@ Important SSE contract:
 - `GET /api/v1/events/stream?topic=...` is intentionally rejected. Create a
   subscription first, or use the Go/CLI client convenience that does this for
   you.
-- Planned SSE resume is node-local: resume cursors refer to the serving node's
-  local EventLog. Clients should reconnect to the same stable node ID; cross-node
+- SSE resume is node-local: resume cursors refer to the serving node's local
+  EventLog. Clients should reconnect to the same stable node ID; cross-node
   durable resume is future work.
 
 ## Build And Test
