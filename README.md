@@ -54,7 +54,7 @@ the mesh.
 PeerLink currently separates data-plane user events from control-plane aggregate
 topic-interest gossip logically through typed `PeerMessage` frames, separate
 interfaces, independent queues, and per-plane metrics. Peers gossip node-level
-interest snapshots/deltas, not individual client identities. Both planes are
+interest snapshots/deltas. Both planes are
 still multiplexed over one physical gRPC `EventStream`; separate physical data
 and control streams are future work if tests or operations show they are needed.
 
