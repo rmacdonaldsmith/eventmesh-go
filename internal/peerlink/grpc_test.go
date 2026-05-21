@@ -1150,7 +1150,7 @@ func TestGRPCPeerLink_BidirectionalEventFlow(t *testing.T) {
 		}
 	}
 
-	t.Logf("✅ Bidirectional event flow working: received %d events including subscription gossip", eventsReceived)
+	t.Logf("✅ Bidirectional event flow working: received %d events including topic-interest gossip", eventsReceived)
 }
 
 // TestGRPCPeerLink_SimultaneousBidirectionalConnections tests the exact scenario

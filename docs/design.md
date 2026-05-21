@@ -90,7 +90,10 @@ peers durable consumers.
 ### RoutingTable
 
 The current RoutingTable implementation is in-memory. It maps topic patterns to
-subscribers and supports exact matching plus single-segment `*` wildcards.
+subscribers and supports exact matching plus single-segment `*` wildcards. Treat
+it as a derived live-interest index, not a durable source of truth. Local client
+subscriptions and peer-interest views rebuild the RoutingTable as clients and
+peers reconnect.
 
 Examples:
 
@@ -415,7 +418,7 @@ Near-term quality work:
 - keep tests reliable and bounded with explicit timeouts
 - reduce noisy expected-error logs in tests
 - improve admin/metrics endpoints
-- clarify peer routing and subscription-gossip guarantees
+- clarify peer routing and topic-interest gossip guarantees
 
 Production-readiness work:
 

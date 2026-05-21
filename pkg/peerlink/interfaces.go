@@ -82,7 +82,7 @@ type DataPlanePeerLink interface {
 	ReceiveEvents(ctx context.Context) (<-chan *eventlog.Event, <-chan error)
 }
 
-// ControlPlanePeerLink handles subscription gossip and health monitoring between mesh nodes.
+// ControlPlanePeerLink handles aggregate topic-interest gossip and health monitoring between mesh nodes.
 // Focused interface for control plane communication with independent QoS.
 type ControlPlanePeerLink interface {
 	// SendInterestUpdate sends aggregate topic-interest deltas to peers.

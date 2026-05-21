@@ -463,7 +463,7 @@ func requireEventLogCount(t *testing.T, ctx context.Context, node *GRPCMeshNode,
 }
 
 // TestRealMultiNodeNetworkingEndToEnd tests complete EventMesh flow with actual PeerLink networking
-// This validates real subscription gossip, interested-peer routing, and data-plane delivery.
+// This validates real topic-interest gossip, interested-peer routing, and data-plane delivery.
 func TestRealMultiNodeNetworkingEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	publisherNode := newStartedIntegrationNode(t, ctx, "publisher-mesh-node")
@@ -499,8 +499,8 @@ func TestRealMultiNodeNetworkingEndToEnd(t *testing.T) {
 	}
 }
 
-// TestSubscriptionGossipEndToEnd tests the complete subscription gossip protocol
-// This verifies REQ-MNODE-003: subscription changes propagate across mesh nodes
+// TestSubscriptionGossipEndToEnd tests the complete topic-interest gossip protocol.
+// This verifies REQ-MNODE-003: aggregate topic interest propagates across mesh nodes.
 func TestSubscriptionGossipEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	nodeA := newStartedIntegrationNode(t, ctx, "node-A")
