@@ -235,7 +235,7 @@ examples/               Runnable demo scripts
   product direction
 - [docs/design.md](docs/design.md) - current architecture and roadmap
 - [docs/discovery.md](docs/discovery.md) - future discovery design notes
-- [docs/benchmark.md](docs/benchmark.md) - benchmark notes and how to rerun
+- [docs/performance.md](docs/performance.md) - performance benchmark commands and current baseline
 - [examples/README.md](examples/README.md) - examples overview
 - [AGENTS.md](AGENTS.md) - canonical agent workflow guidance
 - [CLAUDE.md](CLAUDE.md) - Claude Code compatibility pointer

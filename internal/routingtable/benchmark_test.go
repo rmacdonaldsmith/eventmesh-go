@@ -51,6 +51,39 @@ func BenchmarkInMemoryRoutingTable_GetSubscribers(b *testing.B) {
 	}
 }
 
+func BenchmarkInMemoryRoutingTable_GetSubscribersWildcard_1KPatterns(b *testing.B) {
+	benchmarkRoutingTableWildcardLookup(b, 1000)
+}
+
+func BenchmarkInMemoryRoutingTable_GetSubscribersWildcard_10KPatterns(b *testing.B) {
+	benchmarkRoutingTableWildcardLookup(b, 10000)
+}
+
+func benchmarkRoutingTableWildcardLookup(b *testing.B, patterns int) {
+	rt := NewInMemoryRoutingTable()
+	defer func() { _ = rt.Close() }()
+	ctx := context.Background()
+
+	for i := 0; i < patterns; i++ {
+		subscriber := routingtable.NewLocalSubscriber(fmt.Sprintf("client-%d", i))
+		pattern := fmt.Sprintf("tenant%d.*", i)
+		if i%10 == 0 {
+			pattern = "orders.*"
+		}
+		if err := rt.Subscribe(ctx, pattern, subscriber); err != nil {
+			b.Fatalf("Subscribe failed: %v", err)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := rt.GetSubscribers(ctx, "orders.created"); err != nil {
+			b.Fatalf("GetSubscribers failed: %v", err)
+		}
+	}
+}
+
 // BenchmarkInMemoryRoutingTable_MixedOperations measures mixed workload performance
 func BenchmarkInMemoryRoutingTable_MixedOperations(b *testing.B) {
 	rt := NewInMemoryRoutingTable()
