@@ -2,7 +2,11 @@
 
 EventMesh is a Go event-streaming project for experimenting with local event
 persistence, topic-based routing, HTTP publishing, Server-Sent Events streaming,
-and peer-to-peer mesh propagation.
+and peer-to-peer mesh propagation. The idea is to let applications publish and
+subscribe through nearby nodes while the mesh shares aggregate topic interest and
+routes live events toward interested peers. Publishers do not need to know where
+subscribers live, and subscribers can recover recent local history through replay
+and SSE resume.
 
 The north star is a lightweight event mesh for observable, replayable,
 real-time application coordination: easy for humans, services, and AI agents to
