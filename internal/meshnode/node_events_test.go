@@ -602,7 +602,7 @@ func TestGRPCMeshNode_SubscriptionPropagation(t *testing.T) {
 	subscriber := NewTrustedClient("propagation-subscriber")
 	topic := "propagation.test"
 
-	// Subscribe - this should trigger subscription propagation to peers
+	// Subscribe - this should trigger aggregate topic-interest propagation to peers.
 	err = node.Subscribe(ctx, subscriber, topic)
 	if err != nil {
 		t.Errorf("Expected no error subscribing, got %v", err)

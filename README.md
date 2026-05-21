@@ -243,7 +243,7 @@ examples/               Runnable demo scripts
 
 - Pebble storage hardening, retention, and compaction policy
 - Agent-friendly event metadata, discovery, validation, replay, and tooling
-- More reliable multi-node subscription propagation and delivery semantics
+- More reliable multi-node topic-interest gossip and delivery semantics
 - mTLS and stronger peer identity
 - Production metrics and operational endpoints
 - Broader integration/load tests
