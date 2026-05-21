@@ -243,6 +243,9 @@ func TestAdminGetStats(t *testing.T) {
 		if response.EventsPublished < 0 {
 			t.Error("Expected EventsPublished to be non-negative")
 		}
+		if response.SSEResume.Requests < 0 || response.SSEResume.EventsReplayed < 0 || response.SSEResume.ReplayLimitExceeded < 0 {
+			t.Error("Expected SSE resume counters to be non-negative")
+		}
 	})
 
 	t.Run("includes_local_routing_interest_observability", func(t *testing.T) {

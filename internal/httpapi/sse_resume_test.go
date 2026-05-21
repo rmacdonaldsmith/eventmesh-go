@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,6 +63,56 @@ func TestStreamEventsRejectsInvalidResumeCursor(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "Invalid SSE resume cursor") {
 		t.Fatalf("Expected invalid cursor message, got %s", recorder.Body.String())
+	}
+}
+
+func TestStreamEventsRejectsResumeCursorWithTooManyTopics(t *testing.T) {
+	setup := NewTestServerSetup(t)
+	defer setup.Close()
+
+	token := setup.GenerateTestToken(t, "resume-client", false)
+	claims, err := setup.Auth.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken failed: %v", err)
+	}
+
+	topics := make(map[string]int64, maxSSEResumeTopics+1)
+	for i := 0; i <= maxSSEResumeTopics; i++ {
+		topics[fmt.Sprintf("orders.%d", i)] = 0
+	}
+	cursor, err := encodeSSECursor(sseMultiTopicCursor{Version: sseCursorVersion, NodeID: setup.Node.GetNodeID(), Topics: topics})
+	if err != nil {
+		t.Fatalf("encodeSSECursor failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/events/stream", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Last-Event-ID", cursor)
+	req = req.WithContext(context.WithValue(req.Context(), ClaimsKey, claims))
+
+	recorder := httptest.NewRecorder()
+	setup.Server.handlers.StreamEvents(recorder, req)
+
+	if recorder.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("Expected status %d, got %d. Body: %s", http.StatusRequestEntityTooLarge, recorder.Code, recorder.Body.String())
+	}
+	if setup.Server.handlers.sseResumeReplayLimitExceeded.Load() != 1 {
+		t.Fatalf("Expected replay limit counter to increment")
+	}
+}
+
+func TestValidateSSEReplayPlanRejectsReplayEventBudgetOverflow(t *testing.T) {
+	setup := NewTestServerSetup(t)
+	defer setup.Close()
+
+	token := setup.GenerateTestToken(t, "resume-client", false)
+	createSubscriptionForTest(t, setup.Server.handlers, setup.Auth, token, "orders.*")
+	publishEventForTest(t, setup.Server.handlers, setup.Auth, token, "orders.created", `{"sequence": 1}`)
+	publishEventForTest(t, setup.Server.handlers, setup.Auth, token, "orders.created", `{"sequence": 2}`)
+
+	cursor := sseMultiTopicCursor{Version: sseCursorVersion, NodeID: setup.Node.GetNodeID(), Topics: map[string]int64{"orders.created": -1}}
+	if err := setup.Server.handlers.validateSSEReplayPlan(context.Background(), cursor, []string{"orders.*"}, 1, maxSSEResumeTopics); !errors.Is(err, errSSEReplayLimitExceeded) {
+		t.Fatalf("Expected replay limit error, got %v", err)
 	}
 }
 

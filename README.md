@@ -168,8 +168,8 @@ GET /api/v1/admin/stats
 ```
 
 `GET /api/v1/admin/stats` includes routing observability: local subscription
-counts, aggregate local interest topics, peer-interest views, and interest gossip
-update/snapshot counters.
+counts, aggregate local interest topics, peer-interest views, interest gossip
+update/snapshot counters, and SSE resume guardrail counters.
 
 Important SSE contract:
 
@@ -180,7 +180,8 @@ Important SSE contract:
   you.
 - SSE resume is node-local: resume cursors refer to the serving node's local
   EventLog. Clients should reconnect to the same stable node ID; cross-node
-  durable resume is future work.
+  durable resume is future work. Resume requests are bounded by server-side topic
+  and replay-event limits to avoid unbounded catch-up work.
 
 ## Build And Test
 

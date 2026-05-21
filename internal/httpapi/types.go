@@ -85,6 +85,7 @@ type AdminStatsResponse struct {
 	Subscriptions  AdminSubscriptionStats   `json:"subscriptions"`
 	PeerInterest   AdminPeerInterestStats   `json:"peerInterest"`
 	InterestGossip AdminInterestGossipStats `json:"interestGossip"`
+	SSEResume      AdminSSEResumeStats      `json:"sseResume"`
 }
 
 // AdminEventLogStats represents EventLog statistics in the admin stats response.
@@ -116,6 +117,15 @@ type AdminInterestGossipStats struct {
 	SnapshotsReceived      int64 `json:"snapshotsReceived"`
 	EmptySnapshotsReceived int64 `json:"emptySnapshotsReceived"`
 	SnapshotTopicsReceived int64 `json:"snapshotTopicsReceived"`
+}
+
+// AdminSSEResumeStats represents SSE resume guardrail and replay counters.
+type AdminSSEResumeStats struct {
+	Requests            int64 `json:"requests"`
+	EventsReplayed      int64 `json:"eventsReplayed"`
+	InvalidCursors      int64 `json:"invalidCursors"`
+	NodeMismatches      int64 `json:"nodeMismatches"`
+	ReplayLimitExceeded int64 `json:"replayLimitExceeded"`
 }
 
 // HealthResponse represents health check response

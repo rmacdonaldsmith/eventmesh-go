@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/meshnode"
@@ -17,7 +18,12 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/routingtable"
 )
 
-const sseKeepaliveInterval = 2 * time.Second
+const (
+	sseKeepaliveInterval     = 2 * time.Second
+	maxSSEResumeTopics       = 64
+	maxSSEResumeReplayEvents = 10000
+	sseReplayBatchSize       = 1000
+)
 
 // HTTPClient represents an HTTP API client for the MeshNode
 type HTTPClient struct {
@@ -94,6 +100,12 @@ func (c *HTTPClient) GetEventChannel() <-chan *eventlogpkg.Event {
 type Handlers struct {
 	meshNode *meshnode.GRPCMeshNode
 	jwtAuth  *JWTAuth
+
+	sseResumeRequests            atomic.Int64
+	sseResumeEventsReplayed      atomic.Int64
+	sseResumeInvalidCursor       atomic.Int64
+	sseResumeNodeMismatch        atomic.Int64
+	sseResumeReplayLimitExceeded atomic.Int64
 }
 
 // NewHandlers creates a new handlers instance
@@ -337,10 +349,15 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 
 	resumeCursor, err := h.resumeCursorFromRequest(r)
 	if err != nil {
+		h.sseResumeInvalidCursor.Add(1)
 		h.writeError(w, fmt.Sprintf("Invalid SSE resume cursor: %v", err), http.StatusBadRequest)
 		return
 	}
+	if resumeCursor != nil {
+		h.sseResumeRequests.Add(1)
+	}
 	if resumeCursor != nil && resumeCursor.NodeID != h.meshNode.GetNodeID() {
+		h.sseResumeNodeMismatch.Add(1)
 		h.writeError(w, fmt.Sprintf("SSE resume cursor belongs to a different node %q; reconnect to %q or start a fresh stream", resumeCursor.NodeID, h.meshNode.GetNodeID()), http.StatusConflict)
 		return
 	}
@@ -366,6 +383,18 @@ func (h *Handlers) StreamEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer h.unregisterSSEClient(client, topics)
+	}
+
+	if shouldStream && resumeCursor != nil {
+		if err := h.validateSSEReplayPlan(r.Context(), *resumeCursor, topics, maxSSEResumeReplayEvents, maxSSEResumeTopics); err != nil {
+			if errors.Is(err, errSSEReplayLimitExceeded) || errors.Is(err, errSSEResumeTopicLimitExceeded) {
+				h.sseResumeReplayLimitExceeded.Add(1)
+				h.writeError(w, err.Error(), http.StatusRequestEntityTooLarge)
+				return
+			}
+			h.writeError(w, fmt.Sprintf("Failed to validate SSE replay: %v", err), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	// Set SSE headers
@@ -416,9 +445,43 @@ func (h *Handlers) resumeCursorFromRequest(r *http.Request) (*sseMultiTopicCurso
 	return &cursor, nil
 }
 
-func (h *Handlers) replaySSECursor(w http.ResponseWriter, r *http.Request, cursor sseMultiTopicCursor, activeSubscriptionTopics []string) error {
-	const replayBatchSize = 1000
+var (
+	errSSEReplayLimitExceeded      = errors.New("SSE resume replay exceeds server event limit")
+	errSSEResumeTopicLimitExceeded = errors.New("SSE resume cursor exceeds server topic limit")
+)
 
+func (h *Handlers) validateSSEReplayPlan(ctx context.Context, cursor sseMultiTopicCursor, activeSubscriptionTopics []string, maxEvents, maxTopics int) error {
+	if len(cursor.Topics) > maxTopics {
+		return fmt.Errorf("%w: cursor has %d topics, limit is %d", errSSEResumeTopicLimitExceeded, len(cursor.Topics), maxTopics)
+	}
+
+	totalReplayEvents := int64(0)
+	for topic, offset := range cursor.Topics {
+		if !topicCoveredBySubscriptions(topic, activeSubscriptionTopics) {
+			continue
+		}
+
+		endOffset, err := h.meshNode.GetEventLog().GetTopicEndOffset(ctx, topic)
+		if err != nil {
+			return fmt.Errorf("get end offset for topic %s: %w", topic, err)
+		}
+		nextOffset := offset + 1
+		if nextOffset < 0 {
+			return fmt.Errorf("invalid SSE resume offset for topic %s", topic)
+		}
+		if nextOffset >= endOffset {
+			continue
+		}
+
+		totalReplayEvents += endOffset - nextOffset
+		if totalReplayEvents > int64(maxEvents) {
+			return fmt.Errorf("%w: requested %d events, limit is %d", errSSEReplayLimitExceeded, totalReplayEvents, maxEvents)
+		}
+	}
+	return nil
+}
+
+func (h *Handlers) replaySSECursor(w http.ResponseWriter, r *http.Request, cursor sseMultiTopicCursor, activeSubscriptionTopics []string) error {
 	for topic, offset := range cursor.Topics {
 		if !topicCoveredBySubscriptions(topic, activeSubscriptionTopics) {
 			continue
@@ -426,7 +489,7 @@ func (h *Handlers) replaySSECursor(w http.ResponseWriter, r *http.Request, curso
 
 		nextOffset := offset + 1
 		for {
-			events, err := h.meshNode.GetEventLog().ReadEvents(r.Context(), topic, nextOffset, replayBatchSize)
+			events, err := h.meshNode.GetEventLog().ReadEvents(r.Context(), topic, nextOffset, sseReplayBatchSize)
 			if err != nil {
 				return fmt.Errorf("read replay events for topic %s: %w", topic, err)
 			}
@@ -444,7 +507,8 @@ func (h *Handlers) replaySSECursor(w http.ResponseWriter, r *http.Request, curso
 				}
 				nextOffset = event.Offset + 1
 			}
-			if len(events) < replayBatchSize {
+			h.sseResumeEventsReplayed.Add(int64(len(events)))
+			if len(events) < sseReplayBatchSize {
 				break
 			}
 		}
@@ -887,6 +951,13 @@ func (h *Handlers) AdminGetStats(w http.ResponseWriter, r *http.Request) {
 			SnapshotsReceived:      routingStats.InterestSnapshotsReceived,
 			EmptySnapshotsReceived: routingStats.EmptySnapshotsReceived,
 			SnapshotTopicsReceived: routingStats.SnapshotTopicsReceived,
+		},
+		SSEResume: AdminSSEResumeStats{
+			Requests:            h.sseResumeRequests.Load(),
+			EventsReplayed:      h.sseResumeEventsReplayed.Load(),
+			InvalidCursors:      h.sseResumeInvalidCursor.Load(),
+			NodeMismatches:      h.sseResumeNodeMismatch.Load(),
+			ReplayLimitExceeded: h.sseResumeReplayLimitExceeded.Load(),
 		},
 	}
 

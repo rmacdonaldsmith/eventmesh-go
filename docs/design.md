@@ -239,6 +239,13 @@ before each reconnect so managed streams recover when an ephemeral subscription
 set is lost by a server restart. Raw HTTP clients and streams opened without
 configured topics must manage subscription recreation themselves.
 
+SSE resume has bounded replay guardrails. The server validates resume cursors
+before sending the SSE `200 OK`: cursors may include at most 64 topic offsets,
+and a single resume request may replay at most 10,000 events across authorized
+cursor topics. Requests exceeding those limits fail with `413 Request Entity Too
+Large` instead of starting an unbounded replay. Admin stats expose SSE resume
+request, replay, invalid cursor, node mismatch, and replay-limit counters.
+
 ### SSE Resume Semantics
 
 SSE resume is node-local, local-log resume. The SSE `id:` field is a resume
