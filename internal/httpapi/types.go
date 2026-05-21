@@ -73,12 +73,49 @@ type AdminSubscriptionInfo struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// AdminStatsResponse represents system statistics
+// AdminStatsResponse represents system statistics.
 type AdminStatsResponse struct {
 	ConnectedClients   int `json:"connectedClients"`
+	ConnectedPeers     int `json:"connectedPeers"`
 	TotalSubscriptions int `json:"totalSubscriptions"`
 	TotalTopics        int `json:"totalTopics"`
 	EventsPublished    int `json:"eventsPublished"`
+
+	EventLog       AdminEventLogStats       `json:"eventLog"`
+	Subscriptions  AdminSubscriptionStats   `json:"subscriptions"`
+	PeerInterest   AdminPeerInterestStats   `json:"peerInterest"`
+	InterestGossip AdminInterestGossipStats `json:"interestGossip"`
+}
+
+// AdminEventLogStats represents EventLog statistics in the admin stats response.
+type AdminEventLogStats struct {
+	TotalEvents int64 `json:"totalEvents"`
+	TopicCount  int   `json:"topicCount"`
+}
+
+// AdminSubscriptionStats represents local subscription and aggregate interest statistics.
+type AdminSubscriptionStats struct {
+	LocalSubscriptions            int      `json:"localSubscriptions"`
+	LocalClientsWithSubscriptions int      `json:"localClientsWithSubscriptions"`
+	LocalInterestTopicCount       int      `json:"localInterestTopicCount"`
+	LocalInterestTopics           []string `json:"localInterestTopics"`
+}
+
+// AdminPeerInterestStats represents this node's peer-interest view.
+type AdminPeerInterestStats struct {
+	PeerCountWithInterest int                 `json:"peerCountWithInterest"`
+	TopicCount            int                 `json:"topicCount"`
+	Peers                 map[string][]string `json:"peers"`
+}
+
+// AdminInterestGossipStats represents aggregate topic-interest gossip counters.
+type AdminInterestGossipStats struct {
+	UpdatesSent            int64 `json:"updatesSent"`
+	UpdatesReceived        int64 `json:"updatesReceived"`
+	SnapshotsSent          int64 `json:"snapshotsSent"`
+	SnapshotsReceived      int64 `json:"snapshotsReceived"`
+	EmptySnapshotsReceived int64 `json:"emptySnapshotsReceived"`
+	SnapshotTopicsReceived int64 `json:"snapshotTopicsReceived"`
 }
 
 // HealthResponse represents health check response

@@ -853,11 +853,41 @@ func (h *Handlers) AdminGetStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	routingStats := h.meshNode.GetRoutingStats(ctx)
+	peerInterestTopicCount := 0
+	for _, topics := range routingStats.PeerInterest {
+		peerInterestTopicCount += len(topics)
+	}
+
 	response := AdminStatsResponse{
 		ConnectedClients:   health.ConnectedClients,
+		ConnectedPeers:     health.ConnectedPeers,
 		TotalSubscriptions: subscriberCount,
 		TotalTopics:        topicCount,
 		EventsPublished:    int(eventStats.TotalEvents),
+		EventLog: AdminEventLogStats{
+			TotalEvents: eventStats.TotalEvents,
+			TopicCount:  int(eventStats.TopicCount),
+		},
+		Subscriptions: AdminSubscriptionStats{
+			LocalSubscriptions:            routingStats.LocalSubscriptions,
+			LocalClientsWithSubscriptions: routingStats.LocalClientsWithSubscriptions,
+			LocalInterestTopicCount:       len(routingStats.LocalInterestTopics),
+			LocalInterestTopics:           routingStats.LocalInterestTopics,
+		},
+		PeerInterest: AdminPeerInterestStats{
+			PeerCountWithInterest: len(routingStats.PeerInterest),
+			TopicCount:            peerInterestTopicCount,
+			Peers:                 routingStats.PeerInterest,
+		},
+		InterestGossip: AdminInterestGossipStats{
+			UpdatesSent:            routingStats.InterestUpdatesSent,
+			UpdatesReceived:        routingStats.InterestUpdatesReceived,
+			SnapshotsSent:          routingStats.InterestSnapshotsSent,
+			SnapshotsReceived:      routingStats.InterestSnapshotsReceived,
+			EmptySnapshotsReceived: routingStats.EmptySnapshotsReceived,
+			SnapshotTopicsReceived: routingStats.SnapshotTopicsReceived,
+		},
 	}
 
 	h.writeJSON(w, response, http.StatusOK)

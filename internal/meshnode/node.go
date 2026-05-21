@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/eventlog"
@@ -51,6 +52,13 @@ type GRPCMeshNode struct {
 	// Peer subscription tracking for intelligent routing
 	peerSubscriptions   map[string]map[string]bool // peerNodeID -> topic -> hasSubscriber
 	peerSubscriptionsMu sync.RWMutex               // Protect peer subscriptions map
+
+	interestUpdatesSent       atomic.Int64
+	interestUpdatesReceived   atomic.Int64
+	interestSnapshotsSent     atomic.Int64
+	interestSnapshotsReceived atomic.Int64
+	emptySnapshotsReceived    atomic.Int64
+	snapshotTopicsReceived    atomic.Int64
 }
 
 func (n *GRPCMeshNode) setPeerLink(peerLink peerlinkpkg.CompletePeerLink) {

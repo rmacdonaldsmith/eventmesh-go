@@ -245,6 +245,41 @@ func TestAdminGetStats(t *testing.T) {
 		}
 	})
 
+	t.Run("includes_local_routing_interest_observability", func(t *testing.T) {
+		adminToken := setup.GenerateTestToken(t, "admin", true)
+		clientToken := setup.GenerateTestToken(t, "stats-client", false)
+		createSubscriptionForTest(t, handlers, auth, clientToken, "orders.*")
+		createSubscriptionForTest(t, handlers, auth, clientToken, "payments.*")
+
+		req := httptest.NewRequest("GET", "/api/v1/admin/stats", nil)
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		claims, err := auth.ValidateToken(adminToken)
+		if err != nil {
+			t.Fatalf("Failed to validate token: %v", err)
+		}
+		req = req.WithContext(context.WithValue(req.Context(), ClaimsKey, claims))
+
+		w := httptest.NewRecorder()
+		handlers.AdminGetStats(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+		}
+
+		var response AdminStatsResponse
+		if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+			t.Fatalf("Failed to decode response: %v", err)
+		}
+		if response.Subscriptions.LocalSubscriptions < 2 {
+			t.Fatalf("Expected at least 2 local subscriptions, got %d", response.Subscriptions.LocalSubscriptions)
+		}
+		if response.Subscriptions.LocalInterestTopicCount < 2 {
+			t.Fatalf("Expected at least 2 local interest topics, got %d", response.Subscriptions.LocalInterestTopicCount)
+		}
+		if len(response.Subscriptions.LocalInterestTopics) < 2 {
+			t.Fatalf("Expected local interest topics in response, got %#v", response.Subscriptions.LocalInterestTopics)
+		}
+	})
+
 	t.Run("missing_authentication", func(t *testing.T) {
 		// Create request without auth
 		req := httptest.NewRequest("GET", "/api/v1/admin/stats", nil)

@@ -167,6 +167,10 @@ GET /api/v1/admin/subscriptions
 GET /api/v1/admin/stats
 ```
 
+`GET /api/v1/admin/stats` includes routing observability: local subscription
+counts, aggregate local interest topics, peer-interest views, and interest gossip
+update/snapshot counters.
+
 Important SSE contract:
 
 - `GET /api/v1/events/stream` streams events for the authenticated client's

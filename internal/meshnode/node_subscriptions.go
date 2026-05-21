@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"github.com/rmacdonaldsmith/eventmesh-go/pkg/meshnode"
@@ -189,6 +190,7 @@ func (n *GRPCMeshNode) propagateInterestUpdate(ctx context.Context, action, topi
 				"error", err)
 		} else {
 			successCount++
+			n.interestUpdatesSent.Add(1)
 		}
 	}
 
@@ -263,6 +265,7 @@ func (n *GRPCMeshNode) syncLocalSubscriptionsToPeer(ctx context.Context, peerID 
 	if err := n.controlPlanePeerLink.SendInterestSnapshot(ctx, peerID, snapshot); err != nil {
 		return fmt.Errorf("failed to send interest snapshot to peer %s: %w", peerID, err)
 	}
+	n.interestSnapshotsSent.Add(1)
 	return nil
 }
 
@@ -277,6 +280,7 @@ func (n *GRPCMeshNode) localInterestSnapshot() []string {
 		seen[subscription.Topic] = struct{}{}
 		topics = append(topics, subscription.Topic)
 	}
+	sort.Strings(topics)
 	return topics
 }
 

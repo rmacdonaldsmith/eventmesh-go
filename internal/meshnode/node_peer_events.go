@@ -166,6 +166,10 @@ func (n *GRPCMeshNode) processIncomingInterestMessage(ctx context.Context, messa
 }
 
 func (n *GRPCMeshNode) processIncomingInterestUpdate(ctx context.Context, update *peerlinkpkg.InterestUpdate) {
+	if update == nil {
+		return
+	}
+	n.interestUpdatesReceived.Add(1)
 	n.peerSubscriptionsMu.Lock()
 	defer n.peerSubscriptionsMu.Unlock()
 
@@ -193,6 +197,14 @@ func (n *GRPCMeshNode) processIncomingInterestUpdate(ctx context.Context, update
 }
 
 func (n *GRPCMeshNode) processIncomingInterestSnapshot(ctx context.Context, snapshot *peerlinkpkg.InterestSnapshot) {
+	if snapshot == nil {
+		return
+	}
+	n.interestSnapshotsReceived.Add(1)
+	if len(snapshot.Topics) == 0 {
+		n.emptySnapshotsReceived.Add(1)
+	}
+	n.snapshotTopicsReceived.Add(int64(len(snapshot.Topics)))
 	n.peerSubscriptionsMu.Lock()
 	defer n.peerSubscriptionsMu.Unlock()
 
