@@ -40,7 +40,7 @@ cd examples/regional-weather
 ```
 
 This opens panes for nodes, generator, analytics subscriber, alert subscriber,
-and stats. Stop the nodes afterward with:
+data-plane metrics, and control-plane/gossip metrics. Stop the nodes afterward with:
 
 ```bash
 ./stop.sh
@@ -73,10 +73,16 @@ Terminal 4, weather generators publishing to the city nodes:
 ./generate-weather.py
 ```
 
-Terminal 5, admin stats view:
+Terminal 5, data-plane admin stats view:
 
 ```bash
-./stats.py
+./stats.py --view data
+```
+
+Terminal 6, control-plane/gossip admin stats view:
+
+```bash
+./stats.py --view control
 ```
 
 Stop all nodes:

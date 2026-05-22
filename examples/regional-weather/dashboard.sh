@@ -34,7 +34,10 @@ tmux split-window -v -t "$SESSION:0.0" -c "$DEMO_DIR" \
   "$(labeled_command 'WEATHER GENERATOR: city nodes publish events' 'sleep 3; ./generate-weather.py')"
 tmux select-pane -t "$SESSION:0.2"
 tmux split-window -v -t "$SESSION:0.2" -c "$DEMO_DIR" \
-  "$(labeled_command 'MESH STATS: subscriptions + peer interest' 'sleep 3; ./stats.py')"
+  "$(labeled_command 'DATA PLANE METRICS: event flow + SSE' 'sleep 3; ./stats.py --view data')"
+tmux select-pane -t "$SESSION:0.4"
+tmux split-window -v -t "$SESSION:0.4" -c "$DEMO_DIR" \
+  "$(labeled_command 'CONTROL PLANE METRICS: peer interest gossip' 'sleep 3; ./stats.py --view control')"
 
 tmux select-layout -t "$SESSION:0" tiled
 
