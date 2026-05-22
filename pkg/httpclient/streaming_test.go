@@ -116,6 +116,49 @@ func TestClient_Stream(t *testing.T) {
 	})
 }
 
+func TestStreamClient_IgnoresHTTPClientTimeoutForLongLivedStream(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/events/stream" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		_, _ = fmt.Fprint(w, ": connected\n\n")
+		if flusher != nil {
+			flusher.Flush()
+		}
+
+		time.Sleep(80 * time.Millisecond)
+		event := EventStreamMessage{EventID: "slow-stream-event", Topic: "weather.sf", Offset: 1}
+		data, _ := json.Marshal(event)
+		_, _ = fmt.Fprintf(w, "id: %s\ndata: %s\n\n", event.EventID, data)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(Config{ServerURL: server.URL, ClientID: "stream-client", Timeout: 20 * time.Millisecond})
+	require.NoError(t, err)
+	client.SetToken("test-token")
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	streamClient, err := client.Stream(ctx, StreamConfig{})
+	require.NoError(t, err)
+	defer func() { _ = streamClient.Close() }()
+
+	select {
+	case event := <-streamClient.Events():
+		assert.Equal(t, "slow-stream-event", event.EventID)
+	case err := <-streamClient.Errors():
+		t.Fatalf("Unexpected stream error: %v", err)
+	case <-ctx.Done():
+		t.Fatal("Timed out waiting for long-lived stream event")
+	}
+}
+
 func TestStreamClient_SSEProcessing(t *testing.T) {
 	t.Run("successful_sse_connection", func(t *testing.T) {
 		// Create mock SSE server

@@ -269,8 +269,11 @@ func (sc *StreamClient) connectAndStream(ctx context.Context, config StreamConfi
 		req.Header.Set("Last-Event-ID", resumeCursor)
 	}
 
-	// Perform request
-	resp, err := sc.client.httpClient.Do(req)
+	// Perform request with no client-level timeout. SSE streams are intentionally
+	// long-lived; cancellation is controlled by the request context instead.
+	streamHTTPClient := *sc.client.httpClient
+	streamHTTPClient.Timeout = 0
+	resp, err := streamHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to connect to stream: %w", err)
 	}
