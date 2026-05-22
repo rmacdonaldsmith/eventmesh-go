@@ -23,21 +23,18 @@ labeled_command() {
   printf 'printf "\\033]2;%s\\033\\\\"; clear; printf "==== %s ====\\n\\n"; %s' "$title" "$title" "$*"
 }
 
-tmux new-session -d -s "$SESSION" -c "$DEMO_DIR" \
-  "$(labeled_command 'NODES + HUB LOG' './start.sh; echo; echo "Nodes started. Press Ctrl+C here or run ./stop.sh to stop nodes."; tail -f .run/logs/hub.log')"
-tmux split-window -h -t "$SESSION:0" -c "$DEMO_DIR" \
-  "$(labeled_command 'ANALYTICS SUBSCRIBER: weather.*' './subscribe-analytics.sh')"
-tmux split-window -v -t "$SESSION:0.1" -c "$DEMO_DIR" \
-  "$(labeled_command 'ALERT SUBSCRIBER: alert.*' './subscribe-alerts.sh')"
-tmux select-pane -t "$SESSION:0.0"
-tmux split-window -v -t "$SESSION:0.0" -c "$DEMO_DIR" \
-  "$(labeled_command 'WEATHER GENERATOR: city nodes publish events' 'sleep 3; ./generate-weather.py')"
-tmux select-pane -t "$SESSION:0.2"
-tmux split-window -v -t "$SESSION:0.2" -c "$DEMO_DIR" \
-  "$(labeled_command 'DATA PLANE METRICS: event flow + SSE' 'sleep 3; ./stats.py --view data')"
-tmux select-pane -t "$SESSION:0.4"
-tmux split-window -v -t "$SESSION:0.4" -c "$DEMO_DIR" \
-  "$(labeled_command 'CONTROL PLANE METRICS: peer interest gossip' 'sleep 3; ./stats.py --view control')"
+nodes_pane=$(tmux new-session -d -s "$SESSION" -c "$DEMO_DIR" -P -F '#{pane_id}' \
+  "$(labeled_command 'NODES + HUB LOG' './start.sh; echo; echo "Nodes started. Press Ctrl+C here or run ./stop.sh to stop nodes."; tail -f .run/logs/hub.log')")
+analytics_pane=$(tmux split-window -h -t "$nodes_pane" -c "$DEMO_DIR" -P -F '#{pane_id}' \
+  "$(labeled_command 'ANALYTICS SUBSCRIBER: weather.*' './subscribe-analytics.sh')")
+alerts_pane=$(tmux split-window -v -t "$analytics_pane" -c "$DEMO_DIR" -P -F '#{pane_id}' \
+  "$(labeled_command 'ALERT SUBSCRIBER: alert.*' './subscribe-alerts.sh')")
+generator_pane=$(tmux split-window -v -t "$nodes_pane" -c "$DEMO_DIR" -P -F '#{pane_id}' \
+  "$(labeled_command 'WEATHER GENERATOR: city nodes publish events' 'sleep 3; ./generate-weather.py')")
+data_pane=$(tmux split-window -v -t "$generator_pane" -c "$DEMO_DIR" -P -F '#{pane_id}' \
+  "$(labeled_command 'DATA PLANE METRICS: event flow + SSE' 'sleep 3; ./stats.py --view data')")
+tmux split-window -v -t "$alerts_pane" -c "$DEMO_DIR" -P -F '#{pane_id}' \
+  "$(labeled_command 'CONTROL PLANE METRICS: peer interest gossip' 'sleep 3; ./stats.py --view control')" >/dev/null
 
 tmux select-layout -t "$SESSION:0" tiled
 
@@ -45,4 +42,5 @@ tmux select-layout -t "$SESSION:0" tiled
 tmux set-option -t "$SESSION" pane-border-status top >/dev/null 2>&1 || true
 tmux set-option -t "$SESSION" pane-border-format ' #{pane_index}: #{pane_title} ' >/dev/null 2>&1 || true
 
+tmux select-pane -t "$data_pane"
 tmux attach -t "$SESSION"
