@@ -7,6 +7,8 @@ consumers:
 
 - `analytics-dashboard` subscribes to `weather.*`
 - `alerting-service` subscribes to `alert.*`
+- `sf-dashboard`, `ny-dashboard`, and `chicago-dashboard` subscribe to their
+  city-specific `weather.<city>` topics
 
 The city nodes only forward events that match the hub's aggregate topic
 interest. Admin stats show local subscriptions, peer-interest views, and gossip
@@ -39,8 +41,13 @@ cd examples/regional-weather
 ./dashboard.sh
 ```
 
-This opens panes for nodes, generator, analytics subscriber, alert subscriber,
-data-plane metrics, and control-plane/gossip metrics. Stop the nodes afterward with:
+This opens two tmux windows:
+
+- `overview`: nodes, generator, data-plane metrics, and control-plane/gossip metrics
+- `subscribers`: analytics, alerting, and one city-specific subscriber pane for
+  SF, NY, and Chicago
+
+Stop the nodes afterward with:
 
 ```bash
 ./stop.sh
@@ -67,19 +74,27 @@ Terminal 3, alerting consumer on the hub:
 ./subscribe-alerts.sh
 ```
 
-Terminal 4, weather generators publishing to the city nodes:
+Terminal 4, city-specific consumers:
+
+```bash
+./subscribe-city.sh sf
+./subscribe-city.sh ny
+./subscribe-city.sh chicago
+```
+
+Terminal 5, weather generators publishing to the city nodes:
 
 ```bash
 ./generate-weather.py
 ```
 
-Terminal 5, data-plane admin stats view:
+Terminal 6, data-plane admin stats view:
 
 ```bash
 ./stats.py --view data
 ```
 
-Terminal 6, control-plane/gossip admin stats view:
+Terminal 7, control-plane/gossip admin stats view:
 
 ```bash
 ./stats.py --view control
