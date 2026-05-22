@@ -54,3 +54,6 @@ go.work.sum
 
 # Generated protobuf files (uncomment if you prefer to regenerate them)
 # proto/**/*.pb.go
+
+# Example runtime state
+examples/**/.run/

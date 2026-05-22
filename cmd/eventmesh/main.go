@@ -17,6 +17,7 @@ import (
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/meshnode"
 	"github.com/rmacdonaldsmith/eventmesh-go/internal/peerlink"
 	eventlogpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/eventlog"
+	peerlinkpkg "github.com/rmacdonaldsmith/eventmesh-go/pkg/peerlink"
 )
 
 const (
@@ -33,7 +34,7 @@ func main() {
 		nodeID          = flag.String("node-id", getDefaultNodeID(), "Unique node identifier")
 		listenAddr      = flag.String("listen", ":8080", "Listen address for client connections")
 		peerAddr        = flag.String("peer-listen", ":9090", "Listen address for peer connections")
-		connectPeer     = flag.String("connect-peer", "", "Address of peer node to connect to (optional)")
+		connectPeer     = flag.String("connect-peer", "", "Peer node(s) to connect to after start, as id=address or address; comma-separated")
 		enableHTTP      = flag.Bool("http", false, "Enable HTTP API server")
 		httpPort        = flag.String("http-port", "8081", "Port for HTTP API server")
 		noAuth          = flag.Bool("no-auth", false, "Disable authentication for development (INSECURE - development only)")
@@ -169,11 +170,18 @@ func main() {
 		}()
 	}
 
-	// Connect to peer if specified
+	// Connect to explicitly configured peers after this node is listening.
 	if *connectPeer != "" {
-		log.Printf("🤝 Connecting to peer: %s", *connectPeer)
-		// Note: Peer connection will be implemented when PeerLink networking is ready
-		log.Printf("⚠️  Peer connection not yet implemented (PeerLink networking in progress)")
+		peers, err := parseConnectPeers(*connectPeer)
+		if err != nil {
+			log.Fatalf("❌ Invalid --connect-peer value: %v", err)
+		}
+		for _, peer := range peers {
+			log.Printf("🤝 Connecting to peer %s at %s", peer.ID(), peer.Address())
+			if err := node.GetPeerLink().Connect(ctx, peer); err != nil {
+				log.Fatalf("❌ Failed to connect to peer %s at %s: %v", peer.ID(), peer.Address(), err)
+			}
+		}
 	}
 
 	// Show startup success and health
@@ -190,6 +198,44 @@ func main() {
 	slog.Info("node stopped",
 		"app", appName,
 		"node_id", *nodeID)
+}
+
+type cliPeerNode struct {
+	id      string
+	address string
+}
+
+func (p cliPeerNode) ID() string      { return p.id }
+func (p cliPeerNode) Address() string { return p.address }
+func (p cliPeerNode) IsHealthy() bool { return true }
+
+var _ peerlinkpkg.PeerNode = cliPeerNode{}
+
+func parseConnectPeers(raw string) ([]peerlinkpkg.PeerNode, error) {
+	parts := strings.Split(raw, ",")
+	peers := make([]peerlinkpkg.PeerNode, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		id := part
+		address := part
+		if strings.Contains(part, "=") {
+			pieces := strings.SplitN(part, "=", 2)
+			id = strings.TrimSpace(pieces[0])
+			address = strings.TrimSpace(pieces[1])
+		}
+		if id == "" || address == "" {
+			return nil, fmt.Errorf("peer %q must be address or id=address", part)
+		}
+		peers = append(peers, cliPeerNode{id: id, address: address})
+	}
+	if len(peers) == 0 {
+		return nil, fmt.Errorf("at least one peer is required")
+	}
+	return peers, nil
 }
 
 func applyEventLogConfig(config *meshnode.Config, backend, path string) error {

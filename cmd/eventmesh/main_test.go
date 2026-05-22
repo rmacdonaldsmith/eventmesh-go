@@ -54,6 +54,26 @@ func TestHTTPIntegration(t *testing.T) {
 	}
 }
 
+func TestParseConnectPeers(t *testing.T) {
+	peers, err := parseConnectPeers("hub=127.0.0.1:9100,backup:9101")
+	if err != nil {
+		t.Fatalf("parseConnectPeers failed: %v", err)
+	}
+	if len(peers) != 2 {
+		t.Fatalf("Expected 2 peers, got %d", len(peers))
+	}
+	if peers[0].ID() != "hub" || peers[0].Address() != "127.0.0.1:9100" {
+		t.Fatalf("Unexpected first peer: id=%q address=%q", peers[0].ID(), peers[0].Address())
+	}
+	if peers[1].ID() != "backup:9101" || peers[1].Address() != "backup:9101" {
+		t.Fatalf("Unexpected second peer: id=%q address=%q", peers[1].ID(), peers[1].Address())
+	}
+
+	if _, err := parseConnectPeers("hub="); err == nil {
+		t.Fatal("Expected malformed peer to fail")
+	}
+}
+
 func TestApplyEventLogConfig(t *testing.T) {
 	t.Run("memory_backend_leaves_default_factory", func(t *testing.T) {
 		config := meshnode.NewConfig("test-node", "localhost:0")

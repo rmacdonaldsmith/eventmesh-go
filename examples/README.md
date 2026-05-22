@@ -6,13 +6,15 @@ the repository root.
 
 The examples avoid large demo workflows because the API and mesh behavior are
 still evolving. Prefer copy/pasteable commands and short scripts that are easy
-to keep current.
+to keep current. The regional weather demo is the main end-to-end mesh
+visualization.
 
 ## Recommended Path
 
 1. [single-node](single-node/) — start one local server and use core CLI commands.
 2. [cli-usage](cli-usage/) — publish a small batch of sample events.
 3. [multi-node](multi-node/) — manually start two nodes with static seed discovery.
+4. [regional-weather](regional-weather/) — watch a four-node city weather mesh route events by interest.
 
 ## Development Mode
 
@@ -54,6 +56,13 @@ One short script for publishing sample events plus copy/pasteable CLI commands.
 Manual two-node startup commands using static seed discovery. This is useful for
 inspection, but the mesh layer is still MVP-level and not a production
 deployment recipe.
+
+### regional-weather
+
+A four-node demo with San Francisco, New York, and Chicago city nodes publishing
+`weather.*` and `alert.*` events through a hub node. It includes a synthetic
+weather generator, optional Open-Meteo mode, subscriber scripts, a stats view,
+and an optional tmux dashboard.
 
 ## Topic Patterns
 
