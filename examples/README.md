@@ -1,20 +1,17 @@
 # EventMesh Examples
 
 These examples are intentionally small development aids for the current
-EventMesh implementation. They assume you have already run `make build` from
-the repository root.
-
-The examples avoid large demo workflows because the API and mesh behavior are
-still evolving. Prefer copy/pasteable commands and short scripts that are easy
-to keep current. The regional weather demo is the main end-to-end mesh
-visualization.
+EventMesh implementation. Most direct-binary examples assume you have already
+run `make build` from the repository root; the Docker example builds its own
+container image.
 
 ## Recommended Path
 
 1. [single-node](single-node/) — start one local server and use core CLI commands.
 2. [cli-usage](cli-usage/) — publish a small batch of sample events.
-3. [multi-node](multi-node/) — manually start two nodes with static seed discovery.
-4. [regional-weather](regional-weather/) — watch a four-node city weather mesh route events by interest.
+3. [docker](docker/) — start a Dockerized hub/city weather mesh with Docker Compose.
+4. [multi-node](multi-node/) — direct binary commands for low-level multi-node debugging.
+5. [regional-weather](regional-weather/) — watch a four-node city weather mesh route events by interest.
 
 ## Development Mode
 
@@ -22,7 +19,6 @@ Most examples use `--no-auth` because they are demos. In no-auth mode:
 
 - non-admin routes accept a dummy token from the CLI
 - admin routes still require an admin JWT
-- this mode is not safe for production
 
 Start a dev server:
 
@@ -53,9 +49,17 @@ One short script for publishing sample events plus copy/pasteable CLI commands.
 
 ### multi-node
 
-Manual two-node startup commands using static seed discovery. This is useful for
-inspection, but the mesh layer is still MVP-level and not a production
-deployment recipe.
+A direct binary reference for starting two local nodes with static seed
+discovery. Prefer the Docker Compose example for day-to-day multi-node
+development; use these commands when debugging startup flags or running outside
+Docker.
+
+### docker
+
+The recommended local multi-node workflow. It uses Docker Compose to run a
+hub/city weather mesh with static peer connections, no-auth development mode,
+configurable host ports, per-node logs, subscribers, a generator, stats, and a
+tmux dashboard.
 
 ### regional-weather
 

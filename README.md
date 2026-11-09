@@ -49,6 +49,7 @@ the mesh.
   `orders.*`
 - gRPC PeerLink implementation for peer connections, event forwarding, and
   aggregate topic-interest gossip
+- Docker Compose multi-node dev example for a hub/city weather mesh
 - Local verification loop through `make`
 
 PeerLink currently separates data-plane user events from control-plane aggregate
@@ -115,6 +116,22 @@ subscriptions, opens the unified SSE stream, filters matching events locally,
 re-ensures those subscriptions across reconnects, and removes subscriptions it
 created when the stream closes. Raw HTTP clients must manage subscription
 recreation themselves after node restarts.
+
+### Multi-node development
+
+For a local multi-node mesh, use the Docker Compose weather demo. It starts a
+hub plus city nodes with static peer links and `--no-auth` development mode:
+
+```bash
+cd examples/docker
+./start.sh          # hub + sf + ny
+./start.sh --with-chicago
+./dashboard.sh      # optional tmux dashboard
+```
+
+See [examples/docker/README.md](examples/docker/README.md) for ports, streams,
+stats, and configuration. The [multi-node example](examples/multi-node/README.md)
+keeps direct binary commands for low-level debugging.
 
 ## Authenticated Flow
 
@@ -227,6 +244,7 @@ proto/                  PeerLink protobuf definitions
 tests/                  Integration tests
 docs/                   Design notes and development references
 examples/               Runnable demo scripts
+examples/docker/        Docker Compose multi-node weather demo
 ```
 
 ## Documentation Map
@@ -237,6 +255,8 @@ examples/               Runnable demo scripts
 - [docs/discovery.md](docs/discovery.md) - future discovery design notes
 - [docs/performance.md](docs/performance.md) - performance benchmark commands and current baseline
 - [examples/README.md](examples/README.md) - examples overview
+- [examples/docker/README.md](examples/docker/README.md) - Docker Compose
+  multi-node weather demo
 - [AGENTS.md](AGENTS.md) - canonical agent workflow guidance
 - [CLAUDE.md](CLAUDE.md) - Claude Code compatibility pointer
 

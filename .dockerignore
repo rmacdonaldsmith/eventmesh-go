@@ -1,0 +1,12 @@
+.git
+.beads
+.claude
+.vscode
+.DS_Store
+bin
+eventmesh
+coverage.out
+coverage.html
+data
+examples/regional-weather/.run
+*.log

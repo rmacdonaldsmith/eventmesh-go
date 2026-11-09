@@ -1,0 +1,114 @@
+services:
+  sf:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: eventmesh-go:local
+    environment:
+      EVENTMESH_NODE_ID: sf
+      EVENTMESH_HTTP_ENABLED: "true"
+      EVENTMESH_HTTP_PORT: "8081"
+      EVENTMESH_LISTEN: ":8080"
+      EVENTMESH_PEER_LISTEN: ":9090"
+      EVENTMESH_NO_AUTH: "true"
+      EVENTMESH_LOG_LEVEL: ${EVENTMESH_LOG_LEVEL:-info}
+      EVENTMESH_EVENTLOG_BACKEND: ${EVENTMESH_EVENTLOG_BACKEND:-memory}
+      EVENTMESH_EVENTLOG_PATH: ${EVENTMESH_EVENTLOG_PATH:-}
+    ports:
+      - "${SF_HTTP_PORT:-8082}:8081"
+      - "${SF_PEER_PORT:-9101}:9090"
+    networks:
+      - eventmesh
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/api/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  ny:
+    image: eventmesh-go:local
+    environment:
+      EVENTMESH_NODE_ID: ny
+      EVENTMESH_HTTP_ENABLED: "true"
+      EVENTMESH_HTTP_PORT: "8081"
+      EVENTMESH_LISTEN: ":8080"
+      EVENTMESH_PEER_LISTEN: ":9090"
+      EVENTMESH_NO_AUTH: "true"
+      EVENTMESH_LOG_LEVEL: ${EVENTMESH_LOG_LEVEL:-info}
+      EVENTMESH_EVENTLOG_BACKEND: ${EVENTMESH_EVENTLOG_BACKEND:-memory}
+      EVENTMESH_EVENTLOG_PATH: ${EVENTMESH_EVENTLOG_PATH:-}
+    ports:
+      - "${NY_HTTP_PORT:-8083}:8081"
+      - "${NY_PEER_PORT:-9102}:9090"
+    networks:
+      - eventmesh
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/api/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  hub:
+    image: eventmesh-go:local
+    depends_on:
+      sf:
+        condition: service_healthy
+      ny:
+        condition: service_healthy
+    environment:
+      EVENTMESH_NODE_ID: hub
+      EVENTMESH_HTTP_ENABLED: "true"
+      EVENTMESH_HTTP_PORT: "8081"
+      EVENTMESH_LISTEN: ":8080"
+      EVENTMESH_PEER_LISTEN: ":9090"
+      EVENTMESH_CONNECT_PEER: sf=sf:9090,ny=ny:9090
+      EVENTMESH_NO_AUTH: "true"
+      EVENTMESH_LOG_LEVEL: ${EVENTMESH_LOG_LEVEL:-info}
+      EVENTMESH_EVENTLOG_BACKEND: ${EVENTMESH_EVENTLOG_BACKEND:-memory}
+      EVENTMESH_EVENTLOG_PATH: ${EVENTMESH_EVENTLOG_PATH:-}
+    ports:
+      - "${HUB_HTTP_PORT:-8081}:8081"
+      - "${HUB_PEER_PORT:-9100}:9090"
+    networks:
+      - eventmesh
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/api/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  chicago:
+    image: eventmesh-go:local
+    profiles: ["chicago"]
+    depends_on:
+      hub:
+        condition: service_healthy
+    environment:
+      EVENTMESH_NODE_ID: chicago
+      EVENTMESH_HTTP_ENABLED: "true"
+      EVENTMESH_HTTP_PORT: "8081"
+      EVENTMESH_LISTEN: ":8080"
+      EVENTMESH_PEER_LISTEN: ":9090"
+      EVENTMESH_SEED_NODES: hub:9090
+      EVENTMESH_NO_AUTH: "true"
+      EVENTMESH_LOG_LEVEL: ${EVENTMESH_LOG_LEVEL:-info}
+      EVENTMESH_EVENTLOG_BACKEND: ${EVENTMESH_EVENTLOG_BACKEND:-memory}
+      EVENTMESH_EVENTLOG_PATH: ${EVENTMESH_EVENTLOG_PATH:-}
+    ports:
+      - "${CHICAGO_HTTP_PORT:-8084}:8081"
+      - "${CHICAGO_PEER_PORT:-9103}:9090"
+    networks:
+      - eventmesh
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/api/v1/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+networks:
+  eventmesh:
+    name: eventmesh-weather-dev
